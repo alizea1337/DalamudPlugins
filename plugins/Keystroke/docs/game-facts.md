@@ -40,7 +40,7 @@ originated as hints from third-party plugins are treated as unverified until see
 Enemy casts also appear as `IBattleChara.CastActionId` (49524 "??? Needles" 7.0 s; 49699 "Tankbuster" 29.7 s by
 the Airbuster). Typing the caster's word interrupts the cast (`KTGEnemyCastBar` shows "Interrupted!").
 Cast names seen in the boss phase: Tankbuster, Ballistic Missile, **Dynamic Sensory Jammer**, Burst, Germinate,
-Burr Burrow. Cursed Gaze / Sensory Jammer action ids still unseen; the engine also matches by name as a fallback.
+Burr Burrow. Cursed Gaze / Sensory Jammer pauses confirmed working in play; the engine also matches by name as a fallback.
 
 `numbers +10` = slot **kind**: 0 regular enemy, **1 boss** (Airbuster, entity 1073868183, HP 92→29), **2 barrier phrase**
 (the long sentence anchored at the player's feet, 1280,921: "Fill your hollow heart with rage."). `+9` was 56 on the
@@ -81,8 +81,8 @@ Slot *i* is consistent across `numbers[1+13i]`, `strings[3i]` and `KTGEWord` com
 | MGC (Keybound currency) item id | 52322 | **verified 2026-11-06** (461 read, matches in-game) |
 | Keybound Coffer item id | 52450 | unverified (player had 0) |
 | MGC cap | `CurrencyManager.GetItemMaxCount(52322)` = 10,000 | **verified 2026-11-06** |
-| Cursed Gaze (input-blocking cast) action id | 49529 | unverified |
-| Sensory Jammer (input-blocking cast) action ids | 49532, 49702 | unverified |
+| Cursed Gaze (input-blocking cast) action id | 49529 | **behaviour verified in play 2026-11-06** (pause triggers correctly) |
+| Sensory Jammer (input-blocking cast) action ids | 49532, 49702 | **behaviour verified in play 2026-11-06**; "Dynamic Sensory Jammer" also matched by name |
 
 ## Queueing
 
