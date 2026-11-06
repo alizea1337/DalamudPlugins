@@ -74,6 +74,10 @@ public sealed class Plugin : IDalamudPlugin
             case "inspect":
                 Inspector.Toggle();
                 break;
+            case "compact":
+                Main.SetCompact(!Config.Window.Compact);
+                Main.IsOpen = true;
+                break;
             case "start":
                 Controller.Start();
                 break;

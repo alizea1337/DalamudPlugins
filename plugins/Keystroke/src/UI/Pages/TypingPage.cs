@@ -8,7 +8,6 @@ namespace Keystroke.UI.Pages;
 internal sealed class TypingPage : Page
 {
     private static readonly string[] Profiles = { "Humanized", "Fast", "Custom" };
-    private bool showInstantSheet;
 
     public TypingPage(Plugin plugin) : base(plugin) { }
 
@@ -97,58 +96,14 @@ internal sealed class TypingPage : Page
             var v = t.InstantMode;
             if (Widgets.ToggleRow("Instant mode", ref v, "Inserts the whole answer and submits it. Detectable as non-human; not recommended outside premade groups.", Theme.Icon.Zap, Theme.Theme.Orange))
             {
-                if (v && !t.InstantModeAcknowledged) showInstantSheet = true;
-                else { t.InstantMode = v; changed = true; }
+                if (v) InstantModeSheet.Request(t, Config);
+                else { t.InstantMode = false; changed = true; }
             }
             Widgets.EndCard();
         }
 
-        if (showInstantSheet) DrawInstantSheet(t, ref changed);
+        InstantModeSheet.Draw(Config);
         if (changed) Save();
-    }
-
-    private void DrawInstantSheet(TypingSettings t, ref bool changed)
-    {
-        var s = Widgets.Scale;
-        ImGui.OpenPopup("##instantsheet");
-        ImGui.SetNextWindowSize(new Vector2(420 * s, 0));
-        ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(22, 20) * s);
-        if (ImGui.BeginPopupModal("##instantsheet", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove))
-        {
-            ImGui.SetCursorPosX((ImGui.GetWindowWidth() - Widgets.IconSize(Theme.Icon.TriangleAlert, true).X) / 2);
-            Widgets.Icon(Theme.Icon.TriangleAlert, Theme.Theme.Orange, true);
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            using (Widgets.F.BodySemibold.Push())
-            {
-                var w = ImGui.CalcTextSize(Strings.InstantModeTitle).X;
-                ImGui.SetCursorPosX((ImGui.GetWindowWidth() - w) / 2);
-                ImGui.TextUnformatted(Strings.InstantModeTitle);
-            }
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            ImGui.PushTextWrapPos();
-            Widgets.Secondary(Strings.InstantModeBody);
-            ImGui.PopTextWrapPos();
-            ImGui.Dummy(new Vector2(0, 14 * s));
-
-            var bw = (ImGui.GetContentRegionAvail().X - 8 * s) / 2;
-            if (Widgets.Button(Strings.Cancel + "##cancel", Widgets.ButtonStyle.Default, new Vector2(bw, 30 * s)))
-            {
-                showInstantSheet = false;
-                ImGui.CloseCurrentPopup();
-            }
-            ImGui.SameLine(0, 8 * s);
-            if (Widgets.Button(Strings.InstantModeConfirm + "##ok", Widgets.ButtonStyle.Primary, new Vector2(bw, 30 * s)))
-            {
-                t.InstantMode = true;
-                t.InstantModeAcknowledged = true;
-                changed = true;
-                showInstantSheet = false;
-                ImGui.CloseCurrentPopup();
-            }
-            ImGui.EndPopup();
-        }
-        ImGui.PopStyleVar();
     }
 
     private static void ApplyPreset(TypingSettings t)

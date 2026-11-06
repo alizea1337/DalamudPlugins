@@ -8,7 +8,7 @@ internal static class Strings
 {
     public const string PluginName = "Keystroke";
     public const string Command = "/keystroke";
-    public const string CommandHelp = "Open the Keystroke window. Use /keystroke inspector to open the Inspector.";
+    public const string CommandHelp = "Open the Keystroke window. /keystroke compact toggles the compact view, /keystroke inspector opens the Inspector.";
 
     // Sidebar
     public const string Dashboard = "Dashboard";

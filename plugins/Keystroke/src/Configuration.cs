@@ -177,4 +177,6 @@ public sealed class WindowSettings
 {
     public Vector2 Size { get; set; } = new(860, 580);
     public int LastPage { get; set; } = 0;
+    /// <summary>Collapsed mini window with just the transport controls and typing mode.</summary>
+    public bool Compact { get; set; } = false;
 }
