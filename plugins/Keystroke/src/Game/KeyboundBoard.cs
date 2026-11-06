@@ -6,7 +6,14 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 namespace Keystroke.Game;
 
 /// <summary>One enemy/word pair on the board, as read from the Atk arrays.</summary>
-public sealed record WordSlot(int Index, uint EntityId, string Word, int ScreenX, int ScreenY, int HpPercent, bool Visible);
+/// <param name="CastName">Name of the attack the enemy is casting (strings +2), empty when idle.</param>
+/// <param name="CastProgress">Cast progress 0-100 (numbers +7); typing the word interrupts it.</param>
+/// <param name="Special">numbers +11; non-zero while casting in captures, meaning not yet known.</param>
+public sealed record WordSlot(int Index, uint EntityId, string Word, int ScreenX, int ScreenY, int HpPercent, bool Visible,
+    string CastName, int CastProgress, int Special)
+{
+    public bool IsCasting => CastName.Length > 0 || CastProgress > 0;
+}
 
 /// <summary>What the Keybound Brawler duty currently shows. Immutable; produced once per framework tick.</summary>
 public sealed record KeyboundBoard
@@ -80,10 +87,18 @@ internal static unsafe class KeyboundReader
                 var y = numbers->IntArray[baseIdx + 2];
                 var visible = numbers->IntArray[baseIdx + 4] != 0;
                 var hp = numbers->IntArray[baseIdx + 5];
+                var castProgress = numbers->IntArray[baseIdx + 7];
+                var special = numbers->IntArray[baseIdx + 11];
                 byte* p = strings->StringArray[i * 3];
                 var word = p == null ? "" : ReadCString(p, 256);
                 if (word.Length == 0) continue;
-                list.Add(new WordSlot(i, entityId, word, x, y, hp, visible));
+                var castName = "";
+                if (i * 3 + 2 < sSize)
+                {
+                    byte* cp = strings->StringArray[i * 3 + 2];
+                    castName = cp == null ? "" : ReadCString(cp, 128);
+                }
+                list.Add(new WordSlot(i, entityId, word, x, y, hp, visible, castName, castProgress, special));
             }
         }
         catch (Exception e)

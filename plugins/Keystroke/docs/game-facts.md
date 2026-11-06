@@ -34,8 +34,11 @@ originated as hints from third-party plugins are treated as unverified until see
 
 | Array | Layout |
 |---|---|
-| `NumberArrays[161]` (size 261) | `[0]` = active slot count. Records of 13 ints from index 1: `+0` entityId (e.g. 1073892389), `+1` screenX, `+2` screenY (anchor near the enemy; the word bubble is drawn ~120 px above), `+3` unknown (looks like float bits), `+4` visible = 1, `+5` HP % (66/100/40/80), `+6..+12` zero in captures |
-| `StringArrays[128]` (size 60) | 20 triples: `+0` word ("cactuar", "Braver", "Regina"), `+1` reading (empty on EN), `+2` cast name (empty) |
+| `NumberArrays[161]` (size 261) | `[0]` = active slot count. Records of 13 ints from index 1: `+0` entityId (e.g. 1073892389), `+1` screenX, `+2` screenY (anchor near the enemy; the word bubble is drawn ~120 px above), `+3` unknown (looks like float bits), `+4` visible = 1, `+5` HP % (66/100/40/80), `+7` cast progress (45 while casting), `+11` = 2 while casting (meaning unknown), others zero |
+| `StringArrays[128]` (size 60) | 20 triples: `+0` word ("cactuar", "Braver", "Regina"), `+1` reading (empty on EN), `+2` cast name ("??? Needles" while that enemy casts) |
+
+Enemy casts also appear as `IBattleChara.CastActionId` (49524 "??? Needles", 7.0 s). Typing the caster's word
+interrupts the cast (`KTGEnemyCastBar` shows "Interrupted!"). Cursed Gaze / Sensory Jammer ids still unseen.
 
 Slot *i* is consistent across `numbers[1+13i]`, `strings[3i]` and `KTGEWord` component slot *i*.
 

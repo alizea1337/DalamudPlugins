@@ -352,8 +352,14 @@ internal sealed unsafe class KeyboundController : IAutomationController
             if (cont != null) return cont;
         }
 
-        // Otherwise the weakest enemy first (finishes a kill), nearest to the player as tie-break.
-        return visible.OrderBy(s => s.HpPercent).ThenByDescending(s => s.ScreenY).First();
+        // Enemies mid-cast first (typing their word interrupts the attack), the furthest-along cast
+        // first; then the weakest enemy, nearest to the player as tie-break.
+        return visible
+            .OrderByDescending(s => s.IsCasting ? 1 : 0)
+            .ThenByDescending(s => s.CastProgress)
+            .ThenBy(s => s.HpPercent)
+            .ThenByDescending(s => s.ScreenY)
+            .First();
     }
 
     private bool TargetStillValid()

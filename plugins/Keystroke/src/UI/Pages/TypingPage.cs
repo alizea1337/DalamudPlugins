@@ -7,7 +7,8 @@ namespace Keystroke.UI.Pages;
 
 internal sealed class TypingPage : Page
 {
-    private static readonly string[] Profiles = { "Humanized", "Fast", "Custom" };
+    private static readonly string[] ProfileLabels = { "Relaxed", "Normal", "Skilled", "Custom" };
+    private static readonly TypingProfile[] ProfileOrder = { TypingProfile.Relaxed, TypingProfile.Normal, TypingProfile.Skilled, TypingProfile.Custom };
 
     public TypingPage(Plugin plugin) : base(plugin) { }
 
@@ -26,20 +27,24 @@ internal sealed class TypingPage : Page
         if (Widgets.BeginCard("profile"))
         {
             ImGui.Dummy(new Vector2(0, 6 * s));
-            var p = (int)t.Profile;
-            if (Widgets.Segmented("##profile", Profiles, ref p))
+            var p = Array.IndexOf(ProfileOrder, t.Profile);
+            if (p < 0) p = 1;
+            if (Widgets.Segmented("##profile", ProfileLabels, ref p))
             {
-                t.Profile = (TypingProfile)p;
-                ApplyPreset(t);
+                t.Profile = ProfileOrder[p];
+                t.ApplyPreset();
                 changed = true;
             }
             ImGui.Dummy(new Vector2(0, 8 * s));
             Widgets.Caption(t.Profile switch
             {
-                TypingProfile.Humanized => "Per-key delays follow a log-normal distribution around 80 ms with occasional hesitations. Looks like a quick typist.",
-                TypingProfile.Fast => "Short, slightly varied delays. Clearly faster than a human; use at your own discretion.",
+                TypingProfile.Relaxed => "Around 150 ms per key, uneven, with frequent pauses. Looks like someone glancing at the keyboard.",
+                TypingProfile.Normal => "Around 90 ms per key with natural variation and the odd hesitation. An everyday typist.",
+                TypingProfile.Skilled => "Around 50 ms per key, steady, almost no hesitation. A fast touch typist; still human-paced.",
                 _ => "Tune every parameter yourself.",
             });
+            if (t.InstantMode)
+                Widgets.Caption("Instant mode is on and overrides this profile: whole words are inserted at once.", Theme.Theme.Orange);
             ImGui.Dummy(new Vector2(0, 6 * s));
             Widgets.EndCard();
         }
@@ -104,20 +109,5 @@ internal sealed class TypingPage : Page
 
         InstantModeSheet.Draw(Config);
         if (changed) Save();
-    }
-
-    private static void ApplyPreset(TypingSettings t)
-    {
-        switch (t.Profile)
-        {
-            case TypingProfile.Humanized:
-                t.MedianKeyDelayMs = 80; t.KeyDelayJitter = 0.35f; t.HesitationChance = 0.02f;
-                t.HesitationMinMs = 300; t.HesitationMaxMs = 700; t.BetweenWordsMs = 150;
-                break;
-            case TypingProfile.Fast:
-                t.MedianKeyDelayMs = 35; t.KeyDelayJitter = 0.15f; t.HesitationChance = 0f;
-                t.HesitationMinMs = 0; t.HesitationMaxMs = 0; t.BetweenWordsMs = 60;
-                break;
-        }
     }
 }

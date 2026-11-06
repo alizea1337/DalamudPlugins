@@ -76,18 +76,22 @@ public sealed class StopConditionSettings
 
 public enum TypingProfile
 {
-    Humanized = 0,
-    Fast = 1,
-    Custom = 2,
+    /// <summary>Everyday typist: the default.</summary>
+    Normal = 0,
+    /// <summary>Slow and uneven, like someone looking at the keyboard.</summary>
+    Relaxed = 1,
+    /// <summary>Fast, consistent touch typist.</summary>
+    Skilled = 2,
+    Custom = 3,
 }
 
 [Serializable]
 public sealed class TypingSettings
 {
-    public TypingProfile Profile { get; set; } = TypingProfile.Humanized;
+    public TypingProfile Profile { get; set; } = TypingProfile.Normal;
 
     /// <summary>Median per-key delay in milliseconds (log-normal distribution around this value).</summary>
-    public int MedianKeyDelayMs { get; set; } = 80;
+    public int MedianKeyDelayMs { get; set; } = 90;
     /// <summary>Spread of the per-key delay distribution; 0 = constant.</summary>
     public float KeyDelayJitter { get; set; } = 0.35f;
     /// <summary>Chance (0-1) that a key is preceded by a longer hesitation.</summary>
@@ -95,6 +99,26 @@ public sealed class TypingSettings
     public int HesitationMinMs { get; set; } = 300;
     public int HesitationMaxMs { get; set; } = 700;
     public int BetweenWordsMs { get; set; } = 150;
+
+    /// <summary>Copies the preset values for the current profile into the timing fields (no-op for Custom).</summary>
+    public void ApplyPreset()
+    {
+        switch (Profile)
+        {
+            case TypingProfile.Relaxed:
+                MedianKeyDelayMs = 150; KeyDelayJitter = 0.40f; HesitationChance = 0.05f;
+                HesitationMinMs = 400; HesitationMaxMs = 900; BetweenWordsMs = 350;
+                break;
+            case TypingProfile.Normal:
+                MedianKeyDelayMs = 90; KeyDelayJitter = 0.35f; HesitationChance = 0.02f;
+                HesitationMinMs = 300; HesitationMaxMs = 700; BetweenWordsMs = 150;
+                break;
+            case TypingProfile.Skilled:
+                MedianKeyDelayMs = 50; KeyDelayJitter = 0.25f; HesitationChance = 0.005f;
+                HesitationMinMs = 200; HesitationMaxMs = 400; BetweenWordsMs = 60;
+                break;
+        }
+    }
 
     public bool SkipOptionalPunctuation { get; set; } = false;
     public bool BackgroundInput { get; set; } = true;
