@@ -36,6 +36,15 @@ internal sealed class AppearancePage : Page
             Widgets.EndCard();
         }
 
+        Widgets.SectionLabel("WINDOW");
+        if (Widgets.BeginCard("window"))
+        {
+            var w = Config.Window;
+            var v = w.CompactInDuty;
+            if (Widgets.ToggleRow("Compact view inside the duty", ref v, "Shows the compact panel when the Keybound Brawler duty starts and restores your layout when it ends.", Theme.Icon.AppWindow)) { w.CompactInDuty = v; changed = true; }
+            Widgets.EndCard();
+        }
+
         if (changed)
         {
             Theme.Theme.Configure(a);

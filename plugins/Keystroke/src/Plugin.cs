@@ -90,6 +90,8 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private bool wasInDuty;
+
     private void OnUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
         try
@@ -97,6 +99,16 @@ public sealed class Plugin : IDalamudPlugin
             Hotkeys.Tick();
             Controller.Tick();
             Inspector.Tick();
+
+            // Compact panel while inside the duty, previous layout restored on the way out.
+            var inDuty = Game.Keybound.IsDuty((ushort)Services.ClientState.TerritoryType);
+            if (inDuty != wasInDuty)
+            {
+                wasInDuty = inDuty;
+                if (!Config.Window.CompactInDuty) return;
+                if (inDuty) Main.EnterDutyLayout();
+                else Main.RestoreLayout();
+            }
         }
         catch (Exception e)
         {

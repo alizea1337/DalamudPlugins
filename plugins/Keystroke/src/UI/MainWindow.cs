@@ -46,10 +46,29 @@ internal sealed class MainWindow : Window
 
     public void SetCompact(bool compact)
     {
-        if (!compact && Compact) { /* leaving compact: nothing to store, size was kept */ }
         plugin.Config.Window.Compact = compact;
         plugin.Config.Save();
         ApplyMode();
+    }
+
+    private (bool open, bool compact)? layoutBeforeDuty;
+
+    /// <summary>Entering the duty: show the compact panel, remembering what to restore afterwards.</summary>
+    public void EnterDutyLayout()
+    {
+        if (layoutBeforeDuty != null) return;
+        layoutBeforeDuty = (IsOpen, Compact);
+        if (!Compact) SetCompact(true);
+        IsOpen = true;
+    }
+
+    /// <summary>Leaving the duty: put the window back the way the user had it.</summary>
+    public void RestoreLayout()
+    {
+        if (layoutBeforeDuty is not { } prev) return;
+        layoutBeforeDuty = null;
+        if (prev.compact != Compact) SetCompact(prev.compact);
+        IsOpen = prev.open;
     }
 
     private void ApplyMode()

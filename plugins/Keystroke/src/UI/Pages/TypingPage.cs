@@ -38,9 +38,9 @@ internal sealed class TypingPage : Page
             ImGui.Dummy(new Vector2(0, 8 * s));
             Widgets.Caption(t.Profile switch
             {
-                TypingProfile.Relaxed => "Around 150 ms per key, uneven, with frequent pauses. Looks like someone glancing at the keyboard.",
-                TypingProfile.Normal => "Around 90 ms per key with natural variation and the odd hesitation. An everyday typist.",
-                TypingProfile.Skilled => "Around 50 ms per key, steady, almost no hesitation. A fast touch typist; still human-paced.",
+                TypingProfile.Relaxed => "≈38 WPM: ~310 ms per key, uneven, frequent pauses, 0.5–0.8 s to react to a new word. Someone glancing at the keyboard.",
+                TypingProfile.Normal => "≈52 WPM, the measured everyday average: ~230 ms per key, natural variation, 0.4–0.6 s reaction. Recommended.",
+                TypingProfile.Skilled => "≈85 WPM, professional range: ~140 ms per key, steady, 0.3–0.45 s reaction. Fast but still human-paced.",
                 _ => "Tune every parameter yourself.",
             });
             if (t.InstantMode)
@@ -78,8 +78,23 @@ internal sealed class TypingPage : Page
             });
             Widgets.RowSeparator();
             var bw = t.BetweenWordsMs;
-            Widgets.Row("Pause between words", null, 220 * s, Widgets.FrameHeight,
+            Widgets.Row("Pause between words", "After a word is submitted, before the next one is picked.", 220 * s, Widgets.FrameHeight,
                 () => { if (Widgets.SliderInt("##bw", ref bw, 0, 2000, "%d ms", 220)) { t.BetweenWordsMs = bw; changed = true; } });
+            Widgets.RowSeparator();
+            var rmin = t.ReactionMinMs;
+            var rmax = t.ReactionMaxMs;
+            Widgets.Row("Reaction time", "Noticing a new word and deciding to type it. Humans: ~250 ms simple, ~400–450 ms with a choice.", 220 * s, Widgets.FrameHeight, () =>
+            {
+                ImGui.SetNextItemWidth(104 * s);
+                if (ImGui.InputInt("##rmin", ref rmin, 0, 0)) { t.ReactionMinMs = Math.Clamp(rmin, 0, 5000); changed = true; }
+                ImGui.SameLine(0, 6 * s);
+                ImGui.SetNextItemWidth(104 * s);
+                if (ImGui.InputInt("##rmax", ref rmax, 0, 0)) { t.ReactionMaxMs = Math.Clamp(rmax, t.ReactionMinMs, 5000); changed = true; }
+            });
+            Widgets.RowSeparator();
+            var rd = t.ReadMsPerChar;
+            Widgets.Row("Reading time per character", "Added to the reaction time; 200–300 words per minute is about 40–60 ms per character.", 220 * s, Widgets.FrameHeight,
+                () => { if (Widgets.SliderInt("##rd", ref rd, 0, 150, "%d ms", 220)) { t.ReadMsPerChar = rd; changed = true; } });
             Widgets.EndCard();
         }
         if (!custom) ImGui.EndDisabled();

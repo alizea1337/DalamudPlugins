@@ -37,8 +37,26 @@ originated as hints from third-party plugins are treated as unverified until see
 | `NumberArrays[161]` (size 261) | `[0]` = active slot count. Records of 13 ints from index 1: `+0` entityId (e.g. 1073892389), `+1` screenX, `+2` screenY (anchor near the enemy; the word bubble is drawn ~120 px above), `+3` unknown (looks like float bits), `+4` visible = 1, `+5` HP % (66/100/40/80), `+7` cast progress (45 while casting), `+11` = 2 while casting (meaning unknown), others zero |
 | `StringArrays[128]` (size 60) | 20 triples: `+0` word ("cactuar", "Braver", "Regina"), `+1` reading (empty on EN), `+2` cast name ("??? Needles" while that enemy casts) |
 
-Enemy casts also appear as `IBattleChara.CastActionId` (49524 "??? Needles", 7.0 s). Typing the caster's word
-interrupts the cast (`KTGEnemyCastBar` shows "Interrupted!"). Cursed Gaze / Sensory Jammer ids still unseen.
+Enemy casts also appear as `IBattleChara.CastActionId` (49524 "??? Needles" 7.0 s; 49699 "Tankbuster" 29.7 s by
+the Airbuster). Typing the caster's word interrupts the cast (`KTGEnemyCastBar` shows "Interrupted!").
+Cast names seen in the boss phase: Tankbuster, Ballistic Missile, **Dynamic Sensory Jammer**, Burst, Germinate,
+Burr Burrow. Cursed Gaze / Sensory Jammer action ids still unseen; the engine also matches by name as a fallback.
+
+`numbers +10` = slot **kind**: 0 regular enemy, **1 boss** (Airbuster, entity 1073868183, HP 92→29), **2 barrier phrase**
+(the long sentence anchored at the player's feet, 1280,921: "Fill your hollow heart with rage."). `+9` was 56 on the
+boss and 85 on the barrier slot (meaning unknown). `KTGHudTodo`: "Defeat 25 enemies" → "Defeat all enemies" →
+"Defeat the airbuster".
+
+## Dialogs and buttons (**verified 2026-11-06**)
+
+| Addon | Button | Component node id |
+|---|---|---|
+| `KTGEnterDialogue` (Registrar; agent 399, addon id 130) | **Register** | 9 (Cancel = 10) |
+| `ContentsFinderConfirm` (queue state `Ready`) | **Commence** | 63 (Wait = 64, Withdraw = 65) |
+| `KTGResult` (agent 401 active) | **Exit** | 48; "Time Remaining 0:58" countdown auto-exits |
+
+`KTGResult` reward rows: component 36 → "2,800" (MGP), component 37 → "350" (MGC); currency moved by exactly
+those amounts, and **each game also awards one Keybound Coffer** (coffers 2 → 3).
 
 Slot *i* is consistent across `numbers[1+13i]`, `strings[3i]` and `KTGEWord` component slot *i*.
 

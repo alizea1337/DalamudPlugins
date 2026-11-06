@@ -19,6 +19,16 @@ internal static class Keybound
     public const uint CursedGazeActionId = 49529;
     public static readonly uint[] SensoryJammerActionIds = { 49532, 49702 };
 
+    /// <summary>English cast names that block input; fallback when the action id is unknown.</summary>
+    public static bool IsBlockingCastName(string name)
+        => name.Contains("Sensory Jammer", System.StringComparison.OrdinalIgnoreCase)
+        || name.Contains("Cursed Gaze", System.StringComparison.OrdinalIgnoreCase);
+
+    // Button component node ids (verified 2026-11-06)
+    public const uint RegisterDialogRegisterButton = 9;
+    public const uint ContentsFinderCommenceButton = 63;
+    public const uint ResultExitButton = 48;
+
     public const int NumberArrayIndex = 161;
     public const int StringArrayIndex = 128;
 

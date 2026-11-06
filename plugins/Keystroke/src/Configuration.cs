@@ -91,31 +91,43 @@ public sealed class TypingSettings
     public TypingProfile Profile { get; set; } = TypingProfile.Normal;
 
     /// <summary>Median per-key delay in milliseconds (log-normal distribution around this value).</summary>
-    public int MedianKeyDelayMs { get; set; } = 90;
+    public int MedianKeyDelayMs { get; set; } = 230;
     /// <summary>Spread of the per-key delay distribution; 0 = constant.</summary>
     public float KeyDelayJitter { get; set; } = 0.35f;
     /// <summary>Chance (0-1) that a key is preceded by a longer hesitation.</summary>
-    public float HesitationChance { get; set; } = 0.02f;
+    public float HesitationChance { get; set; } = 0.03f;
     public int HesitationMinMs { get; set; } = 300;
     public int HesitationMaxMs { get; set; } = 700;
-    public int BetweenWordsMs { get; set; } = 150;
+    /// <summary>Pause after submitting a word before looking for the next one.</summary>
+    public int BetweenWordsMs { get; set; } = 250;
+    /// <summary>Reaction window (ms) before the first key of a newly chosen word: noticing + deciding.</summary>
+    public int ReactionMinMs { get; set; } = 400;
+    public int ReactionMaxMs { get; set; } = 600;
+    /// <summary>Reading time added per character of the word (200-300 wpm reading = 40-60 ms/char).</summary>
+    public int ReadMsPerChar { get; set; } = 45;
 
     /// <summary>Copies the preset values for the current profile into the timing fields (no-op for Custom).</summary>
     public void ApplyPreset()
     {
         switch (Profile)
         {
-            case TypingProfile.Relaxed:
-                MedianKeyDelayMs = 150; KeyDelayJitter = 0.40f; HesitationChance = 0.05f;
-                HesitationMinMs = 400; HesitationMaxMs = 900; BetweenWordsMs = 350;
+            // Inter-key interval = 60000 / (WPM x 5). Everyday typists average ~52 WPM (Aalto 2018,
+            // 136M keystrokes), most between 40 and 65; professionals 61-112 WPM. Reaction: simple
+            // visual ~200-300 ms, choice ~400-450 ms. Reading ~200-300 WPM = 40-60 ms per character.
+            case TypingProfile.Relaxed: // ~38 WPM
+                MedianKeyDelayMs = 310; KeyDelayJitter = 0.40f; HesitationChance = 0.06f;
+                HesitationMinMs = 400; HesitationMaxMs = 1000; BetweenWordsMs = 400;
+                ReactionMinMs = 500; ReactionMaxMs = 800; ReadMsPerChar = 60;
                 break;
-            case TypingProfile.Normal:
-                MedianKeyDelayMs = 90; KeyDelayJitter = 0.35f; HesitationChance = 0.02f;
-                HesitationMinMs = 300; HesitationMaxMs = 700; BetweenWordsMs = 150;
+            case TypingProfile.Normal: // ~52 WPM
+                MedianKeyDelayMs = 230; KeyDelayJitter = 0.35f; HesitationChance = 0.03f;
+                HesitationMinMs = 300; HesitationMaxMs = 700; BetweenWordsMs = 250;
+                ReactionMinMs = 400; ReactionMaxMs = 600; ReadMsPerChar = 45;
                 break;
-            case TypingProfile.Skilled:
-                MedianKeyDelayMs = 50; KeyDelayJitter = 0.25f; HesitationChance = 0.005f;
-                HesitationMinMs = 200; HesitationMaxMs = 400; BetweenWordsMs = 60;
+            case TypingProfile.Skilled: // ~85 WPM
+                MedianKeyDelayMs = 140; KeyDelayJitter = 0.25f; HesitationChance = 0.01f;
+                HesitationMinMs = 200; HesitationMaxMs = 400; BetweenWordsMs = 120;
+                ReactionMinMs = 300; ReactionMaxMs = 450; ReadMsPerChar = 35;
                 break;
         }
     }
@@ -203,4 +215,6 @@ public sealed class WindowSettings
     public int LastPage { get; set; } = 0;
     /// <summary>Collapsed mini window with just the transport controls and typing mode.</summary>
     public bool Compact { get; set; } = false;
+    /// <summary>Show the compact window automatically inside the duty and restore the previous layout afterwards.</summary>
+    public bool CompactInDuty { get; set; } = true;
 }

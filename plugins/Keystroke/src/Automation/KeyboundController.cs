@@ -35,6 +35,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
     private string answer = "";
     private int progress;
     private int echoFailures;
+    private bool reacted;
     private bool wasInDuty;
     private bool resultCounted;
     private bool loopActive;
@@ -208,6 +209,14 @@ internal sealed unsafe class KeyboundController : IAutomationController
                     phase = Phase.Clearing;
                     return;
                 }
+                // A freshly chosen word gets a human reaction + reading window; a continued prefix doesn't.
+                if (progress == 0 && !typing.InstantMode && !reacted)
+                {
+                    reacted = true;
+                    nextAt = now + typist.ReactionDelay(answer.Length);
+                    return;
+                }
+                reacted = false;
                 if (typing.InstantMode)
                 {
                     if (InputField.SetText(answer))
@@ -352,10 +361,13 @@ internal sealed unsafe class KeyboundController : IAutomationController
             if (cont != null) return cont;
         }
 
-        // Enemies mid-cast first (typing their word interrupts the attack), the furthest-along cast
-        // first; then the weakest enemy, nearest to the player as tie-break.
+        // The barrier phrase (boss phase) protects the party and takes a while to type, so it comes
+        // first unless Instant mode makes order irrelevant. Then enemies mid-cast (typing their word
+        // interrupts the attack), furthest-along cast first; then the weakest enemy, nearest last.
+        var instant = config().Typing.InstantMode;
         return visible
-            .OrderByDescending(s => s.IsCasting ? 1 : 0)
+            .OrderByDescending(s => !instant && s.IsBarrier ? 1 : 0)
+            .ThenByDescending(s => s.IsCasting ? 1 : 0)
             .ThenByDescending(s => s.CastProgress)
             .ThenBy(s => s.HpPercent)
             .ThenByDescending(s => s.ScreenY)
@@ -402,6 +414,17 @@ internal sealed unsafe class KeyboundController : IAutomationController
         catch (Exception e)
         {
             Services.Log.Verbose(e, "Cast check failed");
+        }
+
+        // Fallback by cast name from the board (English names; the ids above are preferred).
+        foreach (var slot in board.Slots)
+        {
+            if (!slot.IsCasting || !Keybound.IsBlockingCastName(slot.CastName)) continue;
+            if (slot.CastProgress >= 95)
+            {
+                var until = now + BlockTail;
+                if (until > blockedUntil) blockedUntil = until;
+            }
         }
 
         if (now < blockedUntil)

@@ -43,6 +43,17 @@ internal sealed class Typist
         return TimeSpan.FromMilliseconds(Math.Max(0, baseMs + jitter));
     }
 
+    /// <summary>Delay before the first key of a newly chosen word: reaction window plus reading time.</summary>
+    public TimeSpan ReactionDelay(int wordLength)
+    {
+        var t = settings();
+        var lo = Math.Max(0, t.ReactionMinMs);
+        var hi = Math.Max(lo, t.ReactionMaxMs);
+        var react = lo + rng.NextDouble() * (hi - lo);
+        var read = Math.Max(0, t.ReadMsPerChar) * wordLength * (0.8 + rng.NextDouble() * 0.4);
+        return TimeSpan.FromMilliseconds(react + read);
+    }
+
     /// <summary>Short pause before pressing Enter, like a human confirming the word.</summary>
     public TimeSpan BeforeEnterDelay() => TimeSpan.FromMilliseconds(Math.Max(10, settings().MedianKeyDelayMs * (0.6 + rng.NextDouble() * 0.6)));
 
