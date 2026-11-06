@@ -56,6 +56,9 @@ internal sealed class DashboardPage : Page
                 Widgets.Caption($"{Controller.LoopRemaining} games remaining in loop");
             else if (Controller.LoopRemaining < 0)
                 Widgets.Caption("Repeating until stopped");
+            var ms = Controller.MeasuredMsPerKey;
+            if (ms > 0)
+                Widgets.Caption($"{ms:0} ms per key  ·  ≈{60000 / ms / 5:0} WPM  ·  {Config.Typing.Profile}{(Config.Typing.InstantMode ? " (Instant)" : "")}");
             ImGui.Dummy(new Vector2(0, 8 * s));
             DrawTransport(state, s);
             ImGui.EndGroup();

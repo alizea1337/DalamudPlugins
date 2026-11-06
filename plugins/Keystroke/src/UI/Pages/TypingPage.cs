@@ -34,6 +34,8 @@ internal sealed class TypingPage : Page
                 t.Profile = ProfileOrder[p];
                 t.ApplyPreset();
                 changed = true;
+                Services.Log.Information("Typing profile set to {Profile}: median {Median} ms/key, reaction {Min}-{Max} ms, read {Read} ms/char",
+                    t.Profile, t.MedianKeyDelayMs, t.ReactionMinMs, t.ReactionMaxMs, t.ReadMsPerChar);
             }
             ImGui.Dummy(new Vector2(0, 8 * s));
             Widgets.Caption(t.Profile switch

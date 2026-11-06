@@ -54,6 +54,36 @@ internal sealed unsafe class KeyboundController : IAutomationController
     public CofferOpener Coffers { get; } = new();
     public KeyboundBoard Board => board;
 
+    // Rolling measurement of real key spacing so profile changes are visible in the UI.
+    private readonly double[] keyIntervals = new double[12];
+    private int keyIntervalCount;
+    private int keyIntervalHead;
+    private DateTime lastKeyAt = DateTime.MinValue;
+    private DateTime lastKeyMeasure = DateTime.MinValue;
+
+    public double MeasuredMsPerKey
+    {
+        get
+        {
+            if (keyIntervalCount == 0 || (DateTime.UtcNow - lastKeyAt).TotalSeconds > 5) return 0;
+            double sum = 0;
+            for (var i = 0; i < keyIntervalCount; i++) sum += keyIntervals[i];
+            return sum / keyIntervalCount;
+        }
+    }
+
+    private void RecordKey(DateTime now)
+    {
+        if (lastKeyAt != DateTime.MinValue && (now - lastKeyAt).TotalMilliseconds < 3000)
+        {
+            keyIntervals[keyIntervalHead] = (now - lastKeyAt).TotalMilliseconds;
+            keyIntervalHead = (keyIntervalHead + 1) % keyIntervals.Length;
+            if (keyIntervalCount < keyIntervals.Length) keyIntervalCount++;
+        }
+        lastKeyAt = now;
+        lastKeyMeasure = now;
+    }
+
     public KeyboundController(Func<Configuration> config)
     {
         this.config = config;
@@ -388,6 +418,10 @@ internal sealed unsafe class KeyboundController : IAutomationController
                     Fail($"Can't type '{answer[progress]}' on the current keyboard layout");
                     return;
                 }
+                RecordKey(now);
+                if (config().Advanced.VerboseLogging)
+                    Services.Log.Information("key '{C}' {Idx}/{Len} profile={Profile} median={Median}ms measured={Measured:0}ms",
+                        answer[progress], progress + 1, answer.Length, typing.Profile, typing.MedianKeyDelayMs, MeasuredMsPerKey);
                 progress++;
                 Session.KeysTyped++;
                 phase = Phase.AwaitKey;
