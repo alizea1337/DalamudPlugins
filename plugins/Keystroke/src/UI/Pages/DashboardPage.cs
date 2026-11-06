@@ -118,31 +118,32 @@ internal sealed class DashboardPage : Page
     {
         var running = state is AutomationState.Playing or AutomationState.WaitingForDuty or AutomationState.Queued or AutomationState.Finishing;
         var paused = state == AutomationState.Paused;
+        var circle = 44f;
+        var rowTop = ImGui.GetCursorPosY();
 
         if (!running && !paused)
         {
-            if (Widgets.CircleButton("##start", Theme.Icon.Play, 44, Theme.Theme.Accent, Vector4.One, "Start")) Controller.Start();
+            if (Widgets.CircleButton("##start", Theme.Icon.Play, circle, Theme.Theme.Accent, Vector4.One, "Start")) Controller.Start();
         }
         else
         {
             if (paused)
             {
-                if (Widgets.CircleButton("##resume", Theme.Icon.Play, 44, Theme.Theme.Accent, Vector4.One, "Resume")) Controller.Resume();
+                if (Widgets.CircleButton("##resume", Theme.Icon.Play, circle, Theme.Theme.Accent, Vector4.One, "Resume")) Controller.Resume();
             }
             else
             {
-                if (Widgets.CircleButton("##pause", Theme.Icon.Pause, 44, Theme.Theme.ControlBgHover, Theme.Theme.Label, "Pause")) Controller.Pause();
+                if (Widgets.CircleButton("##pause", Theme.Icon.Pause, circle, Theme.Theme.ControlBgHover, Theme.Theme.Label, "Pause")) Controller.Pause();
             }
             ImGui.SameLine(0, 10 * s);
-            if (Widgets.CircleButton("##stop", Theme.Icon.Square, 44, Theme.Theme.WithAlpha(Theme.Theme.Red, 0.22f), Theme.Theme.Red, "Stop")) Controller.Stop();
+            if (Widgets.CircleButton("##stop", Theme.Icon.Square, circle, Theme.Theme.WithAlpha(Theme.Theme.Red, 0.22f), Theme.Theme.Red, "Stop")) Controller.Stop();
         }
 
-        // Count field and loop buttons share one frame height, centred on the 44 px transport circles.
+        // Count field and loop buttons share one frame height, centred on the transport circles.
+        // No group here: BeginGroup after SameLine breaks the line tracking the buttons rely on.
         var h = Widgets.FrameHeight;
-        var rowTop = ImGui.GetCursorPosY();
         ImGui.SameLine(0, 18 * s);
-        ImGui.BeginGroup();
-        ImGui.SetCursorPosY(rowTop + (44 * s - h) / 2);
+        ImGui.SetCursorPosY(rowTop + (circle * s - h) / 2);
         ImGui.SetNextItemWidth(70 * s);
         ImGui.InputInt("##loopcount", ref loopCount, 0, 0);
         loopCount = Math.Clamp(loopCount, 1, 999);
@@ -154,6 +155,8 @@ internal sealed class DashboardPage : Page
         if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, new Vector2(92 * s, h), Theme.Icon.RefreshCw) && !running)
             Controller.StartUnlimited();
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play until you stop it or a stop condition is met.");
-        ImGui.EndGroup();
+
+        // Keep the row height stable regardless of which control ended the line.
+        ImGui.SetCursorPosY(rowTop + circle * s);
     }
 }
