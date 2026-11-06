@@ -85,9 +85,15 @@ internal sealed class InspectorWindow : Window
         // Toolbar
         if (Widgets.Button(paused ? "Resume##insp" : "Pause##insp", Widgets.ButtonStyle.Default, null, paused ? Icon.Play : Icon.Pause)) paused = !paused;
         ImGui.SameLine();
-        if (Widgets.Button("Copy snapshot##insp", Widgets.ButtonStyle.Primary, null, Icon.Copy)) CopySnapshot();
+        if (Widgets.Button("Copy summary##insp", Widgets.ButtonStyle.Primary, null, Icon.Copy)) CopySummary();
+        if (ImGui.IsItemHovered()) Widgets.Tooltip("Compact text digest that fits in a chat message. Use this for reports.");
         ImGui.SameLine();
-        if (Widgets.Button("Snapshot now##insp", Widgets.ButtonStyle.Default, null, Icon.RefreshCw))
+        if (Widgets.Button("Copy JSON##insp", Widgets.ButtonStyle.Default, null, Icon.Copy)) CopySnapshot();
+        ImGui.SameLine();
+        if (Widgets.Button("Save JSON##insp", Widgets.ButtonStyle.Default, null, Icon.FolderOpen)) SaveSnapshot();
+        if (ImGui.IsItemHovered()) Widgets.Tooltip("Writes the full snapshot to the plugin's snapshots folder.");
+        ImGui.SameLine();
+        if (Widgets.Button("Now##insp", Widgets.ButtonStyle.Default, null, Icon.RefreshCw))
         {
             snapshot = GameInspector.Capture(includeNodes, includeArrays);
         }
@@ -138,7 +144,38 @@ internal sealed class InspectorWindow : Window
         var snap = snapshot ?? GameInspector.Capture(true, true);
         var json = JsonSerializer.Serialize(snap, JsonOptions);
         ImGui.SetClipboardText(json);
-        copiedFeedback = $"Copied {json.Length / 1024} KB to clipboard";
+        Feedback($"Copied {json.Length / 1024} KB of JSON");
+    }
+
+    private void CopySummary()
+    {
+        var snap = snapshot ?? GameInspector.Capture(true, true);
+        var text = SnapshotSummary.Build(snap);
+        ImGui.SetClipboardText(text);
+        Feedback($"Copied summary ({text.Length / 1024} KB)");
+    }
+
+    private void SaveSnapshot()
+    {
+        try
+        {
+            var snap = snapshot ?? GameInspector.Capture(true, true);
+            var dir = System.IO.Path.Combine(Services.PluginInterface.GetPluginConfigDirectory(), "snapshots");
+            System.IO.Directory.CreateDirectory(dir);
+            var path = System.IO.Path.Combine(dir, $"snapshot-{snap.CapturedAt:yyyyMMdd-HHmmss}.json");
+            System.IO.File.WriteAllText(path, JsonSerializer.Serialize(snap, JsonOptions));
+            Feedback($"Saved {System.IO.Path.GetFileName(path)}");
+        }
+        catch (Exception e)
+        {
+            Services.Log.Error(e, "Saving snapshot failed");
+            Feedback("Save failed: " + e.Message);
+        }
+    }
+
+    private void Feedback(string text)
+    {
+        copiedFeedback = text;
         copiedAt = DateTime.UtcNow;
     }
 

@@ -11,8 +11,8 @@ originated as hints from third-party plugins are treated as unverified until see
 
 | Fact | Value | Status |
 |---|---|---|
-| Keybound Brawler duty territory (`TerritoryType`) | 1359 | unverified |
-| Keybound Brawler lobby territory (`TerritoryType`) | 1360 | unverified |
+| Keybound Brawler duty territory (`TerritoryType`) | 1359 (`w1en`, place "The Gold Saucer") | **verified 2026-11-06** |
+| Keybound Brawler lobby territory (`TerritoryType`) | 1360 (`w1eo`, place "Keybound Square") | **verified 2026-11-06** |
 | `ContentFinderCondition` row for the duty | 1095 | unverified |
 | Registrar NPC | `ENpcResident` row to be found via Lumina (do not match by English name) | todo |
 | Leave-duty confirmation text | `Addon` sheet row 17854 | unverified |
@@ -22,7 +22,7 @@ originated as hints from third-party plugins are treated as unverified until see
 | Addon | Purpose | Status |
 |---|---|---|
 | `KTGInput` | Text input field. Node 7 is the `AtkComponentTextInput`. | unverified |
-| `KTGEWord` | Word/prompt list shown above enemies | unverified |
+| `KTGEWord` | 20 `Component(1001)` slots (node ids 20000+). Each slot: text node **20** (64×34, the word), text node **22** (64×14, small label), text nodes 6/7 (128×14), images 11–18, nine-grids 24–26. Idle slots are parked at −10000,−10000. | **structure verified 2026-11-06**; which text is the answer still to confirm mid-game |
 | `KTGResult` | End-of-game result screen; node 48 is the leave button | unverified |
 | `KTGHud` | In-duty HUD (exists in ClientStructs) | unverified |
 | `KTGEnterDialogue` | Entry dialogue (exists in ClientStructs) | unverified |
@@ -42,9 +42,9 @@ originated as hints from third-party plugins are treated as unverified until see
 | Fact | Value | Status |
 |---|---|---|
 | MGP item id | 29 | known (Lumina) |
-| MGC (Keybound currency) item id | 52322 | unverified |
-| Keybound Coffer item id | 52450 | unverified |
-| MGC cap | `CurrencyManager.GetItemMaxCount(52322)` | unverified |
+| MGC (Keybound currency) item id | 52322 | **verified 2026-11-06** (461 read, matches in-game) |
+| Keybound Coffer item id | 52450 | unverified (player had 0) |
+| MGC cap | `CurrencyManager.GetItemMaxCount(52322)` = 10,000 | **verified 2026-11-06** |
 | Cursed Gaze (input-blocking cast) action id | 49529 | unverified |
 | Sensory Jammer (input-blocking cast) action ids | 49532, 49702 | unverified |
 
