@@ -18,7 +18,7 @@ internal sealed unsafe class QueueDriver
 {
     public enum Phase { Idle, FindRegistrar, Interact, WaitDialog, Register, WaitQueue, WaitPop, Commence, Entering, Done, Failed }
 
-    private const float InteractRange = 6.5f;
+    private const float InteractRange = 8.0f;
     private static readonly TimeSpan DialogTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan QueueTimeout = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan EnterTimeout = TimeSpan.FromSeconds(90);
@@ -106,7 +106,16 @@ internal sealed unsafe class QueueDriver
                 var ts = TargetSystem.Instance();
                 ts->Target = (GameObject*)npc.Address;
                 var result = ts->InteractWithObject((GameObject*)npc.Address, false);
-                Services.Log.Information("Interacting with the Keybound Registrar (attempt {N}, result {R})", interactAttempts, result);
+                Services.Log.Information("Interacting with the Keybound Registrar (attempt {N}, result {R}, {D:0.0} m)", interactAttempts, result, distance);
+                if (result == 0)
+                {
+                    // The game refused (out of range or busy): don't burn an attempt on it.
+                    interactAttempts--;
+                    Status = $"Move closer to the Keybound Registrar ({distance:0.0} m)";
+                    nextAt = now + TimeSpan.FromMilliseconds(500);
+                    Set(Phase.FindRegistrar, Status);
+                    return;
+                }
                 Set(Phase.WaitDialog, "Waiting for the registration window");
                 return;
             }
