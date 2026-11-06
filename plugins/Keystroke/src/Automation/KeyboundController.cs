@@ -14,7 +14,7 @@ namespace Keystroke.Automation;
 /// </summary>
 internal sealed unsafe class KeyboundController : IAutomationController
 {
-    private enum Phase { Idle, Pick, Clearing, Typing, AwaitKey, BeforeEnter, AwaitSubmit, BetweenWords, Blocked, Recovering }
+    private enum Phase { Idle, Pick, Clearing, AwaitClear, Typing, AwaitKey, BeforeEnter, AwaitSubmit, BetweenWords, Blocked, Recovering }
 
     private static readonly TimeSpan KeyEchoTimeout = TimeSpan.FromMilliseconds(1500);
     private static readonly TimeSpan SubmitTimeout = TimeSpan.FromMilliseconds(2500);
@@ -38,6 +38,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
     private string answer = "";
     private int progress;
     private int echoFailures;
+    private int clearAttempts;
     private bool reacted;
     private bool wasInDuty;
     private bool resultCounted;
@@ -390,15 +391,40 @@ internal sealed unsafe class KeyboundController : IAutomationController
                 return;
 
             case Phase.Clearing:
-                // Typed text diverged from the target: backspace to the common prefix.
-                if (typed.Length <= progress)
+                // Typed text diverged from the target. Esc clears the whole field in one press
+                // (only while it has text: on an empty field Esc opens the quit prompt). The word
+                // is then retyped from the start.
+                if (typed.Length == 0)
                 {
+                    progress = 0;
+                    clearAttempts = 0;
                     phase = Phase.Typing;
                     return;
                 }
+                if (clearAttempts < 2)
+                {
+                    clearAttempts++;
+                    keys.SendEscape(typing.BackgroundInput);
+                    Session.Mistakes++;
+                    phase = Phase.AwaitClear;
+                    nextAt = now + TimeSpan.FromMilliseconds(16);
+                    return;
+                }
+                // Esc didn't clear it: fall back to backspacing.
                 keys.SendBackspace(typing.BackgroundInput);
-                Session.Mistakes++;
                 nextAt = now + typist.NextKeyDelay();
+                return;
+
+            case Phase.AwaitClear:
+                if (typed.Length == 0)
+                {
+                    progress = 0;
+                    clearAttempts = 0;
+                    phase = Phase.Typing;
+                    nextAt = now + typist.BetweenWordsDelay();
+                    return;
+                }
+                if (now - nextAt > TimeSpan.FromMilliseconds(600)) phase = Phase.Clearing;
                 return;
 
             case Phase.Typing:

@@ -124,10 +124,10 @@ public sealed class TypingSettings
                 HesitationMinMs = 300; HesitationMaxMs = 700; BetweenWordsMs = 250;
                 ReactionMinMs = 400; ReactionMaxMs = 600; ReadMsPerChar = 45;
                 break;
-            case TypingProfile.Skilled: // ~85 WPM
-                MedianKeyDelayMs = 140; KeyDelayJitter = 0.25f; HesitationChance = 0.01f;
-                HesitationMinMs = 200; HesitationMaxMs = 400; BetweenWordsMs = 120;
-                ReactionMinMs = 300; ReactionMaxMs = 450; ReadMsPerChar = 35;
+            case TypingProfile.Skilled: // ~105 WPM, upper professional range
+                MedianKeyDelayMs = 115; KeyDelayJitter = 0.20f; HesitationChance = 0.005f;
+                HesitationMinMs = 150; HesitationMaxMs = 300; BetweenWordsMs = 100;
+                ReactionMinMs = 250; ReactionMaxMs = 400; ReadMsPerChar = 30;
                 break;
         }
     }

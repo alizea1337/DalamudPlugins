@@ -42,7 +42,7 @@ internal sealed class TypingPage : Page
             {
                 TypingProfile.Relaxed => "≈38 WPM: ~310 ms per key, uneven, frequent pauses, 0.5–0.8 s to react to a new word. Someone glancing at the keyboard.",
                 TypingProfile.Normal => "≈52 WPM, the measured everyday average: ~230 ms per key, natural variation, 0.4–0.6 s reaction. Recommended.",
-                TypingProfile.Skilled => "≈85 WPM, professional range: ~140 ms per key, steady, 0.3–0.45 s reaction. Fast but still human-paced.",
+                TypingProfile.Skilled => "≈105 WPM, upper professional range: ~115 ms per key, steady, 0.25–0.4 s reaction. Fast but still human-paced.",
                 _ => "Tune every parameter yourself.",
             });
             if (t.InstantMode)
