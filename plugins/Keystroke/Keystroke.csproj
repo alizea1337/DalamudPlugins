@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.1.0.0</Version>
+    <Author>alizea1337</Author>
+    <Name>Keystroke</Name>
+    <Punchline>Automates Keybound Brawler typing with humanized input, auto-queue and reward tracking.</Punchline>
+    <Description>Keystroke reads Keybound Brawler prompts and types the answers for you, with humanized timing by default and an optional instant mode. Auto-queue loops with stop conditions, opens Keybound Coffers, tracks MGP/MGC gains, warns before the MGC cap, and offers global hotkeys and a compact in-duty overlay. Open /keystroke to get started.</Description>
+    <RepoUrl>https://github.com/alizea1337/DalamudPlugins</RepoUrl>
+    <Tags>gold saucer;keybound brawler;typing;automation</Tags>
+
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RootNamespace>Keystroke</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\Fonts\*.ttf;Resources\Fonts\LICENSE-*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="images\icon.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,104 @@
+name: Release plugin
+
+# Tag format: <Plugin>-v<version>[-testing]
+#   Keystroke-v0.1.0          -> stable track
+#   Keystroke-v0.1.0-testing  -> testing track only
+on:
+  push:
+    tags:
+      - "*-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2022
+
+    steps:
+      - name: Parse tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^(?<plugin>[A-Za-z0-9]+)-v(?<version>\d+\.\d+\.\d+(\.\d+)?)(?<testing>-testing)?$') {
+            throw "Tag '$tag' does not match <Plugin>-v<version>[-testing]"
+          }
+          "plugin=$($Matches.plugin)" >> $env:GITHUB_OUTPUT
+          "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
+          "testing=$([bool]$Matches.testing)" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $v = "${{ steps.tag.outputs.version }}"
+          if ($v.Split('.').Count -eq 3) { $v = "$v.0" }
+          dotnet build "plugins/${{ steps.tag.outputs.plugin }}" -c Release -p:Version=$v
+
+      - name: Collect package
+        id: pkg
+        shell: pwsh
+        run: |
+          $plugin = "${{ steps.tag.outputs.plugin }}"
+          $zip = Get-ChildItem "plugins/$plugin/bin" -Recurse -Filter latest.zip | Select-Object -First 1
+          if (-not $zip) { throw "latest.zip not found under plugins/$plugin/bin" }
+          $out = $zip.DirectoryName
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "manifest=$out/$plugin.json" >> $env:GITHUB_OUTPUT
+          $changelog = ""
+          $cl = "plugins/$plugin/CHANGELOG.md"
+          if (Test-Path $cl) {
+            $lines = Get-Content $cl
+            $start = ($lines | Select-String -Pattern '^## ' | Select-Object -First 1).LineNumber
+            if ($start) {
+              $rest = $lines[$start..($lines.Count-1)]
+              $end = ($rest | Select-String -Pattern '^## ' | Select-Object -First 1).LineNumber
+              $section = if ($end) { $rest[0..($end-2)] } else { $rest }
+              $changelog = ($section -join "`n").Trim()
+            }
+          }
+          Set-Content -Path changelog.txt -Value $changelog -Encoding UTF8
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.tag.outputs.plugin }} ${{ steps.tag.outputs.version }}${{ steps.tag.outputs.testing == 'True' && ' (testing)' || '' }}
+          prerelease: ${{ steps.tag.outputs.testing == 'True' }}
+          body_path: changelog.txt
+          files: ${{ steps.pkg.outputs.zip }}
+
+      - name: Update repo.json
+        shell: pwsh
+        run: |
+          $plugin = "${{ steps.tag.outputs.plugin }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/latest.zip"
+          $changelog = Get-Content -Raw changelog.txt
+          $testing = "${{ steps.tag.outputs.testing }}" -eq "True"
+          ./scripts/Update-RepoJson.ps1 -ManifestPath "${{ steps.pkg.outputs.manifest }}" -DownloadUrl $url -Changelog $changelog -Testing:$testing
+
+      - name: Commit repo.json
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.json
+          git diff --cached --quiet; if ($LASTEXITCODE -eq 0) { Write-Host "repo.json unchanged"; exit 0 }
+          git commit -m "chore: update feed for ${{ github.ref_name }}"
+          git push origin HEAD:main

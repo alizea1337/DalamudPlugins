@@ -1,0 +1,80 @@
+# Keybound Brawler game facts
+
+Facts about the game client that Keystroke relies on. These are *facts* (names, IDs, layouts),
+not code. Every row has a verification status; anything marked **unverified** must be confirmed
+through the Inspector page in-game before code depends on it.
+
+Sources: FFXIVClientStructs (MIT), Lumina sheets, in-game Inspector snapshots. Numbers that
+originated as hints from third-party plugins are treated as unverified until seen in-game.
+
+## Territories and content
+
+| Fact | Value | Status |
+|---|---|---|
+| Keybound Brawler duty territory (`TerritoryType`) | 1359 | unverified |
+| Keybound Brawler lobby territory (`TerritoryType`) | 1360 | unverified |
+| `ContentFinderCondition` row for the duty | 1095 | unverified |
+| Registrar NPC | `ENpcResident` row to be found via Lumina (do not match by English name) | todo |
+| Leave-duty confirmation text | `Addon` sheet row 17854 | unverified |
+
+## Addons (`AtkUnitBase` names)
+
+| Addon | Purpose | Status |
+|---|---|---|
+| `KTGInput` | Text input field. Node 7 is the `AtkComponentTextInput`. | unverified |
+| `KTGEWord` | Word/prompt list shown above enemies | unverified |
+| `KTGResult` | End-of-game result screen; node 48 is the leave button | unverified |
+| `KTGHud` | In-duty HUD (exists in ClientStructs) | unverified |
+| `KTGEnterDialogue` | Entry dialogue (exists in ClientStructs) | unverified |
+| `KTGEnemyCastBar`, `KTGHudGaugeHp` | Cast bar / HP gauge | unverified |
+| `ContentsFinderConfirm` | Duty pop confirm; `AddonContentsFinderConfirm.CommenceButton` | ClientStructs |
+| `SelectYesno` | Yes/No dialog | ClientStructs |
+
+## Atk arrays
+
+| Array | Layout | Status |
+|---|---|---|
+| `NumberArrays[161]` | `[0]` = count, then 20 records × 13 ints: `+0` entityId, `+1` screenX, `+2` screenY, `+4` visible, `+7` progress, `+10` kind, `+11` special | unverified |
+| `StringArrays[128]` | 20 triples: word, reading, cast name | unverified |
+
+## Items, currencies, actions
+
+| Fact | Value | Status |
+|---|---|---|
+| MGP item id | 29 | known (Lumina) |
+| MGC (Keybound currency) item id | 52322 | unverified |
+| Keybound Coffer item id | 52450 | unverified |
+| MGC cap | `CurrencyManager.GetItemMaxCount(52322)` | unverified |
+| Cursed Gaze (input-blocking cast) action id | 49529 | unverified |
+| Sensory Jammer (input-blocking cast) action ids | 49532, 49702 | unverified |
+
+## Queueing
+
+- `ContentsFinder.Instance()->QueueInfo` exposes `QueueState`, `QueuedEntries[]`, `PoppedQueueEntry`.
+- Duty commence: `AddonContentsFinderConfirm.CommenceButton` click via its `AtkEventManager` ButtonClick listener.
+
+## Agents (FFXIVClientStructs `AgentId`, confirmed 2026-11-06 from AgentModule.cs)
+
+| Agent | Id | Status |
+|---|---|---|
+| `KTGHud` | 397 | ClientStructs |
+| `Unk398` — "deals with input for KTG" | 398 | ClientStructs (unnamed) |
+| `KTGEnterDialogue` | 399 | ClientStructs |
+| `Unk400` | 400 | ClientStructs (unnamed) |
+| `KTGResult` | 401 | ClientStructs |
+
+No `Agent*`/`Addon*` structs exist for KTG in ClientStructs; node ids and array layouts must come
+from the Inspector.
+
+## AFK / activity
+
+- `InputTimerModule` (`UIModule.GetInputTimerModule`, `Client.UI.Misc`) fields: `AfkTimer` 0x10,
+  `ContentInputTimer` 0x14, `InputTimer` 0x18, `TerritoryTypeId` 0x42. Resetting these is the
+  documented way to keep the inactivity kick away; writing into agent 398's memory is **not** and
+  will not be done without an in-game check of what the field is.
+
+## Duty finder
+
+- `ContentsFinderQueueState`: None 0, Pending 1, Queued 2, Ready 3, Accepted 4, InContent 5.
+- `ContentsFinderQueueInfo`: `QueuedEntries` (5 × `ContentsId`), `PoppedQueueEntry` (0x7C),
+  `QueueState` (0x55), `PositionInQueue` (0x5C).
