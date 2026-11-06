@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Keystroke.UI.Theme;
 
@@ -44,8 +45,13 @@ internal sealed class RewardsAlertsPage : Page
             if (a.SoundEnabled)
             {
                 var se = a.SoundEffect;
-                Widgets.Row("Sound", "Game sound effects 1–16, as in <se.N> chat macros.", 160 * s, Widgets.FrameHeight,
-                    () => { if (Widgets.SliderInt("##se", ref se, 1, 16, "<se.%d>", 160)) { a.SoundEffect = se; changed = true; } });
+                Widgets.Row("Sound", "Game sound effects 1–16, as in <se.N> chat macros.", 230 * s, Widgets.FrameHeight, () =>
+                {
+                    if (Widgets.SliderInt("##se", ref se, 1, 16, "<se.%d>", 160)) { a.SoundEffect = se; changed = true; }
+                    ImGui.SameLine(0, 6 * s);
+                    if (Widgets.Button("##play", Widgets.ButtonStyle.Default, new Vector2(Widgets.FrameHeight, Widgets.FrameHeight), Theme.Icon.Play))
+                        Alerts.Notifier.PlaySound(a.SoundEffect);
+                });
             }
             Widgets.RowSeparator();
             v = a.ChatEnabled;

@@ -2,8 +2,10 @@ using System;
 using System.Linq;
 using Dalamud.Game.ClientState.Objects.Types;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using Keystroke.Alerts;
 using Keystroke.Game;
 using Keystroke.Input;
+using Keystroke.Rewards;
 
 namespace Keystroke.Automation;
 
@@ -26,8 +28,19 @@ internal sealed unsafe class KeyboundController : IAutomationController
     private readonly KeySender keys = new();
     private readonly Typist typist;
     private readonly QueueDriver queue;
+    private readonly Notifier notifier;
     private DateTime leaveAt = DateTime.MaxValue;
     private int loopStartGames;
+
+    // Per-game bookkeeping for the history record and reward deltas.
+    private DateTime gameStartedAt;
+    private int gameStartMgp;
+    private int gameStartMgc;
+    private int gameStartKeys;
+    private int gameStartWords;
+    private int gameStartMistakes;
+    private DateTime recordAt = DateTime.MaxValue;
+    private bool mgcWarned;
 
     private Phase phase = Phase.Idle;
     private DateTime nextAt = DateTime.MinValue;
@@ -53,6 +66,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
     public SessionStats Session { get; } = new();
     public string? LastError { get; private set; }
     public CofferOpener Coffers { get; } = new();
+    public RewardStore History { get; }
     public KeyboundBoard Board => board;
 
     // Rolling measurement of real key spacing so profile changes are visible in the UI.
@@ -90,6 +104,14 @@ internal sealed unsafe class KeyboundController : IAutomationController
         this.config = config;
         typist = new Typist(() => config().Typing);
         queue = new QueueDriver(config);
+        notifier = new Notifier(config);
+        History = new RewardStore();
+    }
+
+    private static (int mgp, int mgc) Currency()
+    {
+        var inv = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+        return inv == null ? (0, 0) : (inv->GetInventoryItemCount(Keybound.MgpItemId), inv->GetInventoryItemCount(Keybound.MgcItemId));
     }
 
     // ------------------------------------------------------------------ commands
@@ -220,11 +242,18 @@ internal sealed unsafe class KeyboundController : IAutomationController
         if (inDuty && !wasInDuty)
         {
             resultCounted = false;
+            gameStartedAt = DateTime.Now;
+            (gameStartMgp, gameStartMgc) = Currency();
+            gameStartKeys = Session.KeysTyped;
+            gameStartWords = Session.WordsTyped;
+            gameStartMistakes = Session.Mistakes;
+            recordAt = DateTime.MaxValue;
             if (State == AutomationState.WaitingForDuty || (State == AutomationState.Idle && config().Automation.AutoPlayOnEntry))
                 BeginPlaying();
         }
         else if (!inDuty && wasInDuty)
         {
+            if (recordAt != DateTime.MaxValue) FinalizeGame();
             target = null;
             answer = "";
             progress = 0;
@@ -265,6 +294,9 @@ internal sealed unsafe class KeyboundController : IAutomationController
             if (loopActive && LoopRemaining > 0) LoopRemaining--;
             Services.Log.Information("Game completed (session total {Count})", Session.GamesCompleted);
 
+            // Currency settles within a couple of seconds of the result screen; record then.
+            recordAt = DateTime.UtcNow + TimeSpan.FromMilliseconds(2000);
+
             if (loopActive)
             {
                 var why = LoopRemaining == 0 ? "count reached" : "";
@@ -273,12 +305,77 @@ internal sealed unsafe class KeyboundController : IAutomationController
                     loopActive = false;
                     LoopRemaining = 0;
                     Services.Log.Information("Loop finished: {Why}", why);
+                    notifier.Notify(AlertKind.LoopFinished, "Loop finished", $"Stopped: {why}. {Session.GamesCompleted} games this session, {Session.MgpGained:N0} MGP.");
                 }
             }
             if (config().Automation.AutoLeaveAfterResult)
                 leaveAt = DateTime.UtcNow + TimeSpan.FromMilliseconds(2500 + Random.Shared.Next(2500));
         }
+
+        if (recordAt != DateTime.MaxValue && DateTime.UtcNow >= recordAt) FinalizeGame();
     }
+
+    /// <summary>Writes the history record for the game that just ended and runs reward alerts.</summary>
+    private void FinalizeGame()
+    {
+        recordAt = DateTime.MaxValue;
+        var (mgp, mgc) = Currency();
+        var mgpGain = Math.Max(0, mgp - gameStartMgp);
+        var mgcGain = Math.Max(0, mgc - gameStartMgc);
+        var keys = Session.KeysTyped - gameStartKeys;
+        var minutes = Math.Max(0.1, (DateTime.Now - gameStartedAt).TotalMinutes);
+        var record = new GameRecord
+        {
+            At = gameStartedAt,
+            DurationSec = (DateTime.Now - gameStartedAt).TotalSeconds,
+            Score = board.Score,
+            MgpGained = mgpGain,
+            MgcGained = mgcGain,
+            Keys = keys,
+            Words = Session.WordsTyped - gameStartWords,
+            Mistakes = Session.Mistakes - gameStartMistakes,
+            Wpm = keys / 5.0 / minutes,
+            Profile = config().Typing.Profile.ToString(),
+            Instant = config().Typing.InstantMode,
+        };
+        Session.MgpGained += mgpGain;
+        Session.MgcGained += mgcGain;
+        History.Append(record);
+        Services.Log.Information("Recorded game: +{Mgp} MGP, +{Mgc} MGC, score {Score}, {Wpm:0} WPM", mgpGain, mgcGain, record.Score, record.Wpm);
+        notifier.Notify(AlertKind.GameResult, "Game finished", $"+{mgpGain:N0} MGP, +{mgcGain:N0} MGC, score {record.Score:N0}");
+        CheckMgcCap(mgc);
+    }
+
+    private void CheckMgcCap(int mgc)
+    {
+        var alerts = config().Alerts;
+        if (!alerts.MgcCapWarning) return;
+        var cm = FFXIVClientStructs.FFXIV.Client.Game.CurrencyManager.Instance();
+        var cap = cm == null ? 0u : cm->GetItemMaxCount(Keybound.MgcItemId);
+        if (cap == 0) return;
+        var threshold = cap * alerts.MgcCapWarningPercent / 100.0;
+        if (mgc >= cap)
+        {
+            if (!mgcWarned || mgcWarnedAtCap == false)
+                notifier.Notify(AlertKind.MgcWarning, "MGC is capped", $"You hold {mgc:N0} / {cap:N0} MGC. Further games won't add MGC until you spend some.");
+            mgcWarned = true;
+            mgcWarnedAtCap = true;
+        }
+        else if (mgc >= threshold)
+        {
+            if (!mgcWarned)
+                notifier.Notify(AlertKind.MgcWarning, "MGC near the cap", $"{mgc:N0} / {cap:N0} MGC ({mgc * 100.0 / cap:0}%). Consider spending before the cap.");
+            mgcWarned = true;
+            mgcWarnedAtCap = false;
+        }
+        else
+        {
+            mgcWarned = false;
+            mgcWarnedAtCap = false;
+        }
+    }
+
+    private bool mgcWarnedAtCap;
 
     private void TickQueue(DateTime now)
     {
@@ -646,6 +743,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
         phase = Phase.Idle;
         SetState(AutomationState.Error, message);
         Services.Log.Error("Automation stopped: {Message}", message);
+        notifier.Notify(AlertKind.Error, "Keystroke stopped", message);
     }
 
 }

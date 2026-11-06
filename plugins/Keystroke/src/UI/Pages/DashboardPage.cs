@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Keystroke.Automation;
@@ -92,12 +93,78 @@ internal sealed class DashboardPage : Page
             Widgets.EndCard();
         }
 
+        var hist = Controller.History;
         Widgets.SectionLabel("LIFETIME");
         if (Widgets.BeginCard("lifetime"))
         {
-            Widgets.ValueRow("Games played", "—", description: "Lifetime stats and the history chart arrive with the rewards milestone.");
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            var w = ImGui.GetContentRegionAvail().X / 4;
+            Widgets.StatTile("Games", hist.TotalGames.ToString("N0"), null, w);
+            ImGui.SameLine();
+            Widgets.StatTile("MGP", hist.TotalMgp.ToString("N0"), Theme.Theme.Green, w);
+            ImGui.SameLine();
+            Widgets.StatTile("MGC", hist.TotalMgc.ToString("N0"), Theme.Theme.Purple, w);
+            ImGui.SameLine();
+            Widgets.StatTile("Best WPM", hist.BestWpm.ToString("0"), null, w);
+            ImGui.Dummy(new Vector2(0, 10 * s));
+            DrawHistoryChart(hist, s);
+            ImGui.Dummy(new Vector2(0, 4 * s));
             Widgets.EndCard();
         }
+    }
+
+    /// <summary>MGP per day for the last 14 days as rounded bars, drawn with the draw list.</summary>
+    private static void DrawHistoryChart(Rewards.RewardStore hist, float s)
+    {
+        var days = hist.LastDays(14);
+        var max = Math.Max(1, days.Max(d => d.Mgp));
+        var width = ImGui.GetContentRegionAvail().X;
+        var height = 96 * s;
+        var pos = ImGui.GetCursorScreenPos();
+        var dl = ImGui.GetWindowDrawList();
+        var gap = 6 * s;
+        var barW = (width - gap * (days.Count - 1)) / days.Count;
+        var labelH = ImGui.GetTextLineHeight();
+        var chartH = height - labelH - 4 * s;
+
+        using (Widgets.F.Caption.Push())
+        {
+            ImGui.TextColored(Theme.Theme.SecondaryLabel, "MGP per day, last 14 days");
+        }
+        pos = ImGui.GetCursorScreenPos();
+
+        // Baseline
+        dl.AddLine(pos + new Vector2(0, chartH), pos + new Vector2(width, chartH), Theme.Theme.U32(Theme.Theme.Separator));
+
+        for (var i = 0; i < days.Count; i++)
+        {
+            var d = days[i];
+            var x = pos.X + i * (barW + gap);
+            var h = (float)(d.Mgp / (double)max) * (chartH - 6 * s);
+            var isToday = i == days.Count - 1;
+            var top = new Vector2(x, pos.Y + chartH - h);
+            var bottom = new Vector2(x + barW, pos.Y + chartH);
+            var col = d.Mgp > 0 ? (isToday ? Theme.Theme.Accent : Theme.Theme.WithAlpha(Theme.Theme.Accent, 0.55f)) : Theme.Theme.WithAlpha(Theme.Theme.Label, 0.06f);
+            if (h < 3 * s) top.Y = bottom.Y - 3 * s;
+            dl.AddRectFilled(top, bottom, Theme.Theme.U32(col), 4 * s);
+
+            // Hover tooltip
+            ImGui.SetCursorScreenPos(new Vector2(x, pos.Y));
+            ImGui.InvisibleButton("##bar" + i, new Vector2(barW, chartH));
+            if (ImGui.IsItemHovered())
+                Widgets.Tooltip($"{d.Day:ddd d MMM}\n{d.Games} games · {d.Mgp:N0} MGP · {d.Mgc:N0} MGC");
+
+            // Day label every other day to keep it airy
+            if (i % 2 == 1 || isToday)
+            {
+                var label = isToday ? "Today" : d.Day.ToString("d/M");
+                using var cap = Widgets.F.Caption.Push();
+                var ts = ImGui.CalcTextSize(label);
+                dl.AddText(new Vector2(x + (barW - ts.X) / 2, pos.Y + chartH + 4 * s), Theme.Theme.U32(Theme.Theme.TertiaryLabel), label);
+            }
+        }
+        ImGui.SetCursorScreenPos(pos + new Vector2(0, height));
+        ImGui.Dummy(new Vector2(width, 0));
     }
 
     private static void DrawStateRing(Vector4 color, float s)

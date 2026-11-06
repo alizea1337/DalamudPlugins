@@ -57,6 +57,7 @@ internal interface IAutomationController
     CofferOpener Coffers { get; }
     /// <summary>Measured interval between the last keystrokes, in ms; 0 when nothing recent.</summary>
     double MeasuredMsPerKey { get; }
+    Rewards.RewardStore History { get; }
 
     /// <summary>Play the current/next game once (queues first if in the lobby and auto-queue is on).</summary>
     void Start();
