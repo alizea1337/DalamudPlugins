@@ -211,17 +211,22 @@ internal sealed class DashboardPage : Page
 
         // Count field and loop buttons share one frame height, centred on the transport circles.
         // No group here: BeginGroup after SameLine breaks the line tracking the buttons rely on.
+        // ImGui's SameLine snaps every item back to the line's top, so the vertical offset must be
+        // re-applied after each SameLine, not just before the first item.
         var h = Widgets.FrameHeight;
+        var midY = rowTop + (circle * s - h) / 2;
         ImGui.SameLine(0, 18 * s);
-        ImGui.SetCursorPosY(rowTop + (circle * s - h) / 2);
+        ImGui.SetCursorPosY(midY);
         ImGui.SetNextItemWidth(70 * s);
         ImGui.InputInt("##loopcount", ref loopCount, 0, 0);
         loopCount = Math.Clamp(loopCount, 1, 999);
         ImGui.SameLine(0, 6 * s);
+        ImGui.SetCursorPosY(midY);
         if (Widgets.Button("Loop##loop", Widgets.ButtonStyle.Default, new Vector2(78 * s, h), Theme.Icon.Repeat) && !running)
             Controller.StartLoop(loopCount);
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play this many games, then stop.");
         ImGui.SameLine(0, 6 * s);
+        ImGui.SetCursorPosY(midY);
         if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, new Vector2(92 * s, h), Theme.Icon.RefreshCw) && !running)
             Controller.StartUnlimited();
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play until you stop it or a stop condition is met.");
