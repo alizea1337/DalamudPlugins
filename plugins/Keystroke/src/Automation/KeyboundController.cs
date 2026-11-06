@@ -93,10 +93,14 @@ internal sealed unsafe class KeyboundController : IAutomationController
     /// <summary>Begin playing if in the duty, queue if in the lobby, otherwise wait.</summary>
     private void Arm()
     {
+        autoQueueSuppressed = false;
         if (board.InDuty) { BeginPlaying(); return; }
-        if (InLobby && (loopActive || config().Automation.AutoQueueOnLobbyEntry)) { BeginQueue(); return; }
-        SetState(AutomationState.WaitingForDuty, InLobby ? "Press Start again or enable auto-queue to register" : "Enter the Keybound Brawler duty to begin");
+        if (InLobby) { BeginQueue(); return; }
+        SetState(AutomationState.WaitingForDuty, "Enter Keybound Square or the Keybound Brawler duty to begin");
     }
+
+    /// <summary>Set when the user stops in the lobby so auto-queue doesn't immediately restart.</summary>
+    private bool autoQueueSuppressed;
 
     private bool InLobby => Keybound.IsLobby((ushort)Services.ClientState.TerritoryType);
 
@@ -131,6 +135,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
         phase = Phase.Idle;
         leaveAt = DateTime.MaxValue;
         queue.Reset();
+        autoQueueSuppressed = true;
         SetState(AutomationState.Idle, "Ready");
     }
 
@@ -206,17 +211,21 @@ internal sealed unsafe class KeyboundController : IAutomationController
         var inLobby = InLobby;
         if (inLobby && !wasInLobby)
         {
-            // Arrived in Keybound Square: continue a loop, or auto-queue if the user asked for that.
+            autoQueueSuppressed = false;
+            // Arrived in Keybound Square with a loop in progress: queue the next game.
             if (State == AutomationState.WaitingForDuty && loopActive) BeginQueue();
-            else if (State == AutomationState.Idle && config().Automation.AutoQueueOnLobbyEntry)
-            {
-                LoopRemaining = -1;
-                loopActive = true;
-                loopStartGames = Session.GamesCompleted;
-                BeginQueue();
-            }
         }
         wasInLobby = inLobby;
+
+        // Auto-queue applies whenever we're idle in the lobby with the option on (also when the
+        // option is switched on while already standing there), until the user presses Stop.
+        if (inLobby && State == AutomationState.Idle && config().Automation.AutoQueueOnLobbyEntry && !autoQueueSuppressed)
+        {
+            LoopRemaining = -1;
+            loopActive = true;
+            loopStartGames = Session.GamesCompleted;
+            BeginQueue();
+        }
 
         if (inDuty && board.ResultVisible && !resultCounted)
         {
@@ -331,17 +340,20 @@ internal sealed unsafe class KeyboundController : IAutomationController
                 reacted = false;
                 if (typing.InstantMode)
                 {
-                    if (InputField.SetText(answer))
+                    // The game only counts characters it receives as keystrokes, so "instant" means
+                    // every remaining key in one burst, then Enter once the field echoes the word.
+                    for (var i = progress; i < answer.Length; i++)
                     {
-                        progress = answer.Length;
-                        Session.KeysTyped += answer.Length;
-                        phase = Phase.BeforeEnter;
-                        nextAt = now + TimeSpan.FromMilliseconds(80);
+                        if (!keys.SendChar(answer[i], typing.BackgroundInput))
+                        {
+                            Fail($"Can't type '{answer[i]}' on the current keyboard layout");
+                            return;
+                        }
                     }
-                    else
-                    {
-                        phase = Phase.Typing; // fall back to key-by-key if the field couldn't be written
-                    }
+                    Session.KeysTyped += answer.Length - progress;
+                    progress = answer.Length;
+                    phase = Phase.AwaitKey;
+                    nextAt = now + TimeSpan.FromMilliseconds(16);
                     return;
                 }
                 phase = Phase.Typing;
@@ -383,12 +395,19 @@ internal sealed unsafe class KeyboundController : IAutomationController
                 return;
 
             case Phase.AwaitKey:
-                // Wait for the game to echo the key into the field before sending the next one.
+                // Wait for the game to echo the key(s) into the field before continuing.
+                if (!board.InputVisible)
+                {
+                    // Field hidden (phase transition, cutscene): start over when it returns.
+                    target = null; answer = ""; progress = 0; echoFailures = 0;
+                    phase = Phase.Pick;
+                    return;
+                }
                 if (string.Equals(typed, answer[..progress], StringComparison.OrdinalIgnoreCase))
                 {
                     echoFailures = 0;
                     phase = Phase.Typing;
-                    nextAt = now + typist.NextKeyDelay();
+                    nextAt = now + (progress >= answer.Length ? TimeSpan.Zero : typist.NextKeyDelay());
                     return;
                 }
                 if (typed.Length > 0 && !answer.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
@@ -399,21 +418,26 @@ internal sealed unsafe class KeyboundController : IAutomationController
                 }
                 if (now - nextAt > KeyEchoTimeout)
                 {
+                    // Nothing arrived: the game is ignoring input (Sensory Jammer / Cursed Gaze window,
+                    // or a stall). Wait it out quietly rather than backspacing into a field that
+                    // isn't listening; resend from the echoed prefix once it responds.
                     echoFailures++;
                     progress = CommonPrefix(typed, answer);
-                    if (echoFailures >= 3)
+                    StatusDetail = $"Input isn't responding; waiting ({echoFailures * KeyEchoTimeout.TotalSeconds:0}s)";
+                    if (echoFailures == 1) Services.Log.Information("Key echo timed out; waiting for input to respond");
+                    if (echoFailures >= 10)
                     {
                         if (config().Advanced.AutomaticRecovery)
                         {
                             phase = Phase.Recovering;
                             nextAt = now + RecoveryDelay;
-                            StatusDetail = "Keys aren't reaching the game; retrying";
-                            Services.Log.Warning("Key echo timed out three times; recovering");
+                            Services.Log.Warning("Input unresponsive for 15 s; recovering");
                         }
                         else Fail("Keys aren't reaching the game");
                         return;
                     }
                     phase = Phase.Typing;
+                    nextAt = now + TimeSpan.FromMilliseconds(250);
                 }
                 return;
 
@@ -564,27 +588,4 @@ internal sealed unsafe class KeyboundController : IAutomationController
         Services.Log.Error("Automation stopped: {Message}", message);
     }
 
-    /// <summary>Writes directly into the KTGInput text field (Instant mode).</summary>
-    private static class InputField
-    {
-        public static bool SetText(string text)
-        {
-            try
-            {
-                var ptr = Services.GameGui.GetAddonByName(Keybound.InputAddon);
-                if (ptr.IsNull) return false;
-                var addon = (AtkUnitBase*)ptr.Address;
-                var node = addon->GetComponentNodeById(7);
-                if (node == null || node->Component == null) return false;
-                var input = (AtkComponentTextInput*)node->Component;
-                input->SetText(text);
-                return true;
-            }
-            catch (Exception e)
-            {
-                Services.Log.Warning(e, "Instant insert failed");
-                return false;
-            }
-        }
-    }
 }

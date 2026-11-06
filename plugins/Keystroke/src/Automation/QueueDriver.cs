@@ -103,13 +103,16 @@ internal sealed unsafe class QueueDriver
                 var npc = FindRegistrar(out var distance);
                 if (npc == null || distance > InteractRange) { Set(Phase.FindRegistrar, "Looking for the Keybound Registrar"); return; }
                 interactAttempts++;
-                TargetSystem.Instance()->InteractWithObject((GameObject*)npc.Address, false);
+                var ts = TargetSystem.Instance();
+                ts->Target = (GameObject*)npc.Address;
+                var result = ts->InteractWithObject((GameObject*)npc.Address, false);
+                Services.Log.Information("Interacting with the Keybound Registrar (attempt {N}, result {R})", interactAttempts, result);
                 Set(Phase.WaitDialog, "Waiting for the registration window");
                 return;
             }
 
             case Phase.WaitDialog:
-                if (AtkClicker.IsReady(Keybound.EnterDialogueAddon))
+                if (AtkClicker.IsVisible(Keybound.EnterDialogueAddon))
                 {
                     Set(Phase.Register, "Registering");
                     nextAt = now + Human(500, 1100);
@@ -152,7 +155,7 @@ internal sealed unsafe class QueueDriver
 
             case Phase.WaitPop:
                 if (queue is ContentsFinderQueueState.Accepted or ContentsFinderQueueState.InContent) { Set(Phase.Entering, "Entering the duty"); return; }
-                if (!AtkClicker.IsReady("ContentsFinderConfirm"))
+                if (!AtkClicker.IsVisible("ContentsFinderConfirm"))
                 {
                     if (queue == ContentsFinderQueueState.Queued) { Set(Phase.WaitQueue, "Back in queue"); return; }
                     if (now - phaseStarted > TimeSpan.FromSeconds(45)) Set(Phase.WaitQueue, "Pop window closed");
@@ -218,7 +221,7 @@ internal sealed unsafe class QueueDriver
 
     private void Set(Phase phase, string status)
     {
-        if (Current != phase) Services.Log.Debug("Queue {Old} -> {New}", Current, phase);
+        if (Current != phase) Services.Log.Information("Queue {Old} -> {New}: {Status}", Current, phase, status);
         Current = phase;
         Status = status;
         phaseStarted = DateTime.UtcNow;

@@ -45,7 +45,7 @@ internal static unsafe class AtkClicker
                 if (evt->State.EventType != AtkEventType.ButtonClick) continue;
                 var listener = evt->Listener != null ? evt->Listener : (AtkEventListener*)addon;
                 listener->ReceiveEvent(AtkEventType.ButtonClick, (int)evt->Param, evt, null);
-                Services.Log.Debug("Clicked {Addon} button {Node}", addonName, componentNodeId);
+                Services.Log.Information("Clicked {Addon} button {Node}", addonName, componentNodeId);
                 return true;
             }
             Services.Log.Warning("{Addon} button {Node} has no ButtonClick event", addonName, componentNodeId);
