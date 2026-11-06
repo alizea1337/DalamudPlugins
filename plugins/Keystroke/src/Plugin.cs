@@ -34,7 +34,7 @@ public sealed class Plugin : IDalamudPlugin
         fonts = new Fonts();
         Widgets.Init(fonts);
 
-        Controller = new StubAutomationController();
+        Controller = new KeyboundController(() => Config);
         Hotkeys = new HotkeyService(() => Config);
         Hotkeys.StartStop += () => { if (Controller.State == AutomationState.Idle) Controller.Start(); else Controller.Stop(); };
         Hotkeys.PauseResume += () => { if (Controller.State == AutomationState.Paused) Controller.Resume(); else Controller.Pause(); };

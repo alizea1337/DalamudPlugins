@@ -40,6 +40,18 @@ internal sealed class DashboardPage : Page
             ImGui.BeginGroup();
             using (Widgets.F.Title.Push()) ImGui.TextColored(stateColor, stateLabel);
             Widgets.Secondary(Controller.StatusDetail);
+            if (Controller.LastError != null && state == AutomationState.Error)
+                Widgets.Caption(Controller.LastError, Theme.Theme.Red);
+            if (Controller.CurrentPrompt.Length > 0)
+            {
+                // Word being typed, with the already-sent part highlighted.
+                var prompt = Controller.CurrentPrompt;
+                var done = Controller.CurrentAnswer.Length;
+                using var mono = Widgets.F.BodySemibold.Push();
+                ImGui.TextColored(Theme.Theme.Accent, prompt[..Math.Min(done, prompt.Length)]);
+                ImGui.SameLine(0, 0);
+                ImGui.TextColored(Theme.Theme.TertiaryLabel, prompt[Math.Min(done, prompt.Length)..]);
+            }
             if (Controller.LoopRemaining > 0)
                 Widgets.Caption($"{Controller.LoopRemaining} games remaining in loop");
             ImGui.Dummy(new Vector2(0, 8 * s));

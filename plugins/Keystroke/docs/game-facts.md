@@ -30,12 +30,27 @@ originated as hints from third-party plugins are treated as unverified until see
 | `ContentsFinderConfirm` | Duty pop confirm; `AddonContentsFinderConfirm.CommenceButton` | ClientStructs |
 | `SelectYesno` | Yes/No dialog | ClientStructs |
 
-## Atk arrays
+## Atk arrays (**verified 2026-11-06**, two mid-game captures)
 
-| Array | Layout | Status |
-|---|---|---|
-| `NumberArrays[161]` | `[0]` = count, then 20 records × 13 ints: `+0` entityId, `+1` screenX, `+2` screenY, `+4` visible, `+7` progress, `+10` kind, `+11` special | unverified |
-| `StringArrays[128]` | 20 triples: word, reading, cast name | unverified |
+| Array | Layout |
+|---|---|
+| `NumberArrays[161]` (size 261) | `[0]` = active slot count. Records of 13 ints from index 1: `+0` entityId (e.g. 1073892389), `+1` screenX, `+2` screenY (anchor near the enemy; the word bubble is drawn ~120 px above), `+3` unknown (looks like float bits), `+4` visible = 1, `+5` HP % (66/100/40/80), `+6..+12` zero in captures |
+| `StringArrays[128]` (size 60) | 20 triples: `+0` word ("cactuar", "Braver", "Regina"), `+1` reading (empty on EN), `+2` cast name (empty) |
+
+Slot *i* is consistent across `numbers[1+13i]`, `strings[3i]` and `KTGEWord` component slot *i*.
+
+## KTGInput (**verified 2026-11-06**)
+
+- Component node **7** = `AtkComponentTextInput` (480×32 at ~824,934 on 2560×1440).
+- Text node **16** inside it holds the typed text; it is **lowercase** regardless of the word's case
+  ("regin" while the word is "Regina"), so matching is case-insensitive. Node 17 shows "1/1".
+- `KTGPlayGuide`: "[Enter]: Submit Text  [Esc]: Delete Text/Quit".
+
+## Other in-duty addons seen
+
+`KTGHudTodo` (text 2 "Defeat 25 enemies", text 3 "5/25"), `KTGHudScore` (text 3/5 score), `KTGHudGaugeHp`,
+`KTGIGaugeHp` (per-enemy HP bars), `KTGEnemyCastBar` (20 slots, text 3 "Interrupted!", text 5 "0"),
+`KTGHudLog`, `KTGPlayerName`, `KTGScreenTextFever` ("TYPING FEVER!").
 
 ## Items, currencies, actions
 
