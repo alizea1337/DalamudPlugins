@@ -50,7 +50,52 @@ internal static unsafe class GameInspector
             Casts = Casts(errors),
             Currency = Currency(errors),
             Queue = Queue(errors),
+            Target = TargetInfo(errors),
+            NearbyNpcs = NearbyNpcs(errors),
             Errors = errors,
+        };
+    }
+
+    private static ObjectSnapshot? TargetInfo(List<string> errors)
+    {
+        try
+        {
+            var t = Services.Targets.Target;
+            return t == null ? null : Describe(t);
+        }
+        catch (Exception e) { errors.Add($"target: {e.Message}"); return null; }
+    }
+
+    private static List<ObjectSnapshot> NearbyNpcs(List<string> errors)
+    {
+        var result = new List<ObjectSnapshot>();
+        try
+        {
+            var player = Services.Objects.LocalPlayer;
+            if (player == null) return result;
+            foreach (var obj in Services.Objects)
+            {
+                if (obj.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.EventNpc) continue;
+                var d = System.Numerics.Vector3.Distance(player.Position, obj.Position);
+                if (d > 12f) continue;
+                result.Add(Describe(obj) with { Distance = d });
+            }
+            result.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+        }
+        catch (Exception e) { errors.Add($"npcs: {e.Message}"); }
+        return result;
+    }
+
+    private static ObjectSnapshot Describe(Dalamud.Game.ClientState.Objects.Types.IGameObject obj)
+    {
+        var player = Services.Objects.LocalPlayer;
+        return new ObjectSnapshot
+        {
+            Name = obj.Name.TextValue,
+            Kind = obj.ObjectKind.ToString(),
+            EntityId = obj.EntityId,
+            DataId = obj.DataId,
+            Distance = player == null ? 0 : System.Numerics.Vector3.Distance(player.Position, obj.Position),
         };
     }
 

@@ -19,6 +19,11 @@ internal static class SnapshotSummary
         sb.AppendLine($"queue: {s.Queue.State} pos={s.Queue.Position} popped={s.Queue.PoppedContentId} queued=[{string.Join(",", s.Queue.QueuedContentIds)}]");
 
         sb.AppendLine("agents: " + string.Join("  ", s.Agents.Select(a => $"{a.Name}={(a.Active ? "active/addon" + a.AddonId : "off")}")));
+        sb.AppendLine(s.Target == null
+            ? "target: none"
+            : $"target: \"{s.Target.Name}\" {s.Target.Kind} dataId={s.Target.DataId} entity=0x{s.Target.EntityId:X} {s.Target.Distance:0.0}m");
+        if (s.NearbyNpcs.Count > 0)
+            sb.AppendLine("npcs nearby: " + string.Join("  ", s.NearbyNpcs.Take(8).Select(n => $"\"{n.Name}\"(dataId {n.DataId}, {n.Distance:0.0}m)")));
 
         sb.AppendLine("addons:");
         foreach (var a in s.Addons)

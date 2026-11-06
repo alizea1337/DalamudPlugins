@@ -27,7 +27,20 @@ public sealed record GameSnapshot
     public List<CastSnapshot> Casts { get; init; } = new();
     public CurrencySnapshot Currency { get; init; } = new();
     public QueueSnapshot Queue { get; init; } = new();
+    public ObjectSnapshot? Target { get; init; }
+    /// <summary>Event NPCs within 12 m of the player, nearest first.</summary>
+    public List<ObjectSnapshot> NearbyNpcs { get; init; } = new();
     public List<string> Errors { get; init; } = new();
+}
+
+public sealed record ObjectSnapshot
+{
+    public string Name { get; init; } = "";
+    public string Kind { get; init; } = "";
+    public uint EntityId { get; init; }
+    /// <summary>Sheet id (ENpcResident / BNpcBase); stable across languages.</summary>
+    public uint DataId { get; init; }
+    public float Distance { get; init; }
 }
 
 public sealed record AddonSnapshot

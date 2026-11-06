@@ -18,4 +18,6 @@ internal sealed class Services
     [PluginService] internal static INotificationManager Notifications { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
+    [PluginService] internal static ITargetManager Targets { get; private set; } = null!;
+    [PluginService] internal static IPartyList Party { get; private set; } = null!;
 }
