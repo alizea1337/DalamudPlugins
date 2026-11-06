@@ -86,12 +86,22 @@ internal sealed class AutomationPage : Page
         Widgets.SectionLabel("KEYBOUND COFFERS");
         if (Widgets.BeginCard("coffers"))
         {
-            Widgets.Row("Open carried Keybound Coffers", "Opens them one at a time while you are out of combat. Never starts on its own.",
-                110 * Widgets.Scale, Widgets.FrameHeight, () =>
+            var coffers = Controller.Coffers;
+            var carried = coffers.Count();
+            var desc = coffers.Running ? coffers.Status : coffers.Status.Length > 0 ? coffers.Status : $"{carried} carried. Opens them one at a time while you are out of combat. Never starts on its own.";
+            Widgets.Row("Open carried Keybound Coffers", desc, 110 * Widgets.Scale, Widgets.FrameHeight, () =>
+            {
+                if (coffers.Running)
                 {
-                    if (Widgets.Button("Open all##coffers", Widgets.ButtonStyle.Default, null, Theme.Icon.PackageOpen))
-                        Services.Log.Information("Coffer opener requested (lands with milestone 3)");
-                }, Theme.Icon.Gift);
+                    if (Widgets.Button("Stop##coffers", Widgets.ButtonStyle.Destructive, null, Theme.Icon.Square)) coffers.Stop("Stopped");
+                }
+                else
+                {
+                    if (carried == 0) ImGui.BeginDisabled();
+                    if (Widgets.Button("Open all##coffers", Widgets.ButtonStyle.Default, null, Theme.Icon.PackageOpen)) coffers.Start();
+                    if (carried == 0) ImGui.EndDisabled();
+                }
+            }, Theme.Icon.Gift);
             Widgets.EndCard();
         }
 

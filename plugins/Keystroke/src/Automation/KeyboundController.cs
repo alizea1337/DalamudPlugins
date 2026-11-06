@@ -25,6 +25,9 @@ internal sealed unsafe class KeyboundController : IAutomationController
     private readonly Func<Configuration> config;
     private readonly KeySender keys = new();
     private readonly Typist typist;
+    private readonly QueueDriver queue;
+    private DateTime leaveAt = DateTime.MaxValue;
+    private int loopStartGames;
 
     private Phase phase = Phase.Idle;
     private DateTime nextAt = DateTime.MinValue;
@@ -39,6 +42,7 @@ internal sealed unsafe class KeyboundController : IAutomationController
     private bool wasInDuty;
     private bool resultCounted;
     private bool loopActive;
+    private bool wasInLobby;
 
     public AutomationState State { get; private set; } = AutomationState.Idle;
     public string StatusDetail { get; private set; } = "Ready";
@@ -47,12 +51,14 @@ internal sealed unsafe class KeyboundController : IAutomationController
     public int LoopRemaining { get; private set; }
     public SessionStats Session { get; } = new();
     public string? LastError { get; private set; }
+    public CofferOpener Coffers { get; } = new();
     public KeyboundBoard Board => board;
 
     public KeyboundController(Func<Configuration> config)
     {
         this.config = config;
         typist = new Typist(() => config().Typing);
+        queue = new QueueDriver(config);
     }
 
     // ------------------------------------------------------------------ commands
@@ -61,28 +67,58 @@ internal sealed unsafe class KeyboundController : IAutomationController
     {
         LastError = null;
         loopActive = false;
-        if (board.InDuty) BeginPlaying();
-        else SetState(AutomationState.WaitingForDuty, "Enter the Keybound Brawler duty to begin");
+        LoopRemaining = 0;
+        loopStartGames = Session.GamesCompleted;
+        Arm();
     }
 
     public void StartLoop(int games)
     {
+        LastError = null;
         LoopRemaining = Math.Max(1, games);
         loopActive = true;
-        Start();
+        loopStartGames = Session.GamesCompleted;
+        Arm();
+    }
+
+    public void StartUnlimited()
+    {
+        LastError = null;
+        LoopRemaining = -1;
+        loopActive = true;
+        loopStartGames = Session.GamesCompleted;
+        Arm();
+    }
+
+    /// <summary>Begin playing if in the duty, queue if in the lobby, otherwise wait.</summary>
+    private void Arm()
+    {
+        if (board.InDuty) { BeginPlaying(); return; }
+        if (InLobby && (loopActive || config().Automation.AutoQueueOnLobbyEntry)) { BeginQueue(); return; }
+        SetState(AutomationState.WaitingForDuty, InLobby ? "Press Start again or enable auto-queue to register" : "Enter the Keybound Brawler duty to begin");
+    }
+
+    private bool InLobby => Keybound.IsLobby((ushort)Services.ClientState.TerritoryType);
+
+    private void BeginQueue()
+    {
+        queue.Begin();
+        SetState(AutomationState.Queued, queue.Status);
     }
 
     public void Pause()
     {
         if (State is AutomationState.Playing or AutomationState.WaitingForDuty or AutomationState.Queued)
+        {
+            if (State == AutomationState.Queued) queue.Reset();
             SetState(AutomationState.Paused, "Paused");
+        }
     }
 
     public void Resume()
     {
         if (State != AutomationState.Paused) return;
-        if (board.InDuty) BeginPlaying();
-        else SetState(AutomationState.WaitingForDuty, "Enter the Keybound Brawler duty to begin");
+        Arm();
     }
 
     public void Stop()
@@ -93,6 +129,8 @@ internal sealed unsafe class KeyboundController : IAutomationController
         answer = "";
         progress = 0;
         phase = Phase.Idle;
+        leaveAt = DateTime.MaxValue;
+        queue.Reset();
         SetState(AutomationState.Idle, "Ready");
     }
 
@@ -105,7 +143,10 @@ internal sealed unsafe class KeyboundController : IAutomationController
         lastTick = now;
 
         board = KeyboundReader.Read();
+        Coffers.Tick();
         HandleTransitions();
+        TickQueue(now);
+        TickResult(now);
 
         if (State != AutomationState.Playing) return;
         Session.TypingTime += dt;
@@ -151,15 +192,31 @@ internal sealed unsafe class KeyboundController : IAutomationController
             target = null;
             answer = "";
             progress = 0;
+            leaveAt = DateTime.MaxValue;
             if (State is AutomationState.Playing or AutomationState.Finishing)
             {
-                if (loopActive && LoopRemaining > 0)
-                    SetState(AutomationState.WaitingForDuty, $"Waiting for the next game ({LoopRemaining} left)");
+                if (loopActive && LoopRemaining != 0)
+                    SetState(AutomationState.WaitingForDuty, LoopRemaining > 0 ? $"Waiting for the next game ({LoopRemaining} left)" : "Waiting for the next game");
                 else
                     SetState(AutomationState.Idle, "Ready");
             }
         }
         wasInDuty = inDuty;
+
+        var inLobby = InLobby;
+        if (inLobby && !wasInLobby)
+        {
+            // Arrived in Keybound Square: continue a loop, or auto-queue if the user asked for that.
+            if (State == AutomationState.WaitingForDuty && loopActive) BeginQueue();
+            else if (State == AutomationState.Idle && config().Automation.AutoQueueOnLobbyEntry)
+            {
+                LoopRemaining = -1;
+                loopActive = true;
+                loopStartGames = Session.GamesCompleted;
+                BeginQueue();
+            }
+        }
+        wasInLobby = inLobby;
 
         if (inDuty && board.ResultVisible && !resultCounted)
         {
@@ -167,7 +224,62 @@ internal sealed unsafe class KeyboundController : IAutomationController
             Session.GamesCompleted++;
             if (loopActive && LoopRemaining > 0) LoopRemaining--;
             Services.Log.Information("Game completed (session total {Count})", Session.GamesCompleted);
+
+            if (loopActive)
+            {
+                var why = LoopRemaining == 0 ? "count reached" : "";
+                if (why.Length > 0 || StopConditionMet(out why))
+                {
+                    loopActive = false;
+                    LoopRemaining = 0;
+                    Services.Log.Information("Loop finished: {Why}", why);
+                }
+            }
+            if (config().Automation.AutoLeaveAfterResult)
+                leaveAt = DateTime.UtcNow + TimeSpan.FromMilliseconds(2500 + Random.Shared.Next(2500));
         }
+    }
+
+    private void TickQueue(DateTime now)
+    {
+        if (State != AutomationState.Queued) return;
+        if (!InLobby)
+        {
+            if (board.InDuty) return; // HandleTransitions switches to Playing
+            SetState(AutomationState.WaitingForDuty, "Return to Keybound Square to queue");
+            queue.Reset();
+            return;
+        }
+        queue.Tick();
+        StatusDetail = queue.Status;
+        if (queue.Current == QueueDriver.Phase.Failed) Fail(queue.Error ?? "Queueing failed");
+    }
+
+    private void TickResult(DateTime now)
+    {
+        if (!board.InDuty || !board.ResultVisible || now < leaveAt) return;
+        leaveAt = DateTime.MaxValue;
+        if (!AtkClicker.ClickButton(Keybound.ResultAddon, Keybound.ResultExitButton))
+            Services.Log.Warning("Could not press Exit on the result screen; the game will time out on its own");
+    }
+
+    private bool StopConditionMet(out string why)
+    {
+        var sc = config().Automation.StopConditions;
+        why = "";
+        if (sc.StopAfterGamesEnabled && Session.GamesCompleted - loopStartGames >= sc.StopAfterGames) { why = $"{sc.StopAfterGames} games played"; return true; }
+        if (sc.StopAtMgpEnabled)
+        {
+            var mgp = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance()->GetInventoryItemCount(Keybound.MgpItemId);
+            if (mgp >= sc.StopAtMgp) { why = $"MGP reached {mgp:N0}"; return true; }
+        }
+        if (sc.StopAtTimeEnabled)
+        {
+            var local = DateTime.Now;
+            var target = new DateTime(local.Year, local.Month, local.Day, sc.StopAtHour, sc.StopAtMinute, 0);
+            if (local >= target) { why = $"it is past {sc.StopAtHour:00}:{sc.StopAtMinute:00}"; return true; }
+        }
+        return false;
     }
 
     private void BeginPlaying()

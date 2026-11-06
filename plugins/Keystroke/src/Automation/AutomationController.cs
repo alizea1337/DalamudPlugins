@@ -43,68 +43,27 @@ public sealed class SessionStats
     }
 }
 
-/// <summary>
-/// What the UI talks to. The real engine lands in later milestones; the UI never reaches
-/// past this surface.
-/// </summary>
+/// <summary>What the UI talks to. The UI never reaches past this surface.</summary>
 internal interface IAutomationController
 {
     AutomationState State { get; }
     string StatusDetail { get; }
     string CurrentPrompt { get; }
     string CurrentAnswer { get; }
+    /// <summary>Games left in a counted loop; -1 while repeating without a limit; 0 when not looping.</summary>
     int LoopRemaining { get; }
     SessionStats Session { get; }
     string? LastError { get; }
+    CofferOpener Coffers { get; }
 
+    /// <summary>Play the current/next game once (queues first if in the lobby and auto-queue is on).</summary>
     void Start();
+    /// <summary>Queue and play this many games, then stop.</summary>
     void StartLoop(int games);
+    /// <summary>Queue and play until stopped or a stop condition is met.</summary>
+    void StartUnlimited();
     void Pause();
     void Resume();
     void Stop();
     void Tick();
-}
-
-/// <summary>Milestone-1 placeholder: tracks requested state so the UI can be exercised without the engine.</summary>
-internal sealed class StubAutomationController : IAutomationController
-{
-    public AutomationState State { get; private set; } = AutomationState.Idle;
-    public string StatusDetail { get; private set; } = "Engine not implemented yet";
-    public string CurrentPrompt => "";
-    public string CurrentAnswer => "";
-    public int LoopRemaining { get; private set; }
-    public SessionStats Session { get; } = new();
-    public string? LastError => null;
-
-    public void Start()
-    {
-        State = AutomationState.WaitingForDuty;
-        StatusDetail = "Waiting for the Keybound Brawler duty";
-        Services.Log.Information("Start requested");
-    }
-
-    public void StartLoop(int games)
-    {
-        LoopRemaining = games;
-        Start();
-    }
-
-    public void Pause()
-    {
-        if (State is AutomationState.Playing or AutomationState.WaitingForDuty) State = AutomationState.Paused;
-    }
-
-    public void Resume()
-    {
-        if (State == AutomationState.Paused) State = AutomationState.WaitingForDuty;
-    }
-
-    public void Stop()
-    {
-        State = AutomationState.Idle;
-        LoopRemaining = 0;
-        StatusDetail = "Engine not implemented yet";
-    }
-
-    public void Tick() { }
 }

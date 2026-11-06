@@ -54,6 +54,8 @@ internal sealed class DashboardPage : Page
             }
             if (Controller.LoopRemaining > 0)
                 Widgets.Caption($"{Controller.LoopRemaining} games remaining in loop");
+            else if (Controller.LoopRemaining < 0)
+                Widgets.Caption("Repeating until stopped");
             ImGui.Dummy(new Vector2(0, 8 * s));
             DrawTransport(state, s);
             ImGui.EndGroup();
@@ -145,6 +147,10 @@ internal sealed class DashboardPage : Page
         if (Widgets.Button("Loop##loop", Widgets.ButtonStyle.Default, null, Theme.Icon.Repeat) && !running)
             Controller.StartLoop(loopCount);
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play this many games, then stop.");
+        ImGui.SameLine(0, 6 * s);
+        if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, null, Theme.Icon.RefreshCw) && !running)
+            Controller.StartUnlimited();
+        if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play until you stop it or a stop condition is met.");
         ImGui.EndGroup();
     }
 }

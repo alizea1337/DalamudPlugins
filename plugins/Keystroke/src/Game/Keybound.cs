@@ -24,6 +24,9 @@ internal static class Keybound
         => name.Contains("Sensory Jammer", System.StringComparison.OrdinalIgnoreCase)
         || name.Contains("Cursed Gaze", System.StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Keybound Registrar event NPC (ENpcResident), verified 2026-11-06.</summary>
+    public const uint RegistrarDataId = 1058751;
+
     // Button component node ids (verified 2026-11-06)
     public const uint RegisterDialogRegisterButton = 9;
     public const uint ContentsFinderCommenceButton = 63;

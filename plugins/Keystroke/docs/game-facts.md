@@ -14,7 +14,7 @@ originated as hints from third-party plugins are treated as unverified until see
 | Keybound Brawler duty territory (`TerritoryType`) | 1359 (`w1en`, place "The Gold Saucer") | **verified 2026-11-06** |
 | Keybound Brawler lobby territory (`TerritoryType`) | 1360 (`w1eo`, place "Keybound Square") | **verified 2026-11-06** |
 | `ContentFinderCondition` row for the duty | 1095 | unverified |
-| Registrar NPC | `ENpcResident` row to be found via Lumina (do not match by English name) | todo |
+| Registrar NPC | EventNpc **DataId 1058751** ("Keybound Registrar"); neighbours: Magitype Master 1058752, Captivated Customer 1058757 | **verified 2026-11-06** |
 | Leave-duty confirmation text | `Addon` sheet row 17854 | unverified |
 
 ## Addons (`AtkUnitBase` names)
