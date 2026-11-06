@@ -73,7 +73,7 @@ internal sealed class DashboardPage : Page
         if (Widgets.BeginCard("session"))
         {
             ImGui.Dummy(new Vector2(0, 4 * s));
-            var w = ImGui.GetContentRegionAvail().X / 4;
+            var w = Widgets.ContentWidth / 4;
             Widgets.StatTile("Games", stats.GamesCompleted.ToString(), null, w);
             ImGui.SameLine();
             Widgets.StatTile("MGP gained", stats.MgpGained.ToString("N0"), Theme.Theme.Green, w);
@@ -98,7 +98,7 @@ internal sealed class DashboardPage : Page
         if (Widgets.BeginCard("lifetime"))
         {
             ImGui.Dummy(new Vector2(0, 4 * s));
-            var w = ImGui.GetContentRegionAvail().X / 4;
+            var w = Widgets.ContentWidth / 4;
             Widgets.StatTile("Games", hist.TotalGames.ToString("N0"), null, w);
             ImGui.SameLine();
             Widgets.StatTile("MGP", hist.TotalMgp.ToString("N0"), Theme.Theme.Green, w);
@@ -118,7 +118,7 @@ internal sealed class DashboardPage : Page
     {
         var days = hist.LastDays(14);
         var max = Math.Max(1, days.Max(d => d.Mgp));
-        var width = ImGui.GetContentRegionAvail().X;
+        var width = Widgets.ContentWidth;
         var height = 96 * s;
         var pos = ImGui.GetCursorScreenPos();
         var dl = ImGui.GetWindowDrawList();

@@ -21,6 +21,8 @@ public sealed class Plugin : IDalamudPlugin
     internal HotkeyService Hotkeys { get; }
     internal InspectorWindow Inspector { get; }
     internal MainWindow Main { get; }
+    internal OverlayWindow Overlay { get; }
+    private readonly ActivityKeeper activity;
 
     private readonly WindowSystem windows = new("Keystroke");
     private readonly Fonts fonts;
@@ -54,8 +56,11 @@ public sealed class Plugin : IDalamudPlugin
             new AdvancedPage(this),
             new AboutPage(this),
         });
+        Overlay = new OverlayWindow(this);
+        activity = new ActivityKeeper(() => Config, Controller);
         windows.AddWindow(Main);
         windows.AddWindow(Inspector);
+        windows.AddWindow(Overlay);
 
         Services.Commands.AddHandler(Strings.Command, new CommandInfo(OnCommand) { HelpMessage = Strings.CommandHelp });
         pluginInterface.UiBuilder.Draw += windows.Draw;
@@ -98,6 +103,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             Hotkeys.Tick();
             Controller.Tick();
+            activity.Tick();
             Inspector.Tick();
 
             // Compact panel while inside the duty, previous layout restored on the way out.

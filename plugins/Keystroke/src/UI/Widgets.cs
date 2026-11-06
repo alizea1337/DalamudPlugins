@@ -148,6 +148,11 @@ internal static class Widgets
     /// <summary>Height of a standard single-line framed control (combo, slider, input) in the current style.</summary>
     public static float FrameHeight => ImGui.GetFrameHeight();
 
+    /// <summary>Usable width: the card's inner width while inside a card, otherwise the window's.</summary>
+    public static float ContentWidth => Cards.Count > 0
+        ? Cards.Peek().Width - 2 * Theme.Theme.CardPadding * Scale
+        : ImGui.GetContentRegionAvail().X;
+
     /// <summary>
     /// A settings row: label (+ optional description) on the left, a control drawn by <paramref name="control"/>
     /// right-aligned and vertically centred. The control must be <paramref name="controlWidth"/> ×
@@ -433,7 +438,7 @@ internal static class Widgets
     /// <summary>Key-value stat tile used on the dashboard.</summary>
     public static void StatTile(string label, string value, Vector4? valueColor = null, float width = 0f)
     {
-        var w = width > 0 ? width : ImGui.GetContentRegionAvail().X;
+        var w = width > 0 ? width : ContentWidth;
         ImGui.BeginGroup();
         using (F.Caption.Push()) ImGui.TextColored(Theme.Theme.SecondaryLabel, label);
         using (F.Title.Push()) Text(value, valueColor);
