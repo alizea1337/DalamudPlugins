@@ -5,7 +5,7 @@
     "InternalName": "Keystroke",
     "Punchline": "Automates Keybound Brawler typing with humanized input, auto-queue and reward tracking.",
     "Description": "Keystroke reads Keybound Brawler prompts and types the answers for you, with humanized timing by default and an optional instant mode. Auto-queue loops with stop conditions, opens Keybound Coffers, tracks MGP/MGC gains, warns before the MGC cap, and offers global hotkeys and a compact in-duty overlay. Open /keystroke to get started.",
-    "Changelog": "First testing release.\n\n- Typing engine with Relaxed / Normal / Skilled / Custom profiles based on measured human typing\n  and reaction data, plus an opt-in Instant mode. Types in the background without game focus.\n- Smart targeting: barrier phrase first in the boss phase, casting enemies next, weakest after.\n- Auto-queue from Keybound Square (Register → Commence), counted loops, Repeat, stop conditions\n  (games, MGP target, time of day), auto-leave after the result screen, party auto-commence.\n- Keybound Coffer opener.\n- Session and lifetime rewards tracking with a 14-day MGP chart; MGC cap warning.\n- Alerts via in-game toast, chat and sound effect.\n- Global hotkeys that work while the game is unfocused; compact view; overlay pill.\n- Dark macOS-style interface with optional glass transparency.\n- Inspector for verifying game state and reporting problems.\r\n",
+    "Changelog": "First stable release. Everything from the 0.1.0 testing build, verified in play: typing,\ntargeting, Cursed Gaze / Sensory Jammer pauses, auto-queue and commence, auto-leave, rewards\ntracking, alerts, overlay and anti-AFK.\n\n- Fix: wrong words are cleared with Esc instead of backspacing.\n- Skilled profile raised to about 105 WPM.\n- Uses the current Dalamud object API (BaseId).\r\n",
     "Tags": [
       "gold saucer",
       "keybound brawler",
@@ -25,13 +25,13 @@
     "AcceptsFeedback": true,
     "FeedbackMessage": null,
     "IsHide": false,
-    "IsTestingExclusive": true,
-    "AssemblyVersion": null,
-    "DownloadLinkInstall": null,
-    "DownloadLinkUpdate": null,
-    "TestingAssemblyVersion": "0.1.0.0",
-    "TestingDalamudApiLevel": 15,
-    "DownloadLinkTesting": "https://github.com/alizea1337/DalamudPlugins/releases/download/Keystroke-v0.1.0-testing/latest.zip",
-    "LastUpdate": 1793998979
+    "IsTestingExclusive": false,
+    "AssemblyVersion": "1.0.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Keystroke-v1.0.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Keystroke-v1.0.0/latest.zip",
+    "TestingAssemblyVersion": null,
+    "TestingDalamudApiLevel": null,
+    "DownloadLinkTesting": null,
+    "LastUpdate": 1793999524
   }
 ]
