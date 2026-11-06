@@ -137,18 +137,21 @@ internal sealed class DashboardPage : Page
             if (Widgets.CircleButton("##stop", Theme.Icon.Square, 44, Theme.Theme.WithAlpha(Theme.Theme.Red, 0.22f), Theme.Theme.Red, "Stop")) Controller.Stop();
         }
 
+        // Count field and loop buttons share one frame height, centred on the 44 px transport circles.
+        var h = Widgets.FrameHeight;
+        var rowTop = ImGui.GetCursorPosY();
         ImGui.SameLine(0, 18 * s);
         ImGui.BeginGroup();
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 9 * s);
+        ImGui.SetCursorPosY(rowTop + (44 * s - h) / 2);
         ImGui.SetNextItemWidth(70 * s);
         ImGui.InputInt("##loopcount", ref loopCount, 0, 0);
         loopCount = Math.Clamp(loopCount, 1, 999);
         ImGui.SameLine(0, 6 * s);
-        if (Widgets.Button("Loop##loop", Widgets.ButtonStyle.Default, null, Theme.Icon.Repeat) && !running)
+        if (Widgets.Button("Loop##loop", Widgets.ButtonStyle.Default, new Vector2(78 * s, h), Theme.Icon.Repeat) && !running)
             Controller.StartLoop(loopCount);
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play this many games, then stop.");
         ImGui.SameLine(0, 6 * s);
-        if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, null, Theme.Icon.RefreshCw) && !running)
+        if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, new Vector2(92 * s, h), Theme.Icon.RefreshCw) && !running)
             Controller.StartUnlimited();
         if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play until you stop it or a stop condition is met.");
         ImGui.EndGroup();
