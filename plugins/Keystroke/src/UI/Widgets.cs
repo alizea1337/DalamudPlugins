@@ -157,7 +157,10 @@ internal static class Widgets
     {
         var rowH = (description == null ? Theme.Theme.RowHeight : Theme.Theme.RowHeight + 14) * Scale;
         var start = ImGui.GetCursorPos();
-        var avail = ImGui.GetContentRegionAvail().X;
+        // Inside a card the usable width is the card's inner width, not the window's.
+        var avail = Cards.Count > 0
+            ? Cards.Peek().Width - 2 * Theme.Theme.CardPadding * Scale
+            : ImGui.GetContentRegionAvail().X;
 
         // Label block
         var textX = start.X;

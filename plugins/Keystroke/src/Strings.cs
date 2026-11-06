@@ -17,6 +17,7 @@ internal static class Strings
     public const string RewardsAlerts = "Rewards & Alerts";
     public const string Hotkeys = "Hotkeys";
     public const string Overlay = "Overlay";
+    public const string Appearance = "Appearance";
     public const string Advanced = "Advanced";
     public const string About = "About";
 

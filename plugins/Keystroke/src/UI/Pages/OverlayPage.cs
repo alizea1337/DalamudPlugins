@@ -31,9 +31,9 @@ internal sealed class OverlayPage : Page
             v = o.ClickThroughWhenLocked;
             if (Widgets.ToggleRow("Click through when locked", ref v, null, Theme.Icon.Crosshair)) { o.ClickThroughWhenLocked = v; changed = true; }
             Widgets.RowSeparator();
-            var op = o.Opacity;
+            var op = (int)System.Math.Round(o.Opacity * 100);
             Widgets.Row("Opacity", null, 220 * s, Widgets.FrameHeight,
-                () => { if (Widgets.SliderFloat("##op", ref op, 0.2f, 1f, "%.0f %%", 220)) { o.Opacity = op; changed = true; } }, Theme.Icon.Layers);
+                () => { if (Widgets.SliderInt("##op", ref op, 20, 100, "%d %%", 220)) { o.Opacity = op / 100f; changed = true; } }, Theme.Icon.Layers);
             Widgets.EndCard();
         }
 

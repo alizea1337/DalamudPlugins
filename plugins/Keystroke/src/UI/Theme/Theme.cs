@@ -10,11 +10,31 @@ namespace Keystroke.UI.Theme;
 /// </summary>
 internal static class Theme
 {
-    // Surfaces
-    public static readonly Vector4 WindowBg = Rgb(0x1C, 0x1C, 0x1E);
-    public static readonly Vector4 SidebarBg = Rgb(0x22, 0x22, 0x25);
-    public static readonly Vector4 CardBg = Rgb(0x2C, 0x2C, 0x2E);
+    // Surfaces (opaque base values; Configure() applies the glass transparency)
+    private static readonly Vector4 WindowBgBase = Rgb(0x1C, 0x1C, 0x1E);
+    private static readonly Vector4 SidebarBgBase = Rgb(0x22, 0x22, 0x25);
+    private static readonly Vector4 CardBgBase = Rgb(0x2C, 0x2C, 0x2E);
+
+    public static Vector4 WindowBg { get; private set; } = WindowBgBase;
+    public static Vector4 SidebarBg { get; private set; } = SidebarBgBase;
+    public static Vector4 CardBg { get; private set; } = CardBgBase;
     public static readonly Vector4 CardBgHover = Rgb(0x33, 0x33, 0x36);
+
+    /// <summary>
+    /// Applies the appearance settings. Transparency lowers the alpha of the window and sidebar so
+    /// the game shows through; cards keep more opacity so rows stay legible on busy backgrounds.
+    /// ImGui cannot blur what is behind a window, so this is translucency, not a backdrop blur.
+    /// </summary>
+    public static void Configure(AppearanceSettings a)
+    {
+        var t = a.Glass ? Math.Clamp(a.Transparency, 0f, 1f) : 0f;
+        var windowAlpha = 1f - t * 0.55f;      // never below 0.45 so text stays readable
+        var sidebarAlpha = 1f - t * 0.45f;
+        var cardAlpha = a.ContrastCards ? 1f - t * 0.25f : 1f - t * 0.55f;
+        WindowBg = WithAlpha(WindowBgBase, windowAlpha);
+        SidebarBg = WithAlpha(SidebarBgBase, sidebarAlpha);
+        CardBg = WithAlpha(CardBgBase, cardAlpha);
+    }
     public static readonly Vector4 ControlBg = Rgb(0x3A, 0x3A, 0x3D);
     public static readonly Vector4 ControlBgHover = Rgb(0x48, 0x48, 0x4C);
     public static readonly Vector4 ControlBgActive = Rgb(0x55, 0x55, 0x5A);

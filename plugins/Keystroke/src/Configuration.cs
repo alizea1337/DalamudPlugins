@@ -16,6 +16,7 @@ public sealed class Configuration : IPluginConfiguration
     public HotkeySettings Hotkeys { get; set; } = new();
     public OverlaySettings Overlay { get; set; } = new();
     public AdvancedSettings Advanced { get; set; } = new();
+    public AppearanceSettings Appearance { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
 
     public void Save() => Services.PluginInterface.SavePluginConfig(this);
@@ -30,9 +31,21 @@ public sealed class Configuration : IPluginConfiguration
         config.Hotkeys ??= new();
         config.Overlay ??= new();
         config.Advanced ??= new();
+        config.Appearance ??= new();
         config.Window ??= new();
         return config;
     }
+}
+
+[Serializable]
+public sealed class AppearanceSettings
+{
+    /// <summary>Let the game show through the window and sidebar (macOS vibrancy look).</summary>
+    public bool Glass { get; set; } = true;
+    /// <summary>0 = fully opaque, 1 = as see-through as still readable.</summary>
+    public float Transparency { get; set; } = 0.25f;
+    /// <summary>Lift cards slightly so they stay readable on busy backgrounds.</summary>
+    public bool ContrastCards { get; set; } = true;
 }
 
 [Serializable]

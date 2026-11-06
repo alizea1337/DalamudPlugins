@@ -17,7 +17,7 @@ internal sealed class HotkeyService
     private const int VkRWin = 0x5C;
     private static readonly TimeSpan RepeatGuard = TimeSpan.FromMilliseconds(300);
 
-    private readonly Configuration config;
+    private readonly Func<Configuration> config;
     private readonly Dictionary<HotkeyBinding, DateTime> lastFired = new();
     private readonly HashSet<HotkeyBinding> held = new();
 
@@ -29,13 +29,13 @@ internal sealed class HotkeyService
     /// <summary>While true, Tick does not fire bindings (the Hotkeys page is capturing a new one).</summary>
     public bool Suspended { get; set; }
 
-    public HotkeyService(Configuration config) => this.config = config;
+    public HotkeyService(Func<Configuration> config) => this.config = config;
 
     public void Tick()
     {
         if (Suspended) return;
         var focused = GameIsForeground();
-        var h = config.Hotkeys;
+        var h = config().Hotkeys;
         Check(h.StartStop, focused, StartStop);
         Check(h.PauseResume, focused, PauseResume);
         Check(h.ToggleOverlay, focused, ToggleOverlay);

@@ -29,12 +29,13 @@ public sealed class Plugin : IDalamudPlugin
     {
         pluginInterface.Create<Services>();
         Config = Configuration.Load();
+        Theme.Configure(Config.Appearance);
 
         fonts = new Fonts();
         Widgets.Init(fonts);
 
         Controller = new StubAutomationController();
-        Hotkeys = new HotkeyService(Config);
+        Hotkeys = new HotkeyService(() => Config);
         Hotkeys.StartStop += () => { if (Controller.State == AutomationState.Idle) Controller.Start(); else Controller.Stop(); };
         Hotkeys.PauseResume += () => { if (Controller.State == AutomationState.Paused) Controller.Resume(); else Controller.Pause(); };
         Hotkeys.ToggleOverlay += () => { Config.Overlay.Enabled = !Config.Overlay.Enabled; Config.Save(); };
@@ -49,6 +50,7 @@ public sealed class Plugin : IDalamudPlugin
             new RewardsAlertsPage(this),
             new HotkeysPage(this),
             new OverlayPage(this),
+            new AppearancePage(this),
             new AdvancedPage(this),
             new AboutPage(this),
         });
@@ -101,6 +103,7 @@ public sealed class Plugin : IDalamudPlugin
     internal void ResetConfiguration()
     {
         Config = new Configuration();
+        Theme.Configure(Config.Appearance);
         Config.Save();
         Services.Log.Information("Configuration reset to defaults");
     }
