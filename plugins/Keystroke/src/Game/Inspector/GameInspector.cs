@@ -94,7 +94,7 @@ internal static unsafe class GameInspector
             Name = obj.Name.TextValue,
             Kind = obj.ObjectKind.ToString(),
             EntityId = obj.EntityId,
-            DataId = obj.DataId,
+            DataId = obj.BaseId,
             Distance = player == null ? 0 : System.Numerics.Vector3.Distance(player.Position, obj.Position),
         };
     }

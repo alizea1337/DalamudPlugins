@@ -221,7 +221,7 @@ internal sealed unsafe class QueueDriver
         IGameObject? best = null;
         foreach (var obj in Services.Objects)
         {
-            if (obj.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.EventNpc || obj.DataId != Keybound.RegistrarDataId) continue;
+            if (obj.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.EventNpc || obj.BaseId != Keybound.RegistrarDataId) continue;
             var d = Vector3.Distance(player.Position, obj.Position);
             if (d < distance) { distance = d; best = obj; }
         }
