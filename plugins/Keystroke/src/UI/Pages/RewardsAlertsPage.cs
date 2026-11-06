@@ -57,8 +57,10 @@ internal sealed class RewardsAlertsPage : Page
             v = a.ChatEnabled;
             if (Widgets.ToggleRow("Chat message", ref v, null, Theme.Icon.Type)) { a.ChatEnabled = v; changed = true; }
             Widgets.RowSeparator();
-            v = a.WindowsToastEnabled;
-            if (Widgets.ToggleRow("Windows notification when the game is in the background", ref v, null, Theme.Icon.Monitor)) { a.WindowsToastEnabled = v; changed = true; }
+            ImGui.BeginDisabled();
+            v = false;
+            Widgets.ToggleRow("Windows notification when the game is in the background", ref v, "Not available yet; planned for a later version.", Theme.Icon.Monitor);
+            ImGui.EndDisabled();
             Widgets.EndCard();
         }
 
