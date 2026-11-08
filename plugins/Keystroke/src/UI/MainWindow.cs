@@ -140,11 +140,14 @@ internal sealed class MainWindow : Window
         if (Theme.Theme.Effects)
             Theme.Theme.DrawGlow(dl, new Vector2(railMin.X, tabsTop + barY + 4 * s), new Vector2(railMin.X + 2 * s, tabsTop + barY + tabH - 4 * s), Theme.Theme.AccentColor, 6 * s, 0.7f);
 
+        // No item spacing between tabs so their pitch matches tabH exactly (the bar relies on it).
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
         ImGui.SetCursorScreenPos(new Vector2(railMin.X, tabsTop));
         for (var i = 0; i < pages.Count; i++)
         {
             if (Widgets.RailTab("##tab" + i, pages[i].Icon, pages[i].Title, i == selected, railW)) selected = i;
         }
+        ImGui.PopStyleVar();
 
         // Rail footer: state dot + compact toggle
         var footerY = railMax.Y - 54 * s;
