@@ -48,7 +48,7 @@ Dalamud's dev plugin locations for testing.
 
 ## Third-party
 
-- [Inter](https://github.com/rsms/inter) — SIL Open Font License 1.1
+- [DejaVu Sans](https://dejavu-fonts.github.io) — Bitstream Vera / DejaVu license
 - [Lucide](https://lucide.dev) — ISC License
 - [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) — MIT License
 

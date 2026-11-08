@@ -40,12 +40,15 @@ public sealed class Configuration : IPluginConfiguration
 [Serializable]
 public sealed class AppearanceSettings
 {
-    /// <summary>Let the game show through the window and sidebar (macOS vibrancy look).</summary>
-    public bool Glass { get; set; } = true;
-    /// <summary>0 = fully opaque, 1 = as see-through as still readable.</summary>
-    public float Transparency { get; set; } = 0.25f;
-    /// <summary>Lift cards slightly so they stay readable on busy backgrounds.</summary>
-    public bool ContrastCards { get; set; } = true;
+    public UI.Theme.Accent Accent { get; set; } = UI.Theme.Accent.Lime;
+    /// <summary>Glows, keycap presses, hover fades, stripe drift.</summary>
+    public bool Effects { get; set; } = true;
+    /// <summary>Keep state changes instant; no drifting or breathing animations.</summary>
+    public bool ReduceMotion { get; set; } = false;
+    /// <summary>Let the signal stripe drift slowly.</summary>
+    public bool AnimatedStripe { get; set; } = true;
+    /// <summary>Show the typed word as keycaps on the dashboard, compact panel and overlay.</summary>
+    public bool Keycaps { get; set; } = true;
 }
 
 [Serializable]

@@ -14,224 +14,154 @@ internal sealed class DashboardPage : Page
 
     public DashboardPage(Plugin plugin) : base(plugin) { }
 
-    public override string Title => Strings.Dashboard;
+    public override string Title => "dashboard";
     public override char Icon => Theme.Icon.LayoutDashboard;
 
     public override void Draw()
     {
-        var s = Widgets.Scale;
-        var state = Controller.State;
+        var s = Widgets.S;
+        var c = Controller;
+        var state = c.State;
         var (stateColor, stateLabel) = MainWindow.StateBadge(state);
 
-        Widgets.PageHeader(Strings.Dashboard, DateTime.Now.ToString("dddd, d MMMM"));
-
         if (!Services.ClientState.IsLoggedIn)
-            Widgets.Banner(Theme.Icon.Info, Theme.Theme.Accent, Strings.NotLoggedIn);
+            Widgets.Notice(Theme.Icon.Info, Theme.Theme.Info, "Log in to a character to get started.");
         else if (!Keybound.IsKeyboundArea((ushort)Services.ClientState.TerritoryType))
-            Widgets.Banner(Theme.Icon.Info, Theme.Theme.Accent, Strings.NotInKeybound);
+            Widgets.Notice(Theme.Icon.Info, Theme.Theme.Info, "Go to Keybound Square in the Gold Saucer; queueing and play start from there.");
 
-        // Transport card
-        if (Widgets.BeginCard("transport"))
+        Widgets.BeginColumns(2);
+
+        // ---- left: transport + keycaps
+        Widgets.BeginGroup("control");
+        Widgets.StatusDot(stateColor, stateLabel, state is AutomationState.Playing or AutomationState.Queued);
+        Widgets.Small(c.StatusDetail);
+        if (c.LastError != null && state == AutomationState.Error) Widgets.Small(c.LastError, Theme.Theme.Danger);
+        ImGui.Dummy(new Vector2(0, 6 * s));
+        DrawTransport(state, s);
+        ImGui.Dummy(new Vector2(0, 8 * s));
+
+        if (Config.Appearance.Keycaps)
         {
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            ImGui.BeginGroup();
-            DrawStateRing(stateColor, s);
-            ImGui.EndGroup();
-            ImGui.SameLine(0, 18 * s);
-            ImGui.BeginGroup();
-            using (Widgets.F.Title.Push()) ImGui.TextColored(stateColor, stateLabel);
-            Widgets.Secondary(Controller.StatusDetail);
-            if (Controller.LastError != null && state == AutomationState.Error)
-                Widgets.Caption(Controller.LastError, Theme.Theme.Red);
-            if (Controller.CurrentPrompt.Length > 0)
+            if (c.CurrentPrompt.Length > 0) Widgets.Keycaps(c.CurrentPrompt, c.CurrentAnswer.Length, 24f);
+            else
             {
-                // Word being typed, with the already-sent part highlighted.
-                var prompt = Controller.CurrentPrompt;
-                var done = Controller.CurrentAnswer.Length;
-                using var mono = Widgets.F.BodySemibold.Push();
-                ImGui.TextColored(Theme.Theme.Accent, prompt[..Math.Min(done, prompt.Length)]);
-                ImGui.SameLine(0, 0);
-                ImGui.TextColored(Theme.Theme.TertiaryLabel, prompt[Math.Min(done, prompt.Length)..]);
-            }
-            if (Controller.LoopRemaining > 0)
-                Widgets.Caption($"{Controller.LoopRemaining} games remaining in loop");
-            else if (Controller.LoopRemaining < 0)
-                Widgets.Caption("Repeating until stopped");
-            var ms = Controller.MeasuredMsPerKey;
-            if (ms > 0)
-                Widgets.Caption($"{ms:0} ms per key  ·  ≈{60000 / ms / 5:0} WPM  ·  {Config.Typing.Profile}{(Config.Typing.InstantMode ? " (Instant)" : "")}");
-            ImGui.Dummy(new Vector2(0, 8 * s));
-            DrawTransport(state, s);
-            ImGui.EndGroup();
-            ImGui.Dummy(new Vector2(0, 8 * s));
-            Widgets.EndCard();
-        }
-
-        // Stats
-        var stats = Controller.Session;
-        Widgets.SectionLabel("THIS SESSION");
-        if (Widgets.BeginCard("session"))
-        {
-            ImGui.Dummy(new Vector2(0, 4 * s));
-            var w = Widgets.ContentWidth / 4;
-            Widgets.StatTile("Games", stats.GamesCompleted.ToString(), null, w);
-            ImGui.SameLine();
-            Widgets.StatTile("MGP gained", stats.MgpGained.ToString("N0"), Theme.Theme.Green, w);
-            ImGui.SameLine();
-            Widgets.StatTile("MGC gained", stats.MgcGained.ToString("N0"), Theme.Theme.Purple, w);
-            ImGui.SameLine();
-            Widgets.StatTile("Games / hour", stats.GamesPerHour.ToString("0.0"), null, w);
-            ImGui.Dummy(new Vector2(0, 10 * s));
-            Widgets.StatTile("WPM", stats.WordsPerMinute.ToString("0"), null, w);
-            ImGui.SameLine();
-            Widgets.StatTile("Accuracy", (stats.Accuracy * 100).ToString("0.0") + "%", null, w);
-            ImGui.SameLine();
-            Widgets.StatTile("MGP / hour", stats.MgpPerHour.ToString("N0"), null, w);
-            ImGui.SameLine();
-            Widgets.StatTile("Since", stats.StartedAt.ToString("HH:mm"), null, w);
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            Widgets.EndCard();
-        }
-
-        var hist = Controller.History;
-        Widgets.SectionLabel("LIFETIME");
-        if (Widgets.BeginCard("lifetime"))
-        {
-            ImGui.Dummy(new Vector2(0, 4 * s));
-            var w = Widgets.ContentWidth / 4;
-            Widgets.StatTile("Games", hist.TotalGames.ToString("N0"), null, w);
-            ImGui.SameLine();
-            Widgets.StatTile("MGP", hist.TotalMgp.ToString("N0"), Theme.Theme.Green, w);
-            ImGui.SameLine();
-            Widgets.StatTile("MGC", hist.TotalMgc.ToString("N0"), Theme.Theme.Purple, w);
-            ImGui.SameLine();
-            Widgets.StatTile("Best WPM", hist.BestWpm.ToString("0"), null, w);
-            ImGui.Dummy(new Vector2(0, 10 * s));
-            DrawHistoryChart(hist, s);
-            ImGui.Dummy(new Vector2(0, 4 * s));
-            Widgets.EndCard();
-        }
-    }
-
-    /// <summary>MGP per day for the last 14 days as rounded bars, drawn with the draw list.</summary>
-    private static void DrawHistoryChart(Rewards.RewardStore hist, float s)
-    {
-        var days = hist.LastDays(14);
-        var max = Math.Max(1, days.Max(d => d.Mgp));
-        var width = Widgets.ContentWidth;
-        var height = 96 * s;
-        var pos = ImGui.GetCursorScreenPos();
-        var dl = ImGui.GetWindowDrawList();
-        var gap = 6 * s;
-        var barW = (width - gap * (days.Count - 1)) / days.Count;
-        var labelH = ImGui.GetTextLineHeight();
-        var chartH = height - labelH - 4 * s;
-
-        using (Widgets.F.Caption.Push())
-        {
-            ImGui.TextColored(Theme.Theme.SecondaryLabel, "MGP per day, last 14 days");
-        }
-        pos = ImGui.GetCursorScreenPos();
-
-        // Baseline
-        dl.AddLine(pos + new Vector2(0, chartH), pos + new Vector2(width, chartH), Theme.Theme.U32(Theme.Theme.Separator));
-
-        for (var i = 0; i < days.Count; i++)
-        {
-            var d = days[i];
-            var x = pos.X + i * (barW + gap);
-            var h = (float)(d.Mgp / (double)max) * (chartH - 6 * s);
-            var isToday = i == days.Count - 1;
-            var top = new Vector2(x, pos.Y + chartH - h);
-            var bottom = new Vector2(x + barW, pos.Y + chartH);
-            var col = d.Mgp > 0 ? (isToday ? Theme.Theme.Accent : Theme.Theme.WithAlpha(Theme.Theme.Accent, 0.55f)) : Theme.Theme.WithAlpha(Theme.Theme.Label, 0.06f);
-            if (h < 3 * s) top.Y = bottom.Y - 3 * s;
-            dl.AddRectFilled(top, bottom, Theme.Theme.U32(col), 4 * s);
-
-            // Hover tooltip
-            ImGui.SetCursorScreenPos(new Vector2(x, pos.Y));
-            ImGui.InvisibleButton("##bar" + i, new Vector2(barW, chartH));
-            if (ImGui.IsItemHovered())
-                Widgets.Tooltip($"{d.Day:ddd d MMM}\n{d.Games} games · {d.Mgp:N0} MGP · {d.Mgc:N0} MGC");
-
-            // Day label every other day to keep it airy
-            if (i % 2 == 1 || isToday)
-            {
-                var label = isToday ? "Today" : d.Day.ToString("d/M");
-                using var cap = Widgets.F.Caption.Push();
-                var ts = ImGui.CalcTextSize(label);
-                dl.AddText(new Vector2(x + (barW - ts.X) / 2, pos.Y + chartH + 4 * s), Theme.Theme.U32(Theme.Theme.TertiaryLabel), label);
+                Widgets.Keycaps("keystroke", state == AutomationState.Playing ? 9 : 0, 24f);
+                Widgets.Small("the word being typed shows here as keycaps");
             }
         }
-        ImGui.SetCursorScreenPos(pos + new Vector2(0, height));
-        ImGui.Dummy(new Vector2(width, 0));
-    }
+        else if (c.CurrentPrompt.Length > 0)
+        {
+            using var b = Widgets.F.Bold.Push();
+            Widgets.Text(c.CurrentPrompt, Theme.Theme.AccentText);
+        }
+        var ms = c.MeasuredMsPerKey;
+        if (ms > 0) Widgets.Small($"{ms:0} ms per key · {60000 / ms / 5:0} wpm · {Config.Typing.Profile.ToString().ToLowerInvariant()}{(Config.Typing.InstantMode ? " (instant)" : "")}");
+        Widgets.EndGroup();
 
-    private static void DrawStateRing(Vector4 color, float s)
-    {
-        var d = 72 * s;
-        var pos = ImGui.GetCursorScreenPos();
-        var dl = ImGui.GetWindowDrawList();
-        var c = pos + new Vector2(d / 2);
-        dl.AddCircle(c, d / 2 - 3 * s, Theme.Theme.U32(Theme.Theme.WithAlpha(color, 0.25f)), 64, 6 * s);
-        var t = (float)(ImGui.GetTime() % 2.0) / 2f;
-        dl.PathArcTo(c, d / 2 - 3 * s, t * MathF.Tau, t * MathF.Tau + MathF.PI * 0.6f, 32);
-        dl.PathStroke(Theme.Theme.U32(color), ImDrawFlags.None, 6 * s);
-        var ic = Theme.Icon.Keyboard;
-        var sz = Widgets.IconSize(ic, true);
-        using (Widgets.F.IconsLarge.Push())
-            dl.AddText(c - sz / 2, Theme.Theme.U32(color), ic.ToString());
-        ImGui.Dummy(new Vector2(d, d));
+        Widgets.BeginGroup("loop");
+        Widgets.Row("games", 70 * s, () => { if (Widgets.IntField("##count", ref loopCount)) loopCount = Math.Clamp(loopCount, 1, 999); });
+        var running = state is AutomationState.Playing or AutomationState.WaitingForDuty or AutomationState.Queued or AutomationState.Finishing or AutomationState.Paused;
+        if (running) ImGui.BeginDisabled();
+        if (Widgets.Button("run loop##loop", Widgets.ButtonKind.Normal, null, Theme.Icon.Repeat, "queue and play this many games, then stop")) c.StartLoop(loopCount);
+        ImGui.SameLine(0, 6 * s);
+        if (Widgets.Button("repeat##rep", Widgets.ButtonKind.Normal, null, Theme.Icon.RefreshCw, "queue and play until stopped or a stop condition is met")) c.StartUnlimited();
+        if (running) ImGui.EndDisabled();
+        if (c.LoopRemaining > 0) Widgets.Small($"{c.LoopRemaining} games left");
+        else if (c.LoopRemaining < 0) Widgets.Small("repeating until stopped");
+        Widgets.EndGroup();
+
+        // ---- right: session + lifetime
+        Widgets.Column(1);
+        var st = c.Session;
+        Widgets.BeginGroup("this session");
+        var half = Widgets.ContentWidth / 2;
+        Widgets.Stat("games", st.GamesCompleted.ToString(), null, half);
+        ImGui.SameLine();
+        Widgets.Stat("mgp", st.MgpGained.ToString("N0"), Theme.Theme.AccentText, half);
+        Widgets.Stat("mgc", st.MgcGained.ToString("N0"), Theme.Theme.Info, half);
+        ImGui.SameLine();
+        Widgets.Stat("games / hour", st.GamesPerHour.ToString("0.0"), null, half);
+        Widgets.ValueRow("wpm", st.WordsPerMinute.ToString("0"));
+        Widgets.ValueRow("accuracy", (st.Accuracy * 100).ToString("0.0") + "%");
+        Widgets.ValueRow("mgp / hour", st.MgpPerHour.ToString("N0"));
+        Widgets.ValueRow("since", st.StartedAt.ToString("HH:mm"));
+        Widgets.EndGroup();
+
+        var hist = c.History;
+        Widgets.BeginGroup("lifetime");
+        Widgets.Stat("games", hist.TotalGames.ToString("N0"), null, half);
+        ImGui.SameLine();
+        Widgets.Stat("mgp", hist.TotalMgp.ToString("N0"), Theme.Theme.AccentText, half);
+        Widgets.Stat("mgc", hist.TotalMgc.ToString("N0"), Theme.Theme.Info, half);
+        ImGui.SameLine();
+        Widgets.Stat("best wpm", hist.BestWpm.ToString("0"), null, half);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        DrawHistoryChart(hist, s);
+        Widgets.EndGroup();
+
+        Widgets.EndColumns();
     }
 
     private void DrawTransport(AutomationState state, float s)
     {
         var running = state is AutomationState.Playing or AutomationState.WaitingForDuty or AutomationState.Queued or AutomationState.Finishing;
         var paused = state == AutomationState.Paused;
-        var circle = 44f;
-        var rowTop = ImGui.GetCursorPosY();
-
         if (!running && !paused)
         {
-            if (Widgets.CircleButton("##start", Theme.Icon.Play, circle, Theme.Theme.Accent, Vector4.One, "Start")) Controller.Start();
+            if (Widgets.Button("start##start", Widgets.ButtonKind.Accent, new Vector2(96 * s, 24 * s), Theme.Icon.Play, "play one game (queues first from the lobby)")) Controller.Start();
         }
         else
         {
             if (paused)
             {
-                if (Widgets.CircleButton("##resume", Theme.Icon.Play, circle, Theme.Theme.Accent, Vector4.One, "Resume")) Controller.Resume();
+                if (Widgets.Button("resume##resume", Widgets.ButtonKind.Accent, new Vector2(96 * s, 24 * s), Theme.Icon.Play)) Controller.Resume();
             }
             else
             {
-                if (Widgets.CircleButton("##pause", Theme.Icon.Pause, circle, Theme.Theme.ControlBgHover, Theme.Theme.Label, "Pause")) Controller.Pause();
+                if (Widgets.Button("pause##pause", Widgets.ButtonKind.Normal, new Vector2(96 * s, 24 * s), Theme.Icon.Pause)) Controller.Pause();
             }
-            ImGui.SameLine(0, 10 * s);
-            if (Widgets.CircleButton("##stop", Theme.Icon.Square, circle, Theme.Theme.WithAlpha(Theme.Theme.Red, 0.22f), Theme.Theme.Red, "Stop")) Controller.Stop();
+            ImGui.SameLine(0, 6 * s);
+            if (Widgets.Button("stop##stop", Widgets.ButtonKind.Danger, new Vector2(80 * s, 24 * s), Theme.Icon.Square)) Controller.Stop();
         }
+    }
 
-        // Count field and loop buttons share one frame height, centred on the transport circles.
-        // No group here: BeginGroup after SameLine breaks the line tracking the buttons rely on.
-        // ImGui's SameLine snaps every item back to the line's top, so the vertical offset must be
-        // re-applied after each SameLine, not just before the first item.
-        var h = Widgets.FrameHeight;
-        var midY = rowTop + (circle * s - h) / 2;
-        ImGui.SameLine(0, 18 * s);
-        ImGui.SetCursorPosY(midY);
-        ImGui.SetNextItemWidth(70 * s);
-        ImGui.InputInt("##loopcount", ref loopCount, 0, 0);
-        loopCount = Math.Clamp(loopCount, 1, 999);
-        ImGui.SameLine(0, 6 * s);
-        ImGui.SetCursorPosY(midY);
-        if (Widgets.Button("Loop##loop", Widgets.ButtonStyle.Default, new Vector2(78 * s, h), Theme.Icon.Repeat) && !running)
-            Controller.StartLoop(loopCount);
-        if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play this many games, then stop.");
-        ImGui.SameLine(0, 6 * s);
-        ImGui.SetCursorPosY(midY);
-        if (Widgets.Button("Repeat##unl", Widgets.ButtonStyle.Default, new Vector2(92 * s, h), Theme.Icon.RefreshCw) && !running)
-            Controller.StartUnlimited();
-        if (ImGui.IsItemHovered()) Widgets.Tooltip("Queue and play until you stop it or a stop condition is met.");
+    /// <summary>MGP per day for the last 14 days as flat bars inside an inset well.</summary>
+    private static void DrawHistoryChart(Rewards.RewardStore hist, float s)
+    {
+        var days = hist.LastDays(14);
+        var max = Math.Max(1, days.Max(d => d.Mgp));
+        var width = Widgets.ContentWidth;
+        var chartH = 64 * s;
+        var dl = ImGui.GetWindowDrawList();
 
-        // Keep the row height stable regardless of which control ended the line.
-        ImGui.SetCursorPosY(rowTop + circle * s);
+        Widgets.Small("mgp per day, last 14 days");
+        var pos = ImGui.GetCursorScreenPos();
+        Theme.Theme.DrawInset(dl, pos, pos + new Vector2(width, chartH), s);
+        var inner = pos + new Vector2(4 * s);
+        var innerW = width - 8 * s;
+        var innerH = chartH - 8 * s;
+        var gap = 2 * s;
+        var barW = (innerW - gap * (days.Count - 1)) / days.Count;
+
+        for (var i = 0; i < days.Count; i++)
+        {
+            var d = days[i];
+            var x = inner.X + i * (barW + gap);
+            var h = (float)(d.Mgp / (double)max) * innerH;
+            var isToday = i == days.Count - 1;
+            var top = new Vector2(x, inner.Y + innerH - h);
+            var bottom = new Vector2(x + barW, inner.Y + innerH);
+            if (h < 2 * s) top.Y = bottom.Y - 2 * s;
+            var col = d.Mgp > 0 ? (isToday ? Theme.Theme.AccentColor : Theme.Theme.AccentDark) : Theme.Theme.BevelMid;
+            dl.AddRectFilled(top, bottom, Theme.Theme.U32(col));
+            if (isToday && d.Mgp > 0 && Theme.Theme.Effects) Theme.Theme.DrawGlow(dl, top, bottom, Theme.Theme.AccentColor, 4 * s, 0.5f);
+
+            ImGui.SetCursorScreenPos(new Vector2(x, inner.Y));
+            ImGui.InvisibleButton("##bar" + i, new Vector2(barW, innerH));
+            if (ImGui.IsItemHovered())
+                Widgets.Tooltip($"{d.Day:ddd d MMM}\n{d.Games} games · {d.Mgp:N0} mgp · {d.Mgc:N0} mgc");
+        }
+        ImGui.SetCursorScreenPos(new Vector2(pos.X, pos.Y + chartH));
+        ImGui.Dummy(new Vector2(width, 2 * s));
     }
 }

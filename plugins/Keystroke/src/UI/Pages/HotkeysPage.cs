@@ -10,7 +10,7 @@ internal sealed class HotkeysPage : Page
 
     public HotkeysPage(Plugin plugin) : base(plugin) { }
 
-    public override string Title => Strings.Hotkeys;
+    public override string Title => "hotkeys";
     public override char Icon => Theme.Icon.KeyRound;
 
     public override void Draw()
@@ -18,46 +18,42 @@ internal sealed class HotkeysPage : Page
         var h = Config.Hotkeys;
         var changed = false;
 
-        Widgets.PageHeader(Strings.Hotkeys, "Work even when the game isn't focused, so pick combinations no other app uses.");
+        Widgets.BeginColumns(2);
+        Widgets.BeginGroup("bindings");
+        Widgets.Small("Work while the game is unfocused, so pick combinations no other app uses.");
+        ImGui.Dummy(new Vector2(0, 4 * Widgets.S));
+        Binding("start / stop", h.StartStop, ref changed);
+        Binding("pause / resume", h.PauseResume, ref changed);
+        Binding("show / hide overlay", h.ToggleOverlay, ref changed);
+        Binding("open keystroke", h.OpenWindow, ref changed);
+        Widgets.EndGroup();
 
-        if (Widgets.BeginCard("keys"))
-        {
-            Binding("Start / Stop", h.StartStop, ref changed, Theme.Icon.Power);
-            Widgets.RowSeparator();
-            Binding("Pause / Resume", h.PauseResume, ref changed, Theme.Icon.Pause);
-            Widgets.RowSeparator();
-            Binding("Show / hide overlay", h.ToggleOverlay, ref changed, Theme.Icon.Eye);
-            Widgets.RowSeparator();
-            Binding("Open Keystroke", h.OpenWindow, ref changed, Theme.Icon.AppWindow);
-            Widgets.EndCard();
-        }
-
-        Widgets.Caption("Click a shortcut, then press the new combination. Esc clears it.");
+        Widgets.Column(1);
+        Widgets.BeginGroup("how to");
+        Widgets.Wrapped("Click a binding, then press the new combination. Esc clears it.");
+        Widgets.Wrapped("Right-click a binding to toggle \"only while the game is focused\".");
+        Widgets.EndGroup();
+        Widgets.EndColumns();
 
         if (changed) Save();
     }
 
-    private void Binding(string label, HotkeyBinding b, ref bool changed, char icon)
+    private void Binding(string label, HotkeyBinding b, ref bool changed)
     {
-        var s = Widgets.Scale;
+        var s = Widgets.S;
         var isRecording = recording == label;
-        var text = isRecording ? "Press keys…" : Widgets.HotkeyLabel(b);
-        var w = 150 * s;
+        var text = isRecording ? "press keys…" : Widgets.HotkeyLabel(b);
         var enabled = b.Enabled;
-        var focusOnly = b.OnlyWhenGameFocused;
         var localChanged = false;
 
-        Widgets.Row(label, b.OnlyWhenGameFocused ? "Only while the game is focused" : "Global", w + 60 * s, Widgets.FrameHeight, () =>
+        var v = enabled;
+        if (Widgets.Check(label + (b.OnlyWhenGameFocused ? "  (focused only)" : "") + "##en" + label, ref v)) { b.Enabled = v; localChanged = true; }
+        Widgets.Row("", 120 * s, () =>
         {
-            if (Widgets.Toggle("##en", ref enabled)) { b.Enabled = enabled; localChanged = true; }
-            ImGui.SameLine(0, 10 * s);
-            if (isRecording) ImGui.PushStyleColor(ImGuiCol.Button, Theme.Theme.WithAlpha(Theme.Theme.Accent, 0.35f));
-            if (ImGui.Button(text + "##bind", new Vector2(w, Widgets.FrameHeight)))
+            if (Widgets.Button(text + "##bind" + label, isRecording ? Widgets.ButtonKind.Accent : Widgets.ButtonKind.Normal, new Vector2(120 * s, Theme.Theme.ControlHeight * s + 2 * s)))
                 recording = isRecording ? null : label;
-            if (isRecording) ImGui.PopStyleColor();
-            if (ImGui.IsItemHovered() && !isRecording) Widgets.Tooltip("Right-click to toggle 'only while focused'.");
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) { b.OnlyWhenGameFocused = !focusOnly; localChanged = true; }
-        }, icon);
+            if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) { b.OnlyWhenGameFocused = !b.OnlyWhenGameFocused; localChanged = true; }
+        });
 
         if (isRecording && Plugin.Hotkeys.TryCaptureBinding(out var captured))
         {
@@ -66,7 +62,6 @@ internal sealed class HotkeysPage : Page
             recording = null;
             localChanged = true;
         }
-
         if (localChanged) changed = true;
     }
 }

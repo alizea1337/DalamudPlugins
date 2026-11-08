@@ -1,4 +1,3 @@
-using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Keystroke.UI.Theme;
@@ -9,78 +8,68 @@ internal sealed class RewardsAlertsPage : Page
 {
     public RewardsAlertsPage(Plugin plugin) : base(plugin) { }
 
-    public override string Title => Strings.RewardsAlerts;
+    public override string Title => "alerts";
     public override char Icon => Theme.Icon.Bell;
 
     public override void Draw()
     {
         var a = Config.Alerts;
         var changed = false;
-        var s = Widgets.Scale;
+        var s = Widgets.S;
 
-        Widgets.PageHeader(Strings.RewardsAlerts, "Currency caps and how Keystroke gets your attention.");
+        Widgets.BeginColumns(2);
 
-        Widgets.SectionLabel("MGC CAP");
-        if (Widgets.BeginCard("mgc"))
+        Widgets.BeginGroup("mgc cap");
+        var v = a.MgcCapWarning;
+        if (Widgets.Check("warn when mgc approaches the cap", ref v, "Keybound currency stops accumulating at the cap; spend it before then.")) { a.MgcCapWarning = v; changed = true; }
+        if (a.MgcCapWarning)
         {
-            var v = a.MgcCapWarning;
-            if (Widgets.ToggleRow("Warn when MGC approaches the cap", ref v, "Keybound currency stops accumulating at the cap; spend it before then.", Theme.Icon.Coins, Theme.Theme.Purple)) { a.MgcCapWarning = v; changed = true; }
-            if (a.MgcCapWarning)
+            var pct = a.MgcCapWarningPercent;
+            if (Widgets.Slider("warn at", ref pct, 50, 100, "{0} % of cap")) { a.MgcCapWarningPercent = pct; changed = true; }
+        }
+        Widgets.EndGroup();
+
+        Widgets.BeginGroup("channels");
+        v = a.ToastEnabled;
+        if (Widgets.Check("in-game toast", ref v)) { a.ToastEnabled = v; changed = true; }
+        v = a.SoundEnabled;
+        if (Widgets.Check("sound effect", ref v)) { a.SoundEnabled = v; changed = true; }
+        if (a.SoundEnabled)
+        {
+            var se = a.SoundEffect;
+            Widgets.Row("sound", 150 * s, () =>
             {
-                var pct = a.MgcCapWarningPercent;
-                Widgets.Row("Warn at", null, 220 * s, Widgets.FrameHeight,
-                    () => { if (Widgets.SliderInt("##pct", ref pct, 50, 100, "%d %% of cap", 220)) { a.MgcCapWarningPercent = pct; changed = true; } });
-            }
-            Widgets.EndCard();
+                var items = new string[16];
+                for (var i = 0; i < 16; i++) items[i] = $"<se.{i + 1}>";
+                var idx = se - 1;
+                if (Widgets.Combo("##se", ref idx, items, 118 * s)) { a.SoundEffect = idx + 1; changed = true; }
+                ImGui.SameLine(0, 4 * s);
+                if (Widgets.Button("##play", Widgets.ButtonKind.Normal, new Vector2(Theme.Theme.ControlHeight * s), Theme.Icon.Play, "preview"))
+                    Alerts.Notifier.PlaySound(a.SoundEffect);
+            }, "Game sound effects 1–16, as in <se.N> chat macros.");
         }
+        v = a.ChatEnabled;
+        if (Widgets.Check("chat message", ref v)) { a.ChatEnabled = v; changed = true; }
+        ImGui.BeginDisabled();
+        var off = false;
+        Widgets.Check("windows notification", ref off, "Not available yet.");
+        ImGui.EndDisabled();
+        Widgets.EndGroup();
 
-        Widgets.SectionLabel("CHANNELS");
-        if (Widgets.BeginCard("channels"))
-        {
-            var v = a.ToastEnabled;
-            if (Widgets.ToggleRow("In-game toast", ref v, null, Theme.Icon.Bell)) { a.ToastEnabled = v; changed = true; }
-            Widgets.RowSeparator();
-            v = a.SoundEnabled;
-            if (Widgets.ToggleRow("Sound effect", ref v, null, Theme.Icon.Volume2)) { a.SoundEnabled = v; changed = true; }
-            if (a.SoundEnabled)
-            {
-                var se = a.SoundEffect;
-                Widgets.Row("Sound", "Game sound effects 1–16, as in <se.N> chat macros.", 230 * s, Widgets.FrameHeight, () =>
-                {
-                    if (Widgets.SliderInt("##se", ref se, 1, 16, "<se.%d>", 160)) { a.SoundEffect = se; changed = true; }
-                    ImGui.SameLine(0, 6 * s);
-                    if (Widgets.Button("##play", Widgets.ButtonStyle.Default, new Vector2(Widgets.FrameHeight, Widgets.FrameHeight), Theme.Icon.Play))
-                        Alerts.Notifier.PlaySound(a.SoundEffect);
-                });
-            }
-            Widgets.RowSeparator();
-            v = a.ChatEnabled;
-            if (Widgets.ToggleRow("Chat message", ref v, null, Theme.Icon.Type)) { a.ChatEnabled = v; changed = true; }
-            Widgets.RowSeparator();
-            ImGui.BeginDisabled();
-            v = false;
-            Widgets.ToggleRow("Windows notification when the game is in the background", ref v, "Not available yet; planned for a later version.", Theme.Icon.Monitor);
-            ImGui.EndDisabled();
-            Widgets.EndCard();
-        }
+        Widgets.Column(1);
 
-        Widgets.SectionLabel("EVENTS");
-        if (Widgets.BeginCard("events"))
-        {
-            var v = a.NotifyLoopFinished;
-            if (Widgets.ToggleRow("Loop finished or stop condition reached", ref v, null, Theme.Icon.Flag)) { a.NotifyLoopFinished = v; changed = true; }
-            Widgets.RowSeparator();
-            v = a.NotifyMgcWarning;
-            if (Widgets.ToggleRow("MGC warning and cap", ref v, null, Theme.Icon.TriangleAlert)) { a.NotifyMgcWarning = v; changed = true; }
-            Widgets.RowSeparator();
-            v = a.NotifyErrors;
-            if (Widgets.ToggleRow("Automation stopped on an error", ref v, null, Theme.Icon.OctagonX)) { a.NotifyErrors = v; changed = true; }
-            Widgets.RowSeparator();
-            v = a.NotifyGameResult;
-            if (Widgets.ToggleRow("Every game result", ref v, "Noisy; off by default.", Theme.Icon.Trophy)) { a.NotifyGameResult = v; changed = true; }
-            Widgets.EndCard();
-        }
+        Widgets.BeginGroup("events");
+        v = a.NotifyLoopFinished;
+        if (Widgets.Check("loop finished or stop condition reached", ref v)) { a.NotifyLoopFinished = v; changed = true; }
+        v = a.NotifyMgcWarning;
+        if (Widgets.Check("mgc warning and cap", ref v)) { a.NotifyMgcWarning = v; changed = true; }
+        v = a.NotifyErrors;
+        if (Widgets.Check("automation stopped on an error", ref v)) { a.NotifyErrors = v; changed = true; }
+        v = a.NotifyGameResult;
+        if (Widgets.Check("every game result", ref v, "Noisy; off by default.")) { a.NotifyGameResult = v; changed = true; }
+        Widgets.EndGroup();
 
+        Widgets.EndColumns();
         if (changed) Save();
     }
 }

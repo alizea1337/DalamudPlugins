@@ -21,8 +21,8 @@ internal sealed class InspectorWindow : Window
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+    private static readonly string[] Tabs = { "overview", "addons", "arrays", "casts", "raw json" };
 
-    private readonly Configuration config;
     private GameSnapshot? snapshot;
     private DateTime lastSample = DateTime.MinValue;
     private int tab;
@@ -31,99 +31,89 @@ internal sealed class InspectorWindow : Window
     private bool includeArrays = true;
     private bool onlyVisibleNodes;
     private string nodeFilter = "";
-    private string copiedFeedback = "";
-    private DateTime copiedAt;
+    private string feedback = "";
+    private DateTime feedbackAt;
 
     public int SampleIntervalMs { get; set; } = 100;
 
     public InspectorWindow(Configuration config) : base("Keystroke Inspector###KeystrokeInspector")
     {
-        this.config = config;
-        Size = new Vector2(760, 620);
+        Size = new Vector2(780, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
-        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(520, 360) };
-        Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(540, 380) };
+        Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoTitleBar;
         RespectCloseHotkey = true;
     }
 
-    /// <summary>Called from the framework update; cheap when the window is closed or paused.</summary>
     public void Tick()
     {
         if (!IsOpen || paused) return;
         var now = DateTime.UtcNow;
         if ((now - lastSample).TotalMilliseconds < SampleIntervalMs) return;
         lastSample = now;
-        try
-        {
-            snapshot = GameInspector.Capture(includeNodes, includeArrays);
-        }
-        catch (Exception e)
-        {
-            Services.Log.Error(e, "Inspector capture failed");
-        }
+        try { snapshot = GameInspector.Capture(includeNodes, includeArrays); }
+        catch (Exception e) { Services.Log.Error(e, "Inspector capture failed"); }
     }
 
     public override void PreDraw()
     {
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 0));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, Theme.Theme.Frame);
     }
 
     public override void PostDraw()
     {
-        ImGui.PopStyleVar();
+        ImGui.PopStyleColor();
+        ImGui.PopStyleVar(3);
     }
 
     public override void Draw()
     {
         using var theme = Theme.Theme.Push();
         using var body = Widgets.F.Body.Push();
-        var s = Widgets.Scale;
+        var s = Widgets.S;
+        var pos = ImGui.GetWindowPos();
+        var size = ImGui.GetWindowSize();
+        var dl = ImGui.GetWindowDrawList();
+        Theme.Theme.DrawFrame(dl, pos, pos + size, s);
+        var inset = Theme.Theme.FrameInset * s;
+        Theme.Theme.DrawStripe(dl, pos + new Vector2(inset, inset), size.X - inset * 2, Theme.Theme.StripeHeight * s);
 
-        ImGui.SetCursorPos(new Vector2(16 * s, 12 * s));
-        ImGui.BeginGroup();
-
-        // Toolbar
-        if (Widgets.Button(paused ? "Resume##insp" : "Pause##insp", Widgets.ButtonStyle.Default, null, paused ? Icon.Play : Icon.Pause)) paused = !paused;
-        ImGui.SameLine();
-        if (Widgets.Button("Copy summary##insp", Widgets.ButtonStyle.Primary, null, Icon.Copy)) CopySummary();
-        if (ImGui.IsItemHovered()) Widgets.Tooltip("Compact text digest that fits in a chat message. Use this for reports.");
-        ImGui.SameLine();
-        if (Widgets.Button("Copy JSON##insp", Widgets.ButtonStyle.Default, null, Icon.Copy)) CopySnapshot();
-        ImGui.SameLine();
-        if (Widgets.Button("Save JSON##insp", Widgets.ButtonStyle.Default, null, Icon.FolderOpen)) SaveSnapshot();
-        if (ImGui.IsItemHovered()) Widgets.Tooltip("Writes the full snapshot to the plugin's snapshots folder.");
-        ImGui.SameLine();
-        if (Widgets.Button("Now##insp", Widgets.ButtonStyle.Default, null, Icon.RefreshCw))
+        var x0 = inset + 12 * s;
+        ImGui.SetCursorPos(new Vector2(x0, inset + Theme.Theme.StripeHeight * s + 8 * s));
+        using (Widgets.F.Title.Push()) Widgets.Text("inspector", Theme.Theme.TextBright);
+        ImGui.SameLine(0, 14 * s);
+        if (Widgets.Button(paused ? "resume##insp" : "pause##insp", Widgets.ButtonKind.Normal, null, paused ? Theme.Icon.Play : Theme.Icon.Pause)) paused = !paused;
+        ImGui.SameLine(0, 4 * s);
+        if (Widgets.Button("copy summary##insp", Widgets.ButtonKind.Accent, null, Theme.Icon.Copy, "Compact text digest that fits in a chat message.")) CopySummary();
+        ImGui.SameLine(0, 4 * s);
+        if (Widgets.Button("copy json##insp", Widgets.ButtonKind.Normal, null, Theme.Icon.Copy)) CopySnapshot();
+        ImGui.SameLine(0, 4 * s);
+        if (Widgets.Button("save json##insp", Widgets.ButtonKind.Normal, null, Theme.Icon.FolderOpen, "Writes the full snapshot to the snapshots folder.")) SaveSnapshot();
+        ImGui.SameLine(0, 4 * s);
+        if (Widgets.Button("now##insp", Widgets.ButtonKind.Normal, null, Theme.Icon.RefreshCw)) snapshot = GameInspector.Capture(includeNodes, includeArrays);
+        if (feedback.Length > 0 && (DateTime.UtcNow - feedbackAt).TotalSeconds < 3)
         {
-            snapshot = GameInspector.Capture(includeNodes, includeArrays);
+            ImGui.SameLine(0, 8 * s);
+            Widgets.Small(feedback, Theme.Theme.AccentText);
         }
-        if (copiedFeedback.Length > 0 && (DateTime.UtcNow - copiedAt).TotalSeconds < 3)
-        {
-            ImGui.SameLine();
-            Widgets.IconText(Icon.CircleCheck, copiedFeedback, Theme.Theme.Green, Theme.Theme.SecondaryLabel);
-        }
+        ImGui.SetCursorPos(new Vector2(size.X - inset - 26 * s, inset + Theme.Theme.StripeHeight * s + 8 * s));
+        if (Widgets.Button("##close", Widgets.ButtonKind.Normal, new Vector2(18 * s), Theme.Icon.X, "close")) IsOpen = false;
 
-        ImGui.SameLine(ImGui.GetWindowWidth() - 240 * s);
+        ImGui.SetCursorPos(new Vector2(x0, ImGui.GetCursorPosY() + 6 * s));
+        var innerW = size.X - x0 * 2;
+        Widgets.Segmented("##insptabs", Tabs, ref tab, innerW);
+        ImGui.SetCursorPosX(x0);
         var ms = SampleIntervalMs;
-        ImGui.SetNextItemWidth(120 * s);
-        if (ImGui.SliderInt("##rate", ref ms, 50, 1000, "%d ms")) SampleIntervalMs = ms;
-        ImGui.SameLine();
-        Widgets.Caption("sample rate");
-
-        ImGui.Dummy(new Vector2(0, 6 * s));
-        var tabs = new[] { "Overview", "Addons", "Arrays", "Casts", "Raw JSON" };
-        Widgets.Segmented("##insptabs", tabs, ref tab, ImGui.GetWindowWidth() - 32 * s);
-        ImGui.Dummy(new Vector2(0, 8 * s));
-        ImGui.EndGroup();
+        if (Widgets.Slider("sample rate##rate", ref ms, 50, 1000, "{0} ms", null, 160 * s)) SampleIntervalMs = ms;
 
         var snap = snapshot;
-        ImGui.SetCursorPosX(16 * s);
-        if (ImGui.BeginChild("##inspbody", new Vector2(ImGui.GetWindowWidth() - 32 * s, ImGui.GetContentRegionAvail().Y - 12 * s)))
+        ImGui.SetCursorPosX(x0);
+        if (ImGui.BeginChild("##inspbody", new Vector2(innerW, size.Y - ImGui.GetCursorPosY() - inset - 8 * s)))
         {
-            if (snap == null)
-            {
-                Widgets.Secondary("Waiting for first sample…");
-            }
+            if (snap == null) Widgets.Small("waiting for first sample…");
             else
             {
                 switch (tab)
@@ -144,7 +134,7 @@ internal sealed class InspectorWindow : Window
         var snap = snapshot ?? GameInspector.Capture(true, true);
         var json = JsonSerializer.Serialize(snap, JsonOptions);
         ImGui.SetClipboardText(json);
-        Feedback($"Copied {json.Length / 1024} KB of JSON");
+        Feedback($"copied {json.Length / 1024} kb of json");
     }
 
     private void CopySummary()
@@ -152,7 +142,7 @@ internal sealed class InspectorWindow : Window
         var snap = snapshot ?? GameInspector.Capture(true, true);
         var text = SnapshotSummary.Build(snap);
         ImGui.SetClipboardText(text);
-        Feedback($"Copied summary ({text.Length / 1024} KB)");
+        Feedback($"copied summary ({text.Length / 1024} kb)");
     }
 
     private void SaveSnapshot()
@@ -164,118 +154,88 @@ internal sealed class InspectorWindow : Window
             System.IO.Directory.CreateDirectory(dir);
             var path = System.IO.Path.Combine(dir, $"snapshot-{snap.CapturedAt:yyyyMMdd-HHmmss}.json");
             System.IO.File.WriteAllText(path, JsonSerializer.Serialize(snap, JsonOptions));
-            Feedback($"Saved {System.IO.Path.GetFileName(path)}");
+            Feedback($"saved {System.IO.Path.GetFileName(path)}");
         }
         catch (Exception e)
         {
             Services.Log.Error(e, "Saving snapshot failed");
-            Feedback("Save failed: " + e.Message);
+            Feedback("save failed: " + e.Message);
         }
     }
 
     private void Feedback(string text)
     {
-        copiedFeedback = text;
-        copiedAt = DateTime.UtcNow;
+        feedback = text;
+        feedbackAt = DateTime.UtcNow;
     }
 
     private static void DrawOverview(GameSnapshot snap)
     {
-        Widgets.SectionLabel("LOCATION");
-        if (Widgets.BeginCard("ov1"))
-        {
-            Widgets.ValueRow("Logged in", snap.IsLoggedIn ? "Yes" : "No", snap.IsLoggedIn ? Theme.Theme.Green : Theme.Theme.Red);
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Territory", $"{snap.TerritoryId}  {snap.TerritoryName}  {snap.TerritoryPlaceName}".Trim());
-            Widgets.RowSeparator();
-            var area = snap.InKeyboundDuty ? "Keybound Brawler duty" : snap.InKeyboundLobby ? "Keybound Brawler lobby" : "Elsewhere";
-            Widgets.ValueRow("Keybound area", area, snap.InKeyboundDuty || snap.InKeyboundLobby ? Theme.Theme.Green : Theme.Theme.SecondaryLabel);
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Client language", snap.ClientLanguage);
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Conditions", snap.Conditions.Length > 0 ? snap.Conditions : "—");
-            Widgets.EndCard();
-        }
+        Widgets.BeginColumns(2);
+        Widgets.BeginGroup("location");
+        Widgets.ValueRow("logged in", snap.IsLoggedIn ? "yes" : "no", snap.IsLoggedIn ? Theme.Theme.AccentText : Theme.Theme.Danger);
+        Widgets.ValueRow("territory", $"{snap.TerritoryId} {snap.TerritoryName} {snap.TerritoryPlaceName}".Trim());
+        var area = snap.InKeyboundDuty ? "keybound duty" : snap.InKeyboundLobby ? "keybound square" : "elsewhere";
+        Widgets.ValueRow("area", area, snap.InKeyboundDuty || snap.InKeyboundLobby ? Theme.Theme.AccentText : null);
+        Widgets.ValueRow("client language", snap.ClientLanguage);
+        Widgets.ValueRow("target", snap.Target == null ? "—" : $"{snap.Target.Name} #{snap.Target.DataId}");
+        Widgets.EndGroup();
+        Widgets.BeginGroup("conditions");
+        Widgets.Wrapped(snap.Conditions.Length > 0 ? snap.Conditions : "—");
+        Widgets.EndGroup();
 
-        Widgets.SectionLabel("CURRENCY");
-        if (Widgets.BeginCard("ov2"))
-        {
-            Widgets.ValueRow("MGP", snap.Currency.Mgp.ToString("N0"));
-            Widgets.RowSeparator();
-            Widgets.ValueRow("MGC", $"{snap.Currency.Mgc:N0} / {snap.Currency.MgcCap:N0}");
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Keybound Coffers", snap.Currency.KeyboundCoffers.ToString());
-            Widgets.EndCard();
-        }
+        Widgets.Column(1);
+        Widgets.BeginGroup("currency");
+        Widgets.ValueRow("mgp", snap.Currency.Mgp.ToString("N0"));
+        Widgets.ValueRow("mgc", $"{snap.Currency.Mgc:N0} / {snap.Currency.MgcCap:N0}");
+        Widgets.ValueRow("keybound coffers", snap.Currency.KeyboundCoffers.ToString());
+        Widgets.EndGroup();
+        Widgets.BeginGroup("duty finder");
+        Widgets.ValueRow("queue state", snap.Queue.State);
+        Widgets.ValueRow("queued", snap.Queue.QueuedContentIds.Count > 0 ? string.Join(", ", snap.Queue.QueuedContentIds) : "—");
+        Widgets.ValueRow("popped", snap.Queue.PoppedContentId != 0 ? snap.Queue.PoppedContentId.ToString() : "—");
+        Widgets.ValueRow("position", snap.Queue.Position.ToString());
+        Widgets.EndGroup();
+        Widgets.BeginGroup("agents");
+        foreach (var a in snap.Agents)
+            Widgets.ValueRow($"{a.Name} ({a.Id})", a.Active ? $"active · addon {a.AddonId}" : "inactive", a.Active ? Theme.Theme.AccentText : null);
+        Widgets.EndGroup();
+        Widgets.EndColumns();
 
-        Widgets.SectionLabel("DUTY FINDER");
-        if (Widgets.BeginCard("ov3"))
-        {
-            Widgets.ValueRow("Queue state", snap.Queue.State);
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Queued content", snap.Queue.QueuedContentIds.Count > 0 ? string.Join(", ", snap.Queue.QueuedContentIds) : "—");
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Popped content", snap.Queue.PoppedContentId != 0 ? snap.Queue.PoppedContentId.ToString() : "—");
-            Widgets.RowSeparator();
-            Widgets.ValueRow("Position", snap.Queue.Position.ToString());
-            Widgets.EndCard();
-        }
-
-        Widgets.SectionLabel("AGENTS");
-        if (Widgets.BeginCard("ov4"))
-        {
-            for (var i = 0; i < snap.Agents.Count; i++)
-            {
-                var a = snap.Agents[i];
-                if (i > 0) Widgets.RowSeparator();
-                Widgets.ValueRow($"{a.Name}  ({a.Id})", a.Active ? $"active · addon {a.AddonId} · {a.Address}" : $"inactive · {a.Address}",
-                    a.Active ? Theme.Theme.Green : Theme.Theme.SecondaryLabel);
-            }
-            Widgets.EndCard();
-        }
-
-        if (snap.Errors.Count > 0)
-        {
-            Widgets.SectionLabel("ERRORS");
-            foreach (var e in snap.Errors) Widgets.Banner(Icon.TriangleAlert, Theme.Theme.Orange, e);
-        }
+        foreach (var e in snap.Errors) Widgets.Notice(Theme.Icon.TriangleAlert, Theme.Theme.Warn, e);
     }
 
     private void DrawAddons(GameSnapshot snap)
     {
-        var s = Widgets.Scale;
-        ImGui.Checkbox("Capture nodes", ref includeNodes);
-        ImGui.SameLine();
-        ImGui.Checkbox("Visible only", ref onlyVisibleNodes);
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(200 * s);
+        var s = Widgets.S;
+        Widgets.Check("capture nodes", ref includeNodes);
+        Widgets.Check("visible only", ref onlyVisibleNodes);
+        ImGui.SetNextItemWidth(220 * s);
         ImGui.InputTextWithHint("##nodefilter", "filter text / id / type", ref nodeFilter, 64);
         ImGui.Dummy(new Vector2(0, 6 * s));
 
         foreach (var addon in snap.Addons)
         {
-            var color = !addon.Present ? Theme.Theme.TertiaryLabel : addon.Visible ? Theme.Theme.Green : Theme.Theme.Orange;
+            var color = !addon.Present ? Theme.Theme.TextFaint : addon.Visible ? Theme.Theme.AccentText : Theme.Theme.Warn;
             var header = addon.Present
                 ? $"{addon.Name}   {(addon.Visible ? "visible" : "hidden")}   {addon.Width:0}×{addon.Height:0} @ {addon.X:0},{addon.Y:0}   {addon.NodeCount} nodes   {addon.Address}"
                 : $"{addon.Name}   not loaded";
-
             ImGui.PushStyleColor(ImGuiCol.Text, color);
-            var open = addon.Present && ImGui.TreeNodeEx(header + "##" + addon.Name, ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.Framed);
+            var open = addon.Present && ImGui.TreeNodeEx(header + "##" + addon.Name, ImGuiTreeNodeFlags.SpanAvailWidth);
             ImGui.PopStyleColor();
-            if (!addon.Present) { ImGui.TextColored(color, header); continue; }
+            if (!addon.Present) { Widgets.Text(header, color); continue; }
             if (!open) continue;
 
             if (ImGui.BeginTable("nodes" + addon.Name, 7, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.BordersInnerH))
             {
-                ImGui.TableSetupColumn("Id", ImGuiTableColumnFlags.WidthFixed, 56 * s);
-                ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 130 * s);
-                ImGui.TableSetupColumn("Vis", ImGuiTableColumnFlags.WidthFixed, 32 * s);
-                ImGui.TableSetupColumn("Pos", ImGuiTableColumnFlags.WidthFixed, 90 * s);
-                ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80 * s);
-                ImGui.TableSetupColumn("Component", ImGuiTableColumnFlags.WidthFixed, 110 * s);
-                ImGui.TableSetupColumn("Text", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("id", ImGuiTableColumnFlags.WidthFixed, 56 * s);
+                ImGui.TableSetupColumn("type", ImGuiTableColumnFlags.WidthFixed, 130 * s);
+                ImGui.TableSetupColumn("vis", ImGuiTableColumnFlags.WidthFixed, 32 * s);
+                ImGui.TableSetupColumn("pos", ImGuiTableColumnFlags.WidthFixed, 90 * s);
+                ImGui.TableSetupColumn("size", ImGuiTableColumnFlags.WidthFixed, 80 * s);
+                ImGui.TableSetupColumn("component", ImGuiTableColumnFlags.WidthFixed, 110 * s);
+                ImGui.TableSetupColumn("text", ImGuiTableColumnFlags.WidthStretch);
                 ImGui.TableHeadersRow();
-
                 foreach (var n in addon.Nodes)
                 {
                     if (onlyVisibleNodes && !n.Visible) continue;
@@ -285,22 +245,14 @@ internal sealed class InspectorWindow : Window
                           (n.ComponentType?.Contains(nodeFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
                           (n.Text?.Contains(nodeFilter, StringComparison.OrdinalIgnoreCase) ?? false)))
                         continue;
-
                     ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(new string(' ', n.Depth * 2) + n.NodeId);
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(n.Type);
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(n.Visible ? Theme.Theme.Green : Theme.Theme.TertiaryLabel, n.Visible ? "●" : "○");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{n.X:0},{n.Y:0}");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{n.Width}×{n.Height}");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(n.ComponentType ?? "");
-                    ImGui.TableNextColumn();
-                    if (n.Text != null) ImGui.TextColored(Theme.Theme.Yellow, n.Text);
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(new string(' ', n.Depth * 2) + n.NodeId);
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(n.Type);
+                    ImGui.TableNextColumn(); ImGui.TextColored(n.Visible ? Theme.Theme.AccentText : Theme.Theme.TextFaint, n.Visible ? "●" : "○");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted($"{n.X:0},{n.Y:0}");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted($"{n.Width}×{n.Height}");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(n.ComponentType ?? "");
+                    ImGui.TableNextColumn(); if (n.Text != null) ImGui.TextColored(Theme.Theme.Warn, n.Text);
                 }
                 ImGui.EndTable();
             }
@@ -310,21 +262,20 @@ internal sealed class InspectorWindow : Window
 
     private void DrawArrays(GameSnapshot snap)
     {
-        ImGui.Checkbox("Capture arrays", ref includeArrays);
-        ImGui.Dummy(new Vector2(0, 6 * Widgets.Scale));
-        DrawArray("Number array", snap.NumberArray, 13);
-        ImGui.Dummy(new Vector2(0, 10 * Widgets.Scale));
-        DrawArray("String array", snap.StringArray, 3);
+        Widgets.Check("capture arrays", ref includeArrays);
+        ImGui.Dummy(new Vector2(0, 6 * Widgets.S));
+        DrawArray("number array", snap.NumberArray, 13);
+        ImGui.Dummy(new Vector2(0, 10 * Widgets.S));
+        DrawArray("string array", snap.StringArray, 3);
     }
 
     private static void DrawArray(string title, ArraySnapshot? arr, int stride)
     {
-        if (arr == null) { Widgets.Secondary($"{title}: capture disabled"); return; }
-        using (Widgets.F.BodySemibold.Push()) ImGui.TextUnformatted($"{title} [{arr.Index}]");
-        if (!arr.Present) { Widgets.Secondary("not present"); return; }
-        Widgets.Caption($"size {arr.Size}, showing {arr.Values.Count}; grouped by {stride} per row (hint layout, unverified)");
-
-        var s = Widgets.Scale;
+        if (arr == null) { Widgets.Small($"{title}: capture disabled"); return; }
+        using (Widgets.F.Bold.Push()) Widgets.Text($"{title} [{arr.Index}]", Theme.Theme.TextBright);
+        if (!arr.Present) { Widgets.Small("not present"); return; }
+        Widgets.Small($"size {arr.Size}, showing {arr.Values.Count}; {stride} per row");
+        var s = Widgets.S;
         if (ImGui.BeginTable("arr" + arr.Index, stride + 1, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollX))
         {
             ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 44 * s);
@@ -334,14 +285,14 @@ internal sealed class InspectorWindow : Window
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.TextColored(Theme.Theme.SecondaryLabel, i.ToString());
+                ImGui.TextColored(Theme.Theme.TextDim, i.ToString());
                 for (var c = 0; c < stride; c++)
                 {
                     ImGui.TableNextColumn();
                     if (i + c < arr.Values.Count)
                     {
                         var v = arr.Values[i + c];
-                        ImGui.TextColored(v is "0" or "" ? Theme.Theme.TertiaryLabel : Theme.Theme.Label, v);
+                        ImGui.TextColored(v is "0" or "" ? Theme.Theme.TextFaint : Theme.Theme.Text, v);
                     }
                 }
             }
@@ -351,23 +302,23 @@ internal sealed class InspectorWindow : Window
 
     private static void DrawCasts(GameSnapshot snap)
     {
-        if (snap.Casts.Count == 0) { Widgets.Secondary("Nothing is casting."); return; }
-        var s = Widgets.Scale;
+        if (snap.Casts.Count == 0) { Widgets.Small("nothing is casting"); return; }
+        var s = Widgets.S;
         if (ImGui.BeginTable("casts", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.BordersInnerH))
         {
-            ImGui.TableSetupColumn("Entity", ImGuiTableColumnFlags.WidthFixed, 90 * s);
-            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 180 * s);
-            ImGui.TableSetupColumn("Action id", ImGuiTableColumnFlags.WidthFixed, 80 * s);
-            ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Progress", ImGuiTableColumnFlags.WidthFixed, 110 * s);
+            ImGui.TableSetupColumn("entity", ImGuiTableColumnFlags.WidthFixed, 90 * s);
+            ImGui.TableSetupColumn("name", ImGuiTableColumnFlags.WidthFixed, 180 * s);
+            ImGui.TableSetupColumn("action id", ImGuiTableColumnFlags.WidthFixed, 80 * s);
+            ImGui.TableSetupColumn("action", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("progress", ImGuiTableColumnFlags.WidthFixed, 110 * s);
             ImGui.TableHeadersRow();
             foreach (var c in snap.Casts)
             {
-                var blocking = c.ActionId == Game.Keybound.CursedGazeActionId || Game.Keybound.SensoryJammerActionIds.Contains(c.ActionId);
+                var blocking = c.ActionId == Game.Keybound.CursedGazeActionId || Game.Keybound.SensoryJammerActionIds.Contains(c.ActionId) || Game.Keybound.IsBlockingCastName(c.ActionName);
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn(); ImGui.TextUnformatted($"0x{c.EntityId:X}");
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(c.Name);
-                ImGui.TableNextColumn(); ImGui.TextColored(blocking ? Theme.Theme.Red : Theme.Theme.Label, c.ActionId.ToString());
+                ImGui.TableNextColumn(); ImGui.TextColored(blocking ? Theme.Theme.Danger : Theme.Theme.Text, c.ActionId.ToString());
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(c.ActionName + (blocking ? "  (input-blocking)" : ""));
                 ImGui.TableNextColumn(); ImGui.TextUnformatted($"{c.CurrentTime:0.0} / {c.TotalTime:0.0}s");
             }

@@ -4,65 +4,52 @@ using Keystroke.UI.Theme;
 
 namespace Keystroke.UI;
 
-/// <summary>
-/// One-time confirmation before Instant mode is enabled. Shared by the Typing page and the
-/// compact window. Call <see cref="Request"/> to enable (shows the sheet if not yet acknowledged)
-/// and <see cref="Draw"/> every frame from a window that may host the popup.
-/// </summary>
+/// <summary>One-time confirmation before Instant mode is enabled; shared by the Typing page and the compact strip.</summary>
 internal static class InstantModeSheet
 {
     private static bool pending;
 
-    /// <summary>Enables Instant mode, asking first if the user hasn't acknowledged the warning.</summary>
     public static void Request(TypingSettings t, Configuration config)
     {
-        if (t.InstantModeAcknowledged)
-        {
-            t.InstantMode = true;
-            config.Save();
-        }
-        else
-        {
-            pending = true;
-        }
+        if (t.InstantModeAcknowledged) { t.InstantMode = true; config.Save(); }
+        else pending = true;
     }
 
     public static void Draw(Configuration config)
     {
         if (!pending) return;
         var t = config.Typing;
-        var s = Widgets.Scale;
+        var s = Widgets.S;
 
         ImGui.OpenPopup("##instantsheet");
-        ImGui.SetNextWindowSize(new Vector2(420 * s, 0));
+        ImGui.SetNextWindowSize(new Vector2(400 * s, 0));
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(22, 20) * s);
-        ImGui.PushStyleColor(ImGuiCol.PopupBg, Theme.Theme.Rgb(0x2C, 0x2C, 0x2E));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(18, 16) * s);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
+        ImGui.PushStyleColor(ImGuiCol.PopupBg, Vector4.Zero);
         if (ImGui.BeginPopupModal("##instantsheet", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove))
         {
-            ImGui.SetCursorPosX((ImGui.GetWindowWidth() - Widgets.IconSize(Icon.TriangleAlert, true).X) / 2);
-            Widgets.Icon(Icon.TriangleAlert, Theme.Theme.Orange, true);
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            using (Widgets.F.BodySemibold.Push())
-            {
-                var w = ImGui.CalcTextSize(Strings.InstantModeTitle).X;
-                ImGui.SetCursorPosX((ImGui.GetWindowWidth() - w) / 2);
-                ImGui.TextUnformatted(Strings.InstantModeTitle);
-            }
-            ImGui.Dummy(new Vector2(0, 6 * s));
-            ImGui.PushTextWrapPos();
-            Widgets.Secondary(Strings.InstantModeBody);
-            ImGui.PopTextWrapPos();
-            ImGui.Dummy(new Vector2(0, 14 * s));
+            var dl = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetWindowPos();
+            var size = ImGui.GetWindowSize();
+            dl.ChannelsSplit(2);
+            dl.ChannelsSetCurrent(1);
 
-            var bw = (ImGui.GetContentRegionAvail().X - 8 * s) / 2;
-            if (Widgets.Button(Strings.Cancel + "##cancel", Widgets.ButtonStyle.Default, new Vector2(bw, 30 * s)))
+            Widgets.Icon(Theme.Icon.TriangleAlert, Theme.Theme.Warn, true);
+            ImGui.SameLine(0, 8 * s);
+            using (Widgets.F.Title.Push()) Widgets.Text("enable instant mode?", Theme.Theme.TextBright);
+            ImGui.Dummy(new Vector2(0, 6 * s));
+            Widgets.Wrapped("Instant mode sends every key of the word in one frame and submits it. It is far faster than any human and easy to notice for other players. Leave it off unless you play in a premade group that doesn't mind.", Theme.Theme.Text, size.X - 36 * s);
+            ImGui.Dummy(new Vector2(0, 12 * s));
+
+            var bw = (size.X - 36 * s - 8 * s) / 2;
+            if (Widgets.Button("cancel##cancel", Widgets.ButtonKind.Normal, new Vector2(bw, 24 * s)))
             {
                 pending = false;
                 ImGui.CloseCurrentPopup();
             }
             ImGui.SameLine(0, 8 * s);
-            if (Widgets.Button(Strings.InstantModeConfirm + "##ok", Widgets.ButtonStyle.Primary, new Vector2(bw, 30 * s)))
+            if (Widgets.Button("enable instant mode##ok", Widgets.ButtonKind.Accent, new Vector2(bw, 24 * s)))
             {
                 t.InstantMode = true;
                 t.InstantModeAcknowledged = true;
@@ -70,9 +57,15 @@ internal static class InstantModeSheet
                 pending = false;
                 ImGui.CloseCurrentPopup();
             }
+
+            dl.ChannelsSetCurrent(0);
+            Theme.Theme.DrawFrame(dl, pos, pos + size, s);
+            var inset = Theme.Theme.FrameInset * s;
+            Theme.Theme.DrawStripe(dl, pos + new Vector2(inset, inset), size.X - inset * 2, Theme.Theme.StripeHeight * s);
+            dl.ChannelsMerge();
             ImGui.EndPopup();
         }
         ImGui.PopStyleColor();
-        ImGui.PopStyleVar();
+        ImGui.PopStyleVar(2);
     }
 }

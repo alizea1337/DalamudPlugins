@@ -9,8 +9,7 @@ using Keystroke.UI.Theme;
 namespace Keystroke.UI;
 
 /// <summary>
-/// Compact status pill: state dot, status text, the word being typed, session counters.
-/// Visibility, lock/click-through, opacity and position come from the Overlay settings.
+/// Small bevelled strip: signal stripe, state dot and status, the word as keycaps, session counters.
 /// </summary>
 internal sealed class OverlayWindow : Window
 {
@@ -22,7 +21,7 @@ internal sealed class OverlayWindow : Window
         this.plugin = plugin;
         Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize |
-                ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoDocking;
+                ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoBackground;
         RespectCloseHotkey = false;
         IsOpen = true;
         Position = plugin.Config.Overlay.Position;
@@ -49,60 +48,62 @@ internal sealed class OverlayWindow : Window
             if (o.ClickThroughWhenLocked) f |= ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoMouseInputs;
         }
         Flags = f;
-
-        var s = Widgets.Scale;
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(14, 10) * s);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 14 * s);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
+        var s = Widgets.S;
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(Theme.Theme.FrameInset * s + 8 * s, Theme.Theme.FrameInset * s + Theme.Theme.StripeHeight * s + 6 * s));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, Math.Clamp(o.Opacity, 0.2f, 1f));
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, Theme.Theme.Rgb(0x1C, 0x1C, 0x1E, 0.92f));
-        ImGui.PushStyleColor(ImGuiCol.Border, Theme.Theme.Separator);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowMinSize, new Vector2(220 * s, 0));
     }
 
-    public override void PostDraw()
-    {
-        ImGui.PopStyleColor(2);
-        ImGui.PopStyleVar(4);
-    }
+    public override void PostDraw() => ImGui.PopStyleVar(5);
 
     public override void Draw()
     {
         using var theme = Theme.Theme.Push();
         using var body = Widgets.F.Body.Push();
-        var s = Widgets.Scale;
+        var s = Widgets.S;
         var c = plugin.Controller;
         var o = Settings;
         var (col, label) = MainWindow.StateBadge(c.State);
 
+        // Frame behind the content (window has no background of its own)
+        var dl = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetWindowPos();
+        var size = ImGui.GetWindowSize();
+        dl.ChannelsSplit(2);
+        dl.ChannelsSetCurrent(1);
+
         ImGui.BeginGroup();
-        Widgets.StatusDot(col, label);
+        Widgets.StatusDot(col, label, c.State is AutomationState.Playing or AutomationState.Queued);
         if (c.State != AutomationState.Idle && c.StatusDetail.Length > 0 && c.StatusDetail != label)
         {
             ImGui.SameLine(0, 8 * s);
-            Widgets.Caption(c.StatusDetail.Length > 48 ? c.StatusDetail[..48] + "…" : c.StatusDetail);
+            Widgets.Small(c.StatusDetail.Length > 40 ? c.StatusDetail[..40] + "…" : c.StatusDetail);
         }
         ImGui.EndGroup();
 
         if (o.ShowCurrentAnswer && c.CurrentPrompt.Length > 0)
         {
-            var prompt = c.CurrentPrompt;
-            var done = Math.Min(c.CurrentAnswer.Length, prompt.Length);
-            using var semi = Widgets.F.BodySemibold.Push();
-            ImGui.TextColored(Theme.Theme.Accent, prompt[..done]);
-            ImGui.SameLine(0, 0);
-            ImGui.TextColored(Theme.Theme.TertiaryLabel, prompt[done..]);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+            if (plugin.Config.Appearance.Keycaps) Widgets.Keycaps(c.CurrentPrompt, c.CurrentAnswer.Length, 18f, 260 * s);
+            else { using var b = Widgets.F.Bold.Push(); Widgets.Text(c.CurrentPrompt, Theme.Theme.AccentText); }
         }
 
         if (o.ShowSessionStats)
         {
             var st = c.Session;
             var ms = c.MeasuredMsPerKey;
-            var speed = ms > 0 ? $" · {60000 / ms / 5:0} WPM" : "";
-            Widgets.Caption($"{st.GamesCompleted} games · {st.MgpGained:N0} MGP · {st.MgcGained:N0} MGC{speed}");
+            var speed = ms > 0 ? $" · {60000 / ms / 5:0} wpm" : "";
+            Widgets.Small($"{st.GamesCompleted} games · {st.MgpGained:N0} mgp · {st.MgcGained:N0} mgc{speed}");
         }
 
-        // Persist a moved position.
-        var pos = ImGui.GetWindowPos();
+        dl.ChannelsSetCurrent(0);
+        Theme.Theme.DrawFrame(dl, pos, pos + size, s);
+        var inset = Theme.Theme.FrameInset * s;
+        Theme.Theme.DrawStripe(dl, pos + new Vector2(inset, inset), size.X - inset * 2, Theme.Theme.StripeHeight * s);
+        dl.ChannelsMerge();
+
         if (!o.Locked && pos != lastPos && lastPos != Vector2.Zero && pos != o.Position)
         {
             o.Position = pos;

@@ -4,149 +4,163 @@ using Dalamud.Bindings.ImGui;
 
 namespace Keystroke.UI.Theme;
 
+/// <summary>Selectable accent colours. Values are the bright "on" colour; darker shades are derived.</summary>
+public enum Accent { Lime = 0, Cyan = 1, Magenta = 2, Gold = 3, Crimson = 4, Ice = 5 }
+
 /// <summary>
-/// Dark macOS-style palette and metrics. Pushed only while Keystroke windows draw so other
-/// Dalamud windows keep their own look.
+/// Keystroke's own look: a bevelled charcoal frame, a three-colour signal stripe, an icon rail, group
+/// boxes with titles cut into their borders, sharp corners and one acid accent. Drawn by hand through
+/// the draw list; ImGui's style is only pushed for the few stock controls we still use (inputs, combos).
 /// </summary>
 internal static class Theme
 {
-    // Surfaces (opaque base values; Configure() applies the glass transparency)
-    private static readonly Vector4 WindowBgBase = Rgb(0x1C, 0x1C, 0x1E);
-    private static readonly Vector4 SidebarBgBase = Rgb(0x22, 0x22, 0x25);
-    private static readonly Vector4 CardBgBase = Rgb(0x2C, 0x2C, 0x2E);
+    // Surfaces
+    public static readonly Vector4 Frame = Rgb(0x07, 0x07, 0x08);     // outermost ring + window edge
+    public static readonly Vector4 BevelLight = Rgb(0x3A, 0x3A, 0x3E);
+    public static readonly Vector4 BevelMid = Rgb(0x23, 0x23, 0x26);
+    public static readonly Vector4 Surface = Rgb(0x12, 0x12, 0x14);   // window body
+    public static readonly Vector4 Rail = Rgb(0x0E, 0x0E, 0x10);      // icon rail
+    public static readonly Vector4 Panel = Rgb(0x17, 0x17, 0x19);     // group box body
+    public static readonly Vector4 Inset = Rgb(0x0F, 0x0F, 0x11);     // input / track interiors
+    public static readonly Vector4 InsetLine = Rgb(0x32, 0x32, 0x36);
+    public static readonly Vector4 InsetShadow = Rgb(0x08, 0x08, 0x0A);
 
-    public static Vector4 WindowBg { get; private set; } = WindowBgBase;
-    public static Vector4 SidebarBg { get; private set; } = SidebarBgBase;
-    public static Vector4 CardBg { get; private set; } = CardBgBase;
-    public static readonly Vector4 CardBgHover = Rgb(0x33, 0x33, 0x36);
+    // Text
+    public static readonly Vector4 Text = Rgb(0xC9, 0xC9, 0xCF);
+    public static readonly Vector4 TextDim = Rgb(0x8A, 0x8A, 0x92);
+    public static readonly Vector4 TextFaint = Rgb(0x5C, 0x5C, 0x64);
+    public static readonly Vector4 TextBright = Rgb(0xFF, 0xFF, 0xFF);
+    public static readonly Vector4 TextShadow = new(0, 0, 0, 0.85f);
 
-    /// <summary>
-    /// Applies the appearance settings. Transparency lowers the alpha of the window and sidebar so
-    /// the game shows through; cards keep more opacity so rows stay legible on busy backgrounds.
-    /// ImGui cannot blur what is behind a window, so this is translucency, not a backdrop blur.
-    /// </summary>
-    public static void Configure(AppearanceSettings a)
-    {
-        var t = a.Glass ? Math.Clamp(a.Transparency, 0f, 1f) : 0f;
-        var windowAlpha = 1f - t * 0.55f;      // never below 0.45 so text stays readable
-        var sidebarAlpha = 1f - t * 0.45f;
-        var cardAlpha = a.ContrastCards ? 1f - t * 0.25f : 1f - t * 0.55f;
-        WindowBg = WithAlpha(WindowBgBase, windowAlpha);
-        SidebarBg = WithAlpha(SidebarBgBase, sidebarAlpha);
-        CardBg = WithAlpha(CardBgBase, cardAlpha);
-    }
-    public static readonly Vector4 ControlBg = Rgb(0x3A, 0x3A, 0x3D);
-    public static readonly Vector4 ControlBgHover = Rgb(0x48, 0x48, 0x4C);
-    public static readonly Vector4 ControlBgActive = Rgb(0x55, 0x55, 0x5A);
-    public static readonly Vector4 Separator = new(1f, 1f, 1f, 0.08f);
-    public static readonly Vector4 SidebarSelection = new(1f, 1f, 1f, 0.10f);
+    // Semantic
+    public static readonly Vector4 Warn = Rgb(0xF2, 0xB1, 0x34);
+    public static readonly Vector4 Danger = Rgb(0xE2, 0x4A, 0x4A);
+    public static readonly Vector4 Ok = Rgb(0x6F, 0xD6, 0x5A);
+    public static readonly Vector4 Info = Rgb(0x3D, 0xDC, 0xF5);
 
-    // Labels
-    public static readonly Vector4 Label = Rgb(0xF5, 0xF5, 0xF7);
-    public static readonly Vector4 SecondaryLabel = new(0.92f, 0.92f, 0.96f, 0.60f);
-    public static readonly Vector4 TertiaryLabel = new(0.92f, 0.92f, 0.96f, 0.30f);
+    // Signal stripe: cyan -> accent -> gold
+    public static readonly Vector4 StripeA = Rgb(0x3D, 0xDC, 0xF5);
+    public static readonly Vector4 StripeC = Rgb(0xF5, 0xD1, 0x3D);
 
-    // System colours (macOS dark)
-    public static readonly Vector4 Accent = Rgb(0x0A, 0x84, 0xFF);
-    public static readonly Vector4 AccentHover = Rgb(0x2B, 0x95, 0xFF);
-    public static readonly Vector4 AccentActive = Rgb(0x00, 0x6E, 0xE0);
-    public static readonly Vector4 Green = Rgb(0x30, 0xD1, 0x58);
-    public static readonly Vector4 Red = Rgb(0xFF, 0x45, 0x3A);
-    public static readonly Vector4 Orange = Rgb(0xFF, 0x9F, 0x0A);
-    public static readonly Vector4 Yellow = Rgb(0xFF, 0xD6, 0x0A);
-    public static readonly Vector4 Purple = Rgb(0xBF, 0x5A, 0xF2);
-    public static readonly Vector4 Gray = Rgb(0x8E, 0x8E, 0x93);
+    // Accent (configured)
+    public static Vector4 AccentColor { get; private set; } = Rgb(0xA8, 0xE6, 0x3D);
+    public static Vector4 AccentDark { get; private set; } = Rgb(0x6E, 0x9A, 0x1E);
+    public static Vector4 AccentDeep { get; private set; } = Rgb(0x3F, 0x5A, 0x12);
+    public static Vector4 AccentGlow { get; private set; } = new(0.66f, 0.9f, 0.24f, 0.35f);
+    public static Vector4 AccentText { get; private set; } = Rgb(0xC4, 0xF0, 0x6A);
+    public static Accent CurrentAccent { get; private set; } = Accent.Lime;
 
-    // Metrics (unscaled; multiply by ImGuiHelpers.GlobalScale where needed)
-    public const float WindowRounding = 12f;
-    public const float CardRounding = 10f;
-    public const float ControlRounding = 6f;
-    public const float SidebarWidth = 210f;
-    public const float ContentPadding = 24f;
-    public const float CardPadding = 14f;
-    public const float RowHeight = 40f;
+    public static bool Effects { get; private set; } = true;
+    public static bool ReduceMotion { get; private set; }
+    public static bool AnimatedStripe { get; private set; } = true;
+
+    // Metrics (unscaled)
+    public const float RailWidth = 56f;
+    public const float StripeHeight = 3f;
+    public const float FrameInset = 6f;          // outer ring stack thickness
+    public const float GroupPadding = 10f;
+    public const float GroupGap = 10f;
+    public const float RowHeight = 22f;
+    public const float CheckboxSize = 10f;
+    public const float ControlHeight = 18f;
 
     public static Vector4 Rgb(byte r, byte g, byte b, float a = 1f) => new(r / 255f, g / 255f, b / 255f, a);
-
     public static uint U32(Vector4 c) => ImGui.ColorConvertFloat4ToU32(c);
-
     public static Vector4 WithAlpha(Vector4 c, float a) => new(c.X, c.Y, c.Z, a);
-
     public static Vector4 Lerp(Vector4 a, Vector4 b, float t) => Vector4.Lerp(a, b, Math.Clamp(t, 0f, 1f));
+    public static Vector4 Scale(Vector4 c, float k) => new(Math.Clamp(c.X * k, 0, 1), Math.Clamp(c.Y * k, 0, 1), Math.Clamp(c.Z * k, 0, 1), c.W);
 
-    /// <summary>Pushes the full Keystroke style. Dispose the returned scope to pop it.</summary>
+    /// <summary>Applies the Appearance settings (accent, effects).</summary>
+    public static void Configure(AppearanceSettings a)
+    {
+        CurrentAccent = a.Accent;
+        AccentColor = a.Accent switch
+        {
+            Accent.Cyan => Rgb(0x3D, 0xDC, 0xF5),
+            Accent.Magenta => Rgb(0xE0, 0x4C, 0xE6),
+            Accent.Gold => Rgb(0xF5, 0xD1, 0x3D),
+            Accent.Crimson => Rgb(0xF0, 0x4E, 0x5A),
+            Accent.Ice => Rgb(0xB8, 0xE8, 0xFF),
+            _ => Rgb(0xA8, 0xE6, 0x3D),
+        };
+        AccentDark = Scale(AccentColor, 0.66f);
+        AccentDeep = Scale(AccentColor, 0.38f);
+        AccentGlow = WithAlpha(AccentColor, 0.35f);
+        AccentText = Lerp(AccentColor, Vector4.One, 0.25f);
+        Effects = a.Effects;
+        ReduceMotion = a.ReduceMotion;
+        AnimatedStripe = a.AnimatedStripe && a.Effects;
+    }
+
+    /// <summary>Pushes the ImGui style for the stock controls we still use. Dispose to pop.</summary>
     public static Scope Push()
     {
         var colors = 0;
         void C(ImGuiCol col, Vector4 v) { ImGui.PushStyleColor(col, v); colors++; }
-
-        C(ImGuiCol.WindowBg, WindowBg);
+        C(ImGuiCol.WindowBg, Surface);
         C(ImGuiCol.ChildBg, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.PopupBg, CardBg);
-        C(ImGuiCol.Border, Separator);
+        C(ImGuiCol.PopupBg, Panel);
+        C(ImGuiCol.Border, Frame);
         C(ImGuiCol.BorderShadow, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.Text, Label);
-        C(ImGuiCol.TextDisabled, TertiaryLabel);
-        C(ImGuiCol.FrameBg, ControlBg);
-        C(ImGuiCol.FrameBgHovered, ControlBgHover);
-        C(ImGuiCol.FrameBgActive, ControlBgActive);
-        C(ImGuiCol.TitleBg, WindowBg);
-        C(ImGuiCol.TitleBgActive, WindowBg);
-        C(ImGuiCol.TitleBgCollapsed, WindowBg);
-        C(ImGuiCol.ScrollbarBg, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.ScrollbarGrab, new Vector4(1, 1, 1, 0.18f));
-        C(ImGuiCol.ScrollbarGrabHovered, new Vector4(1, 1, 1, 0.28f));
-        C(ImGuiCol.ScrollbarGrabActive, new Vector4(1, 1, 1, 0.36f));
-        C(ImGuiCol.CheckMark, Accent);
-        C(ImGuiCol.SliderGrab, Rgb(0xE5, 0xE5, 0xEA));
-        C(ImGuiCol.SliderGrabActive, Rgb(0xFF, 0xFF, 0xFF));
-        C(ImGuiCol.Button, ControlBg);
-        C(ImGuiCol.ButtonHovered, ControlBgHover);
-        C(ImGuiCol.ButtonActive, ControlBgActive);
-        C(ImGuiCol.Header, SidebarSelection);
-        C(ImGuiCol.HeaderHovered, new Vector4(1, 1, 1, 0.06f));
-        C(ImGuiCol.HeaderActive, new Vector4(1, 1, 1, 0.12f));
-        C(ImGuiCol.Separator, Separator);
-        C(ImGuiCol.SeparatorHovered, Separator);
-        C(ImGuiCol.SeparatorActive, Separator);
+        C(ImGuiCol.Text, Text);
+        C(ImGuiCol.TextDisabled, TextFaint);
+        C(ImGuiCol.FrameBg, Inset);
+        C(ImGuiCol.FrameBgHovered, Rgb(0x14, 0x14, 0x17));
+        C(ImGuiCol.FrameBgActive, Rgb(0x18, 0x18, 0x1B));
+        C(ImGuiCol.TitleBg, Surface);
+        C(ImGuiCol.TitleBgActive, Surface);
+        C(ImGuiCol.TitleBgCollapsed, Surface);
+        C(ImGuiCol.ScrollbarBg, Inset);
+        C(ImGuiCol.ScrollbarGrab, Rgb(0x2D, 0x2D, 0x31));
+        C(ImGuiCol.ScrollbarGrabHovered, Rgb(0x41, 0x41, 0x46));
+        C(ImGuiCol.ScrollbarGrabActive, Rgb(0x52, 0x52, 0x58));
+        C(ImGuiCol.CheckMark, AccentColor);
+        C(ImGuiCol.SliderGrab, TextBright);
+        C(ImGuiCol.SliderGrabActive, TextBright);
+        C(ImGuiCol.Button, BevelMid);
+        C(ImGuiCol.ButtonHovered, Rgb(0x2C, 0x2C, 0x30));
+        C(ImGuiCol.ButtonActive, Rgb(0x1C, 0x1C, 0x1F));
+        C(ImGuiCol.Header, WithAlpha(AccentColor, 0.18f));
+        C(ImGuiCol.HeaderHovered, new Vector4(1, 1, 1, 0.05f));
+        C(ImGuiCol.HeaderActive, new Vector4(1, 1, 1, 0.09f));
+        C(ImGuiCol.Separator, BevelMid);
+        C(ImGuiCol.SeparatorHovered, BevelMid);
+        C(ImGuiCol.SeparatorActive, BevelMid);
         C(ImGuiCol.ResizeGrip, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.ResizeGripHovered, new Vector4(1, 1, 1, 0.15f));
-        C(ImGuiCol.ResizeGripActive, new Vector4(1, 1, 1, 0.25f));
+        C(ImGuiCol.ResizeGripHovered, new Vector4(1, 1, 1, 0.12f));
+        C(ImGuiCol.ResizeGripActive, new Vector4(1, 1, 1, 0.2f));
         C(ImGuiCol.Tab, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.TabHovered, ControlBgHover);
-        C(ImGuiCol.TabActive, ControlBg);
-        C(ImGuiCol.TableHeaderBg, new Vector4(0, 0, 0, 0));
-        C(ImGuiCol.TableBorderStrong, Separator);
-        C(ImGuiCol.TableBorderLight, Separator);
+        C(ImGuiCol.TabHovered, BevelMid);
+        C(ImGuiCol.TabActive, Panel);
+        C(ImGuiCol.TableHeaderBg, Inset);
+        C(ImGuiCol.TableBorderStrong, BevelMid);
+        C(ImGuiCol.TableBorderLight, BevelMid);
         C(ImGuiCol.TableRowBg, new Vector4(0, 0, 0, 0));
         C(ImGuiCol.TableRowBgAlt, new Vector4(1, 1, 1, 0.02f));
-        C(ImGuiCol.TextSelectedBg, WithAlpha(Accent, 0.35f));
+        C(ImGuiCol.TextSelectedBg, WithAlpha(AccentColor, 0.3f));
         C(ImGuiCol.NavHighlight, new Vector4(0, 0, 0, 0));
 
         var vars = 0;
         void V(ImGuiStyleVar var, float v) { ImGui.PushStyleVar(var, v); vars++; }
         void V2(ImGuiStyleVar var, Vector2 v) { ImGui.PushStyleVar(var, v); vars++; }
-
-        V(ImGuiStyleVar.WindowRounding, WindowRounding);
-        V(ImGuiStyleVar.ChildRounding, CardRounding);
-        V(ImGuiStyleVar.PopupRounding, CardRounding);
-        V(ImGuiStyleVar.FrameRounding, ControlRounding);
-        V(ImGuiStyleVar.GrabRounding, 99f);
-        V(ImGuiStyleVar.ScrollbarRounding, 99f);
-        V(ImGuiStyleVar.TabRounding, ControlRounding);
-        V(ImGuiStyleVar.WindowBorderSize, 1f);
+        V(ImGuiStyleVar.WindowRounding, 0f);
+        V(ImGuiStyleVar.ChildRounding, 0f);
+        V(ImGuiStyleVar.PopupRounding, 0f);
+        V(ImGuiStyleVar.FrameRounding, 0f);
+        V(ImGuiStyleVar.GrabRounding, 0f);
+        V(ImGuiStyleVar.ScrollbarRounding, 0f);
+        V(ImGuiStyleVar.TabRounding, 0f);
+        V(ImGuiStyleVar.WindowBorderSize, 0f);
         V(ImGuiStyleVar.ChildBorderSize, 0f);
         V(ImGuiStyleVar.PopupBorderSize, 1f);
         V(ImGuiStyleVar.FrameBorderSize, 0f);
-        V(ImGuiStyleVar.ScrollbarSize, 10f);
-        V(ImGuiStyleVar.GrabMinSize, 14f);
-        V2(ImGuiStyleVar.WindowPadding, new Vector2(0, 0));
-        V2(ImGuiStyleVar.FramePadding, new Vector2(10, 6));
-        V2(ImGuiStyleVar.ItemSpacing, new Vector2(8, 8));
-        V2(ImGuiStyleVar.ItemInnerSpacing, new Vector2(6, 6));
-        V2(ImGuiStyleVar.CellPadding, new Vector2(8, 6));
-        V2(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.5f, 0.5f));
-
+        V(ImGuiStyleVar.ScrollbarSize, 6f);
+        V(ImGuiStyleVar.GrabMinSize, 6f);
+        V2(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        V2(ImGuiStyleVar.FramePadding, new Vector2(6, 3));
+        V2(ImGuiStyleVar.ItemSpacing, new Vector2(6, 4));
+        V2(ImGuiStyleVar.ItemInnerSpacing, new Vector2(4, 4));
+        V2(ImGuiStyleVar.CellPadding, new Vector2(6, 3));
         return new Scope(colors, vars);
     }
 
@@ -154,17 +168,98 @@ internal static class Theme
     {
         private readonly int colors;
         private readonly int vars;
+        public Scope(int colors, int vars) { this.colors = colors; this.vars = vars; }
+        public void Dispose() { ImGui.PopStyleVar(vars); ImGui.PopStyleColor(colors); }
+    }
 
-        public Scope(int colors, int vars)
-        {
-            this.colors = colors;
-            this.vars = vars;
-        }
+    // ------------------------------------------------------------------ drawing helpers
 
-        public void Dispose()
+    /// <summary>The window frame: black edge, light ring, wide mid ring, light ring, black. Fills the body.</summary>
+    public static void DrawFrame(ImDrawListPtr dl, Vector2 min, Vector2 max, float s)
+    {
+        dl.AddRectFilled(min, max, U32(Frame));
+        Ring(dl, min, max, 1 * s, 1 * s, BevelLight);
+        Ring(dl, min, max, 2 * s, 3 * s, BevelMid);
+        Ring(dl, min, max, 5 * s, 1 * s, BevelLight);
+        dl.AddRectFilled(min + new Vector2(FrameInset * s), max - new Vector2(FrameInset * s), U32(Surface));
+    }
+
+    private static void Ring(ImDrawListPtr dl, Vector2 min, Vector2 max, float inset, float width, Vector4 color)
+    {
+        var a = min + new Vector2(inset);
+        var b = max - new Vector2(inset);
+        dl.AddRectFilled(a, new Vector2(b.X, a.Y + width), U32(color));
+        dl.AddRectFilled(new Vector2(a.X, b.Y - width), b, U32(color));
+        dl.AddRectFilled(a, new Vector2(a.X + width, b.Y), U32(color));
+        dl.AddRectFilled(new Vector2(b.X - width, a.Y), b, U32(color));
+    }
+
+    /// <summary>Inset well for inputs, tracks and combos: shadow line outside, light line inside, dark fill.</summary>
+    public static void DrawInset(ImDrawListPtr dl, Vector2 min, Vector2 max, float s, Vector4? fill = null)
+    {
+        dl.AddRectFilled(min, max, U32(InsetShadow));
+        dl.AddRect(min + new Vector2(1 * s), max - new Vector2(1 * s), U32(InsetLine));
+        dl.AddRectFilled(min + new Vector2(2 * s), max - new Vector2(2 * s), U32(fill ?? Inset));
+    }
+
+    /// <summary>Raised bevel for buttons and keycaps: light top/left edge, dark bottom/right edge.</summary>
+    public static void DrawRaised(ImDrawListPtr dl, Vector2 min, Vector2 max, float s, Vector4 fill, bool pressed = false)
+    {
+        var hi = pressed ? InsetShadow : BevelLight;
+        var lo = pressed ? BevelLight : InsetShadow;
+        dl.AddRectFilled(min, max, U32(Frame));
+        dl.AddRectFilled(min + new Vector2(1 * s), max - new Vector2(1 * s), U32(fill));
+        dl.AddLine(min + new Vector2(1 * s, 1 * s), new Vector2(max.X - 1 * s, min.Y + 1 * s), U32(hi), 1 * s);
+        dl.AddLine(min + new Vector2(1 * s, 1 * s), new Vector2(min.X + 1 * s, max.Y - 1 * s), U32(hi), 1 * s);
+        dl.AddLine(new Vector2(min.X + 1 * s, max.Y - 1 * s), max - new Vector2(1 * s, 1 * s), U32(lo), 1 * s);
+        dl.AddLine(new Vector2(max.X - 1 * s, min.Y + 1 * s), max - new Vector2(1 * s, 1 * s), U32(lo), 1 * s);
+    }
+
+    /// <summary>Three-stop horizontal gradient stripe. With animation on, the stops drift along the bar.</summary>
+    public static void DrawStripe(ImDrawListPtr dl, Vector2 min, float width, float height)
+    {
+        var t = AnimatedStripe && !ReduceMotion ? (float)(ImGui.GetTime() * 0.08 % 1.0) : 0f;
+        const int segments = 24;
+        var segW = width / segments;
+        for (var i = 0; i < segments; i++)
         {
-            ImGui.PopStyleVar(vars);
-            ImGui.PopStyleColor(colors);
+            var u0 = (i / (float)segments + t) % 1f;
+            var u1 = ((i + 1) / (float)segments + t) % 1f;
+            if (u1 < u0) u1 = 1f; // wrap boundary
+            var c0 = StripeColor(u0);
+            var c1 = StripeColor(u1);
+            var a = min + new Vector2(segW * i, 0);
+            var b = a + new Vector2(segW + 0.5f, height);
+            dl.AddRectFilledMultiColor(a, b, U32(c0), U32(c1), U32(c1), U32(c0));
         }
+    }
+
+    /// <summary>Cyan → accent → gold → (back to) cyan across u ∈ [0,1], so the drift wraps seamlessly.</summary>
+    private static Vector4 StripeColor(float u)
+    {
+        u = ((u % 1f) + 1f) % 1f;
+        return u < 1f / 3f ? Lerp(StripeA, AccentColor, u * 3f)
+             : u < 2f / 3f ? Lerp(AccentColor, StripeC, (u - 1f / 3f) * 3f)
+             : Lerp(StripeC, StripeA, (u - 2f / 3f) * 3f);
+    }
+
+    /// <summary>Soft glow: a few expanding translucent rects behind an element.</summary>
+    public static void DrawGlow(ImDrawListPtr dl, Vector2 min, Vector2 max, Vector4 color, float radius, float strength = 1f)
+    {
+        if (!Effects) return;
+        const int layers = 4;
+        for (var i = layers; i >= 1; i--)
+        {
+            var k = i / (float)layers;
+            var a = color.W * strength * (1f - k) * 0.5f;
+            dl.AddRectFilled(min - new Vector2(radius * k), max + new Vector2(radius * k), U32(WithAlpha(color, a)), radius * k);
+        }
+    }
+
+    /// <summary>Text with the 1 px black drop shadow that gives small type its bite on dark panels.</summary>
+    public static void ShadowText(ImDrawListPtr dl, Vector2 pos, Vector4 color, string text, float s)
+    {
+        dl.AddText(pos + new Vector2(1 * s, 1 * s), U32(TextShadow), text);
+        dl.AddText(pos, U32(color), text);
     }
 }
