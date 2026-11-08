@@ -131,7 +131,16 @@ internal sealed class MainWindow : Window
         dl.AddLine(new Vector2(railMax.X, railMin.Y), railMax, Theme.Theme.U32(Theme.Theme.Frame), 1 * s);
         dl.AddLine(new Vector2(railMax.X + 1 * s, railMin.Y), new Vector2(railMax.X + 1 * s, railMax.Y), Theme.Theme.U32(Theme.Theme.BevelMid), 1 * s);
 
-        ImGui.SetCursorScreenPos(railMin + new Vector2(0, 8 * s));
+        // One selection bar that slides between tabs, drawn before the tabs so icons sit on top.
+        var tabH = 44 * s;
+        var tabsTop = railMin.Y + 8 * s;
+        var barY = Widgets.Ease(ImGui.GetID("##railbar"), selected * tabH, 14f);
+        dl.AddRectFilled(new Vector2(railMin.X, tabsTop + barY), new Vector2(railMax.X, tabsTop + barY + tabH), Theme.Theme.U32(Theme.Theme.WithAlpha(Theme.Theme.AccentColor, 0.07f)));
+        dl.AddRectFilled(new Vector2(railMin.X, tabsTop + barY), new Vector2(railMin.X + 2 * s, tabsTop + barY + tabH), Theme.Theme.U32(Theme.Theme.AccentColor));
+        if (Theme.Theme.Effects)
+            Theme.Theme.DrawGlow(dl, new Vector2(railMin.X, tabsTop + barY + 4 * s), new Vector2(railMin.X + 2 * s, tabsTop + barY + tabH - 4 * s), Theme.Theme.AccentColor, 6 * s, 0.7f);
+
+        ImGui.SetCursorScreenPos(new Vector2(railMin.X, tabsTop));
         for (var i = 0; i < pages.Count; i++)
         {
             if (Widgets.RailTab("##tab" + i, pages[i].Icon, pages[i].Title, i == selected, railW)) selected = i;
@@ -162,18 +171,22 @@ internal sealed class MainWindow : Window
         ImGui.SetCursorScreenPos(new Vector2(pos.X + size.X - inset - 26 * s, railMin.Y + 8 * s));
         if (Widgets.Button("##close", Widgets.ButtonKind.Normal, new Vector2(18 * s), Theme.Icon.X, "close")) IsOpen = false;
 
-        // Page cross-fade
+        // Page transition: content slides up a few pixels while a surface-coloured veil fades out.
+        // (ImGui's Alpha style does not touch draw-list drawing, so the veil does the fading.)
         if (shownPage != selected)
         {
             pageFade = Theme.Theme.ReduceMotion || !Theme.Theme.Effects ? 1f : 0f;
             shownPage = selected;
         }
-        pageFade = Math.Min(1f, pageFade + ImGui.GetIO().DeltaTime * 7f);
+        pageFade = Math.Min(1f, pageFade + ImGui.GetIO().DeltaTime * 6f);
+        var ease = 1f - (1f - pageFade) * (1f - pageFade); // ease-out
+        var slide = (1f - ease) * 14 * s;
 
-        ImGui.SetCursorScreenPos(new Vector2(contentX, railMin.Y + headerH + 1 * s));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(14 * s, 12 * s));
-        ImGui.PushStyleVar(ImGuiStyleVar.Alpha, pageFade);
-        if (ImGui.BeginChild("##content", new Vector2(contentW, pos.Y + size.Y - inset - railMin.Y - headerH - 1 * s), false, ImGuiWindowFlags.AlwaysUseWindowPadding))
+        var contentMin = new Vector2(contentX, railMin.Y + headerH + 1 * s);
+        var contentSize = new Vector2(contentW, pos.Y + size.Y - inset - contentMin.Y);
+        ImGui.SetCursorScreenPos(contentMin);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(14 * s, 12 * s + slide));
+        if (ImGui.BeginChild("##content", contentSize, false, ImGuiWindowFlags.AlwaysUseWindowPadding))
         {
             try { pages[selected].Draw(); }
             catch (Exception e)
@@ -182,9 +195,11 @@ internal sealed class MainWindow : Window
                 Widgets.Notice(Theme.Icon.TriangleAlert, Theme.Theme.Danger, "This page failed to draw: " + e.Message);
             }
             ImGui.Dummy(new Vector2(0, 8 * s));
+            if (ease < 0.999f)
+                ImGui.GetWindowDrawList().AddRectFilled(contentMin, contentMin + contentSize, Theme.Theme.U32(Theme.Theme.WithAlpha(Theme.Theme.Surface, 1f - ease)));
         }
         ImGui.EndChild();
-        ImGui.PopStyleVar(2);
+        ImGui.PopStyleVar();
     }
 
     // ------------------------------------------------------------------ compact

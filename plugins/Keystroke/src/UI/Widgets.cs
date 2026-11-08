@@ -496,11 +496,8 @@ internal static class Widgets
         var dl = ImGui.GetWindowDrawList();
         var t = Ease(ImGui.GetID(id), selected ? 1f : hovered ? 0.35f : 0f, 12f);
 
-        if (t > 0.01f)
-        {
-            dl.AddRectFilled(pos, pos + new Vector2(width, h), Theme.Theme.U32(Theme.Theme.WithAlpha(Theme.Theme.AccentColor, 0.06f * t)));
-            dl.AddRectFilled(pos, pos + new Vector2(2 * S, h), Theme.Theme.U32(Theme.Theme.WithAlpha(Theme.Theme.AccentColor, t)));
-        }
+        if (hovered && !selected)
+            dl.AddRectFilled(pos, pos + new Vector2(width, h), Theme.Theme.U32(new Vector4(1, 1, 1, 0.03f)));
         var iconSz = IconSize(icon, true);
         var iconPos = pos + new Vector2((width - iconSz.X) / 2, 7 * S);
         var col = Theme.Theme.Lerp(Theme.Theme.TextDim, Theme.Theme.AccentColor, t);

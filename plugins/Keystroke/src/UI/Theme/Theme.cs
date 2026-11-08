@@ -7,6 +7,9 @@ namespace Keystroke.UI.Theme;
 /// <summary>Selectable accent colours. Values are the bright "on" colour; darker shades are derived.</summary>
 public enum Accent { Lime = 0, Cyan = 1, Magenta = 2, Gold = 3, Crimson = 4, Ice = 5 }
 
+/// <summary>Top stripe colouring.</summary>
+public enum StripeStyle { Rgb = 0, Signal = 1 }
+
 /// <summary>
 /// Keystroke's own look: a bevelled charcoal frame, a three-colour signal stripe, an icon rail, group
 /// boxes with titles cut into their borders, sharp corners and one acid accent. Drawn by hand through
@@ -53,9 +56,10 @@ internal static class Theme
     public static bool Effects { get; private set; } = true;
     public static bool ReduceMotion { get; private set; }
     public static bool AnimatedStripe { get; private set; } = true;
+    public static StripeStyle Stripe { get; private set; } = StripeStyle.Rgb;
 
     // Metrics (unscaled)
-    public const float RailWidth = 56f;
+    public const float RailWidth = 70f;
     public const float StripeHeight = 3f;
     public const float FrameInset = 6f;          // outer ring stack thickness
     public const float GroupPadding = 10f;
@@ -90,6 +94,7 @@ internal static class Theme
         Effects = a.Effects;
         ReduceMotion = a.ReduceMotion;
         AnimatedStripe = a.AnimatedStripe && a.Effects;
+        Stripe = a.Stripe;
     }
 
     /// <summary>Pushes the ImGui style for the stock controls we still use. Dispose to pop.</summary>
@@ -215,11 +220,12 @@ internal static class Theme
         dl.AddLine(new Vector2(max.X - 1 * s, min.Y + 1 * s), max - new Vector2(1 * s, 1 * s), U32(lo), 1 * s);
     }
 
-    /// <summary>Three-stop horizontal gradient stripe. With animation on, the stops drift along the bar.</summary>
+    /// <summary>Horizontal gradient stripe: RGB hue cycle or the cyan-accent-gold signal. Drifts when animated.</summary>
     public static void DrawStripe(ImDrawListPtr dl, Vector2 min, float width, float height)
     {
-        var t = AnimatedStripe && !ReduceMotion ? (float)(ImGui.GetTime() * 0.08 % 1.0) : 0f;
-        const int segments = 24;
+        var speed = Stripe == StripeStyle.Rgb ? 0.18 : 0.08;
+        var t = AnimatedStripe && !ReduceMotion ? (float)(ImGui.GetTime() * speed % 1.0) : 0f;
+        const int segments = 48;
         var segW = width / segments;
         for (var i = 0; i < segments; i++)
         {
@@ -234,13 +240,34 @@ internal static class Theme
         }
     }
 
-    /// <summary>Cyan → accent → gold → (back to) cyan across u ∈ [0,1], so the drift wraps seamlessly.</summary>
+    /// <summary>Colour at u in [0,1] along the stripe; wraps so the drift is seamless.</summary>
     private static Vector4 StripeColor(float u)
     {
         u = ((u % 1f) + 1f) % 1f;
+        if (Stripe == StripeStyle.Rgb) return Hsv(u, 0.85f, 1f);
         return u < 1f / 3f ? Lerp(StripeA, AccentColor, u * 3f)
              : u < 2f / 3f ? Lerp(AccentColor, StripeC, (u - 1f / 3f) * 3f)
              : Lerp(StripeC, StripeA, (u - 2f / 3f) * 3f);
+    }
+
+    /// <summary>HSV (h in turns) to RGB.</summary>
+    public static Vector4 Hsv(float h, float sat, float v)
+    {
+        h = ((h % 1f) + 1f) % 1f * 6f;
+        var i = (int)MathF.Floor(h);
+        var f = h - i;
+        var p = v * (1 - sat);
+        var q = v * (1 - sat * f);
+        var t = v * (1 - sat * (1 - f));
+        return i switch
+        {
+            0 => new Vector4(v, t, p, 1),
+            1 => new Vector4(q, v, p, 1),
+            2 => new Vector4(p, v, t, 1),
+            3 => new Vector4(p, q, v, 1),
+            4 => new Vector4(t, p, v, 1),
+            _ => new Vector4(v, p, q, 1),
+        };
     }
 
     /// <summary>Soft glow: a few expanding translucent rects behind an element.</summary>

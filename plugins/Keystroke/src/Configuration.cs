@@ -45,8 +45,9 @@ public sealed class AppearanceSettings
     public bool Effects { get; set; } = true;
     /// <summary>Keep state changes instant; no drifting or breathing animations.</summary>
     public bool ReduceMotion { get; set; } = false;
-    /// <summary>Let the signal stripe drift slowly.</summary>
+    /// <summary>Let the stripe drift.</summary>
     public bool AnimatedStripe { get; set; } = true;
+    public UI.Theme.StripeStyle Stripe { get; set; } = UI.Theme.StripeStyle.Rgb;
     /// <summary>Show the typed word as keycaps on the dashboard, compact panel and overlay.</summary>
     public bool Keycaps { get; set; } = true;
 }

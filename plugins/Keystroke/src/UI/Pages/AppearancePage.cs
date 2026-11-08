@@ -66,7 +66,9 @@ internal sealed class AppearancePage : Page
         if (a.Effects)
         {
             v = a.AnimatedStripe;
-            if (Widgets.Check("drifting signal stripe", ref v)) { a.AnimatedStripe = v; changed = true; }
+            if (Widgets.Check("drifting stripe", ref v)) { a.AnimatedStripe = v; changed = true; }
+            var st = (int)a.Stripe;
+            Widgets.Row("stripe", 150 * s, () => { if (Widgets.Combo("##stripe", ref st, new[] { "rgb", "signal (cyan / accent / gold)" }, 150 * s)) { a.Stripe = (StripeStyle)st; changed = true; } });
             v = a.ReduceMotion;
             if (Widgets.Check("reduce motion", ref v, "Keeps state changes instant; no drifting or breathing.")) { a.ReduceMotion = v; changed = true; }
         }
