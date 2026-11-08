@@ -20,7 +20,7 @@ internal sealed class HotkeysPage : Page
 
         Widgets.BeginColumns(2);
         Widgets.BeginGroup("bindings");
-        Widgets.Small("Work while the game is unfocused, so pick combinations no other app uses.");
+        Widgets.Wrapped("Work while the game is unfocused, so pick combinations no other app uses.");
         ImGui.Dummy(new Vector2(0, 4 * Widgets.S));
         Binding("start / stop", h.StartStop, ref changed);
         Binding("pause / resume", h.PauseResume, ref changed);
@@ -43,17 +43,15 @@ internal sealed class HotkeysPage : Page
         var s = Widgets.S;
         var isRecording = recording == label;
         var text = isRecording ? "press keys…" : Widgets.HotkeyLabel(b);
-        var enabled = b.Enabled;
+        var enabled = b.Enabled && b.Key != 0;
         var localChanged = false;
 
-        var v = enabled;
-        if (Widgets.Check(label + (b.OnlyWhenGameFocused ? "  (focused only)" : "") + "##en" + label, ref v)) { b.Enabled = v; localChanged = true; }
-        Widgets.Row("", 120 * s, () =>
+        Widgets.Row(label + (b.OnlyWhenGameFocused ? "  (focused only)" : ""), 120 * s, () =>
         {
             if (Widgets.Button(text + "##bind" + label, isRecording ? Widgets.ButtonKind.Accent : Widgets.ButtonKind.Normal, new Vector2(120 * s, Theme.Theme.ControlHeight * s + 2 * s)))
                 recording = isRecording ? null : label;
             if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) { b.OnlyWhenGameFocused = !b.OnlyWhenGameFocused; localChanged = true; }
-        });
+        }, enabled ? "Click to rebind. Esc while recording turns the binding off. Right-click toggles focused-only." : "Off. Click and press a combination to enable.");
 
         if (isRecording && Plugin.Hotkeys.TryCaptureBinding(out var captured))
         {

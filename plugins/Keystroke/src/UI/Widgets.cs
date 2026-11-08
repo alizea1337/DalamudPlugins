@@ -153,6 +153,9 @@ internal static class Widgets
     {
         var w = width > 0 ? width : (columnWidth > 0 ? columnWidth : ImGui.GetContentRegionAvail().X);
         var outer = ImGui.GetCursorScreenPos();
+        // After a previous group ImGui's next line starts at the window edge; inside a column layout
+        // the group must stay on its column's X.
+        if (columnWidth > 0) outer.X = columnStart.X + column * (columnWidth + Theme.Theme.GroupGap * S);
         var pad = Theme.Theme.GroupPadding * S;
         var titleH = ImGui.GetTextLineHeight();
 

@@ -138,7 +138,7 @@ internal sealed class MainWindow : Window
         }
 
         // Rail footer: state dot + compact toggle
-        var footerY = railMax.Y - 40 * s;
+        var footerY = railMax.Y - 54 * s;
         var (col, label) = StateBadge(plugin.Controller.State);
         ImGui.SetCursorScreenPos(new Vector2(railMin.X + 6 * s, footerY));
         var pulse = plugin.Controller.State is AutomationState.Playing or AutomationState.Queued;

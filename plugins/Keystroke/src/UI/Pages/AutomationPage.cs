@@ -54,7 +54,7 @@ internal sealed class AutomationPage : Page
         Widgets.Column(1);
 
         Widgets.BeginGroup("stop conditions");
-        Widgets.Small("When one is met the current game finishes, you leave, and nothing re-queues.");
+        Widgets.Wrapped("When one is met the current game finishes, you leave, and nothing re-queues.");
         ImGui.Dummy(new System.Numerics.Vector2(0, 4 * s));
         v = sc.StopAfterGamesEnabled;
         if (Widgets.Check("after a number of games", ref v)) { sc.StopAfterGamesEnabled = v; changed = true; }
