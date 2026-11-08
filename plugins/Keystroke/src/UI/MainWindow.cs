@@ -142,9 +142,10 @@ internal sealed class MainWindow : Window
 
         // No item spacing between tabs so their pitch matches tabH exactly (the bar relies on it).
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
-        ImGui.SetCursorScreenPos(new Vector2(railMin.X, tabsTop));
         for (var i = 0; i < pages.Count; i++)
         {
+            // Explicit position every time: ImGui's next line would start at the window edge, not the rail.
+            ImGui.SetCursorScreenPos(new Vector2(railMin.X, tabsTop + i * tabH));
             if (Widgets.RailTab("##tab" + i, pages[i].Icon, pages[i].Title, i == selected, railW)) selected = i;
         }
         ImGui.PopStyleVar();
