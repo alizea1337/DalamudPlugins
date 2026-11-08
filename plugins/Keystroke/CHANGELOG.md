@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+New interface. A bevelled charcoal frame with a drifting cyan-lime-gold signal stripe, an icon
+rail, and pages laid out as group boxes with cut-in titles. Checkbox rows, thin accent sliders,
+inset fields, bevel buttons. The word being typed is shown as keycaps that press down as keys go
+out, on the dashboard, the compact strip and the overlay. Six selectable accents; effects and
+reduce-motion switches on the new "look" page. DejaVu Sans replaces Inter.
+
 ## 1.0.0
 
 First stable release. Everything from the 0.1.0 testing build, verified in play: typing,

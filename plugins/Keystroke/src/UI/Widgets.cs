@@ -293,6 +293,7 @@ internal static class Widgets
         var trackH = 4 * S;
         var labelH = ImGui.GetTextLineHeight();
         var totalH = labelH + 4 * S + trackH + 6 * S + labelH * 0.9f;
+        ImGui.Dummy(new Vector2(0, 2 * S)); // breathing room after a preceding row
         var pos = ImGui.GetCursorScreenPos();
         var dl = ImGui.GetWindowDrawList();
 
