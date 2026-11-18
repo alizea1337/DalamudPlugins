@@ -82,7 +82,7 @@ public sealed class CharacterProfile
     public List<JobStats> Jobs { get; set; } = new();
     /// <summary>SecretRecipeBook rows the character has learned.</summary>
     public List<uint> MasterBooks { get; set; } = new();
-    /// <summary>Folklore tomes read, by GatheringSubCategory division.</summary>
+    /// <summary>Folklore tomes read, by the tome's item id.</summary>
     public List<uint> FolkloreTomes { get; set; } = new();
 
     /// <summary>Base stats per discipline and level ("Hand:100"), kept between checks.</summary>

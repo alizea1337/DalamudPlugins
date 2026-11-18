@@ -108,12 +108,8 @@ internal sealed class PlanService : IDisposable
         return null;
     }
 
-    private static unsafe bool HasTome(uint division)
-    {
-        if (!Services.PlayerState.IsLoaded) return true;
-        var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
-        return ps == null || ps->IsFolkloreBookUnlocked(division);
-    }
+    private static bool HasTome(uint tomeItem)
+        => !Services.PlayerState.IsLoaded || ItemUnlocks.IsLearned(tomeItem);
 
     /// <summary>Among several recipes for one item, take one the character can craft now on its best-levelled job.</summary>
     private static RecipeInfo? ChooseRecipe(IReadOnlyList<RecipeInfo> recipes)

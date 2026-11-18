@@ -34,7 +34,7 @@ public sealed class PlannerOptions
     /// <summary>Why the character can't use a recipe (level, master book), or null when it can.</summary>
     public System.Func<RecipeInfo, string?>? RecipeBlocker { get; init; }
 
-    /// <summary>Whether the character has read a folklore tome (by GatheringSubCategory division). Null: assume yes.</summary>
+    /// <summary>Whether the character has read a folklore tome (by the tome's item id). Null: assume yes.</summary>
     public System.Func<uint, bool>? HasTome { get; init; }
 }
 

@@ -112,7 +112,7 @@ internal sealed class CharacterPage : Page
         foreach (var job in ClassJobs.Gatherers)
         {
             var tomes = catalog.FolkloreTomes.Where(t => t.ClassJobId == job).ToList();
-            BookRow(job, tomes.Count, tomes.Count(t => p.FolkloreTomes.Contains(t.Division)), tomes.Where(t => !p.FolkloreTomes.Contains(t.Division)).Select(t => t.Name).ToList());
+            BookRow(job, tomes.Count, tomes.Count(t => p.FolkloreTomes.Contains(t.ItemId)), tomes.Where(t => !p.FolkloreTomes.Contains(t.ItemId)).Select(t => t.Name).ToList());
         }
     }
 

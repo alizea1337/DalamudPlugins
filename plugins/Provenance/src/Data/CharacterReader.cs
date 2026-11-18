@@ -20,12 +20,6 @@ internal static unsafe class CharacterReader
     private const uint WellFed = 48;
     private const uint Medicated = 49;
 
-    /// <summary>Quest that teaches Manipulation, per crafter (ClassJob 8–15).</summary>
-    private static readonly Dictionary<uint, uint> ManipulationQuest = new()
-    {
-        [8] = 67979, [9] = 68153, [10] = 68132, [11] = 68137, [12] = 68147, [13] = 67969, [14] = 67974, [15] = 68142,
-    };
-
     public static CharacterProfile? Read(GameCatalog catalog, CharacterProfile? previous)
     {
         var ps = GamePlayerState.Instance();
@@ -69,22 +63,22 @@ internal static unsafe class CharacterReader
         }
 
         foreach (var job in ClassJobs.Crafters.Concat(ClassJobs.Gatherers))
-            profile.Jobs.Add(ReadJob(job, gearsets, currentJob, live, profile));
+            profile.Jobs.Add(ReadJob(job, gearsets, currentJob, live, profile, catalog));
 
         foreach (var book in catalog.MasterBooks)
             if (ps->IsSecretRecipeBookUnlocked(book.Id)) profile.MasterBooks.Add(book.Id);
         foreach (var tome in catalog.FolkloreTomes)
-            if (ps->IsFolkloreBookUnlocked(tome.Division)) profile.FolkloreTomes.Add(tome.Division);
+            if (ItemUnlocks.IsLearned(tome.ItemId)) profile.FolkloreTomes.Add(tome.ItemId);
 
         profile.Note = notes.Count > 0 ? string.Join(" ", notes) : null;
         return profile;
     }
 
-    private static JobStats ReadJob(uint job, RaptureGearsetModule* module, uint currentJob, int[]? live, CharacterProfile profile)
+    private static JobStats ReadJob(uint job, RaptureGearsetModule* module, uint currentJob, int[]? live, CharacterProfile profile, GameCatalog catalog)
     {
         var d = ClassJobs.Of(job);
         var stats = new JobStats { ClassJobId = job, Level = Level(job) };
-        if (ClassJobs.IsCrafter(job) && ManipulationQuest.TryGetValue(job, out var quest))
+        if (ClassJobs.IsCrafter(job) && catalog.ManipulationQuest.TryGetValue(job, out var quest))
             stats.Manipulation = QuestManager.IsQuestComplete(quest);
 
         // The highest item level gearset for the job is the one a run would equip.

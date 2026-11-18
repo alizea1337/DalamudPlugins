@@ -72,8 +72,8 @@ public enum Obtain
 }
 
 /// <param name="Tome">
-/// Folklore tome (GatheringSubCategory division) needed for the item's timed nodes or fishing holes,
-/// or 0 when at least one of them needs no tome.
+/// Item id of the folklore tome the item's timed nodes or fishing holes need, or 0 when at least one
+/// of them needs no tome.
 /// </param>
 public readonly record struct ItemSources(Obtain Flags, uint VendorPrice, uint Tome = 0)
 {

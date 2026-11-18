@@ -10,7 +10,7 @@ namespace Provenance.Data;
 
 internal sealed record MasterBook(uint Id, string Name, Job? Job);
 
-internal sealed record FolkloreTome(uint Division, string Name, uint ClassJobId);
+internal sealed record FolkloreTome(uint ItemId, string Name, uint ClassJobId);
 
 /// <summary>One row of the recipe browser.</summary>
 internal sealed record BrowseEntry(uint RecipeId, uint ItemId, string Name, Job Job, int Level, int Stars, uint Icon, int Yield, bool Expert, uint MasterBook)
@@ -200,9 +200,13 @@ internal sealed class GameCatalog : IGameCatalog
         bool IsUseful(uint id) => recipesByItem.ContainsKey(id) || sources.ContainsKey(id);
     }
 
-    /// <summary>A sub category only locks nodes when it names a folklore book.</summary>
+    /// <summary>
+    /// A sub category locks its nodes behind the tome item it names. Mining and botany tomes of one
+    /// region share a Division, so the item is the only reliable key. Rows without an item
+    /// (Diadem, restoration) are not book-locked.
+    /// </summary>
     private static uint TomeOf(GatheringSubCategory? sub)
-        => sub is { } sc && !sc.FolkloreBook.IsEmpty ? sc.Division : 0u;
+        => sub is { } sc && !sc.FolkloreBook.IsEmpty ? sc.Item.RowId : 0u;
 
     private void NoteTome(uint itemId, uint tome)
     {
@@ -241,12 +245,21 @@ internal sealed class GameCatalog : IGameCatalog
         var tomes = new Dictionary<uint, FolkloreTome>();
         foreach (var sc in Services.Data.GetExcelSheet<GatheringSubCategory>())
         {
-            if (sc.FolkloreBook.IsEmpty || sc.Division == 0 || tomes.ContainsKey(sc.Division)) continue;
+            var item = sc.Item.RowId;
+            if (sc.FolkloreBook.IsEmpty || item == 0 || tomes.ContainsKey(item)) continue;
             var name = sc.Item.ValueNullable?.Name.ExtractText() is { Length: > 0 } n ? n : sc.FolkloreBook.ExtractText();
-            tomes[sc.Division] = new FolkloreTome(sc.Division, name, sc.ClassJob.RowId);
+            tomes[item] = new FolkloreTome(item, name, sc.ClassJob.RowId);
         }
-        FolkloreTomes = tomes.Values.OrderBy(t => t.ClassJobId).ThenBy(t => t.Division).ToList();
+        FolkloreTomes = tomes.Values.OrderBy(t => t.ClassJobId).ThenBy(t => t.ItemId).ToList();
+
+        // Manipulation is learned through a class quest; the action rows (one per crafter) name it.
+        foreach (var action in Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>())
+            if (action.RowId is >= 4574 and <= 4581 && action.UnlockLink.RowId != 0)
+                ManipulationQuest[action.ClassJob.RowId] = action.UnlockLink.RowId;
     }
+
+    /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
+    public Dictionary<uint, uint> ManipulationQuest { get; } = new();
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 
