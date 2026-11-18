@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+Scrips, monster drops, travel and security.
 
 - Timed nodes: while waiting for one, the run goes to where it spawns (teleport, then mount up and
   ride or fly there) and crafts or waits on the spot, so gathering starts as soon as it opens.

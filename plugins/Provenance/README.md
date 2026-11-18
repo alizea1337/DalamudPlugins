@@ -6,7 +6,7 @@ books, vendors, monster drops, gathering and crafting in one run.
 
 Open it with `/provenance` (or `/prov`).
 
-## What works today (0.1)
+## What it does
 
 - **Import** a Teamcraft list in any of three forms:
   - a list link (`ffxivteamcraft.com/list/…`), downloaded from Teamcraft's public database,

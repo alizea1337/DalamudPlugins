@@ -16,7 +16,7 @@ https://raw.githubusercontent.com/alizea1337/DalamudPlugins/main/repo.json
 | Plugin | Description | Status |
 |---|---|---|
 | [Keystroke](plugins/Keystroke) | Automates Keybound Brawler typing with humanized input, auto-queue and reward tracking. | testing |
-| [Provenance](plugins/Provenance) | Turns a Teamcraft list into finished items: gathers, buys and crafts every material for you. | in development |
+| [Provenance](plugins/Provenance) | Turns a Teamcraft list into finished items: gathers, buys and crafts every material for you. | testing |
 
 ## Releasing
 
