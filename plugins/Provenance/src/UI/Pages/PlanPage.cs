@@ -186,7 +186,7 @@ internal sealed class PlanPage : Page
         Ui.Icon(FontAwesomeIcon.Book, Palette.Warn);
         ImGui.SameLine(0, 10 * s);
         using (Ui.F.Strong.Push()) Ui.Text("Learn first", Palette.Warn);
-        Ui.Wrapped("Some recipes or legendary nodes in this order need a book you haven't learned. The run reads it before anything else once it's in your bags.");
+        Ui.Wrapped("Some recipes or legendary nodes in this order need a book you haven't learned. The run buys it at an exchange when you have the scrips or tokens, and reads it before anything else.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         foreach (var line in plan.Learn)
         {
@@ -196,9 +196,11 @@ internal sealed class PlanPage : Page
             Ui.Text(catalog.ItemName(line.ItemId));
             ImGui.SameLine(0, 8 * s);
             if (line.Remaining == 0) Ui.Chip("in your bags, read first", Palette.Accent);
+            else if (line.WillBuy) Ui.Chip("bought first", Palette.Accent);
             else Ui.Chip("get it first", Palette.Danger);
             var forText = "Needed for " + string.Join(", ", line.NeededFor.Take(4).Select(catalog.ItemName)) + (line.NeededFor.Count > 4 ? $" and {line.NeededFor.Count - 4} more" : "") + ".";
-            if (line.Remaining > 0 && catalog.SoldAt(line.ItemId) is { } shop) forText += $" Sold at the {shop} exchange.";
+            if (line.Remaining > 0 && line.Purchase is { } purchase) forText += " " + purchase.Text + ".";
+            else if (line.Remaining > 0 && catalog.SoldAt(line.ItemId) is { } shop) forText += $" Sold at the {shop} exchange.";
             using (Ui.F.Small.Push()) Ui.Muted(forText);
             ImGui.EndGroup();
         }

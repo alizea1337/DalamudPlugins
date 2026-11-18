@@ -44,7 +44,15 @@ public sealed class PlannerOptions
 
     /// <summary>Whether the character has read a folklore tome (by the tome's item id). Null: assume yes.</summary>
     public System.Func<uint, bool>? HasTome { get; init; }
+
+    /// <summary>How a run could buy a book or tome (by item id) at an exchange; null when no exchange sells it.</summary>
+    public System.Func<uint, BookPurchase?>? BuyBook { get; init; }
 }
+
+/// <summary>A book or tome sold at a scrip or token exchange.</summary>
+/// <param name="CanBuy">The character has the currency and can reach the exchange.</param>
+/// <param name="Text">"300 Purple Crafters' Scrips at the scrip exchange in Solution Nine", or why it can't be bought.</param>
+public sealed record BookPurchase(bool CanBuy, string Text);
 
 /// <summary>Everything the plan knows about one item, summed over the whole order.</summary>
 public sealed class PlanLine
@@ -71,6 +79,12 @@ public sealed class PlanLine
 
     /// <summary>For books and tomes to learn: the items that need it.</summary>
     public IReadOnlyList<uint> NeededFor { get; internal set; } = System.Array.Empty<uint>();
+
+    /// <summary>For books and tomes not in the bags: where the run can buy it, if anywhere.</summary>
+    public BookPurchase? Purchase { get; internal set; }
+
+    /// <summary>A book the run buys before reading it.</summary>
+    public bool WillBuy => Supply == Supply.Learn && Remaining > 0 && Purchase is { CanBuy: true };
 }
 
 /// <summary>A node of the display tree: one target and the materials under it.</summary>
@@ -94,7 +108,7 @@ public sealed class Plan
         this.lines = lines;
         CraftSteps = craftSteps;
         Tree = tree;
-        Missing = lines.Values.Where(l => l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0).ToList();
+        Missing = lines.Values.Where(l => l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0 && !l.WillBuy).ToList();
         Learn = lines.Values.Where(l => l.Supply == Supply.Learn).ToList();
         VendorGil = lines.Values.Where(l => l.Supply == Supply.Vendor).Sum(l => (long)l.Remaining * l.VendorUnitPrice);
     }

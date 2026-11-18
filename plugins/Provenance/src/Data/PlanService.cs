@@ -83,6 +83,7 @@ internal sealed class PlanService : IDisposable
         dirty = false;
         nextRebuild = DateTime.UtcNow.AddSeconds(10);
         var c = config();
+        reachable.Clear();
         Plan = Planner.Build(c.Order, catalog, owned, new PlannerOptions
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
@@ -92,7 +93,47 @@ internal sealed class PlanService : IDisposable
             RecipeBlocker = RecipeBlocker,
             MissingBook = r => MissingBook(r, catalog),
             HasTome = HasTome,
+            BuyBook = BuyBook,
         });
+    }
+
+    private readonly Dictionary<uint, bool> reachable = new();
+
+    private bool CanReach(uint territory)
+        => reachable.TryGetValue(territory, out var ok) ? ok : reachable[territory] = Teleporter.CanReach(territory);
+
+    /// <summary>
+    /// The exchange to buy a book or tome at: one the character can reach, cheapest first, then the
+    /// one closest to an aetheryte (cities before outlying zones). Null when no reachable exchange sells it.
+    /// </summary>
+    public ExchangeOffer? BookOffer(uint itemId)
+    {
+        var catalog = Catalog;
+        if (catalog == null) return null;
+        return catalog.Exchanges.For(itemId).Where(o => CanReach(o.TerritoryId))
+            .OrderBy(o => o.Cost)
+            .ThenByDescending(o => GameState.CurrencyCount(o.CurrencyItemId) >= o.Cost)
+            .ThenBy(o => o.NpcEntries)
+            .ThenBy(o => Services.Data.GetExcelSheet<TerritoryType>().GetRowOrDefault(o.TerritoryId)?.TerritoryIntendedUse.RowId == 0 ? 0 : 1)
+            .FirstOrDefault();
+    }
+
+    /// <summary>What the planner shows for a book that isn't in the bags: bought by the run, or why not.</summary>
+    private BookPurchase? BuyBook(uint itemId)
+    {
+        var catalog = Catalog;
+        if (catalog == null || !Services.ClientState.IsLoggedIn) return null;
+        var all = catalog.Exchanges.For(itemId);
+        if (all.Count == 0) return null;
+        if (BookOffer(itemId) is not { } offer)
+        {
+            var any = all.OrderBy(o => o.Cost).First();
+            return new BookPurchase(false, $"Sold for {any.Cost:N0} {any.CurrencyName} by {any.Who} in {any.PlaceName}, which you can't teleport to yet");
+        }
+        var have = GameState.CurrencyCount(offer.CurrencyItemId);
+        if (have < offer.Cost)
+            return new BookPurchase(false, $"Costs {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName}; you have {have:N0}");
+        return new BookPurchase(true, $"The run buys it for {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName} (you have {have:N0})");
     }
 
     /// <summary>

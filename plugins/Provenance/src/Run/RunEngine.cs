@@ -99,6 +99,7 @@ internal sealed class RunEngine : IDisposable
         Crafter.Crafted += OnCrafted;
         Shopper = new Shopper(plugin, Add);
         Retainers = new RetainerRun(plugin, Add);
+        Books = new BookBuyer(plugin, Add);
         cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
@@ -112,6 +113,9 @@ internal sealed class RunEngine : IDisposable
     public Crafter Crafter { get; }
     public Shopper Shopper { get; }
     public RetainerRun Retainers { get; }
+    public BookBuyer Books { get; }
+    /// <summary>The learn stage is buying books at exchanges before reading them.</summary>
+    private bool buyingBooks;
     public IReadOnlyList<RunLogEntry> Log => log;
     /// <summary>When the next timed node opens, while only timed nodes are left.</summary>
     public TimeSpan? NextWindow { get; private set; }
@@ -147,8 +151,8 @@ internal sealed class RunEngine : IDisposable
         if (gather && !GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
         if (gather && !Vnav.Available) return "vnavmesh isn't loaded.";
         if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
-        if ((plan.Count(Supply.Vendor) > 0 || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
-            return "vnavmesh isn't loaded; it walks to vendors and summoning bells.";
+        if ((plan.Count(Supply.Vendor) > 0 || plan.Learn.Any(l => l.WillBuy) || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
+            return "vnavmesh isn't loaded; it walks to vendors, exchanges and summoning bells.";
         if (UnreachableVendorItem() is { } unreachable)
             return $"No vendor you can reach sells {plugin.Plans.Catalog!.ItemName(unreachable)} under your price cap; get it yourself, or attune to more aetherytes and aethernet shards.";
         if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
@@ -198,6 +202,26 @@ internal sealed class RunEngine : IDisposable
     private void StartLearning()
     {
         plugin.Plans.Invalidate();
+        // Books not in the bags that an exchange sells: buy them first, then read everything.
+        var buy = plugin.Plans.Plan.Learn.Where(l => l.WillBuy)
+            .Select(l => plugin.Plans.BookOffer(l.ItemId) is { } offer ? new BookOrder(l.ItemId, offer) : null)
+            .OfType<BookOrder>().ToList();
+        if (buy.Count > 0)
+        {
+            Stage = RunStage.Learn;
+            Headline = "Buying books";
+            buyingBooks = true;
+            learnDeadline = default;
+            Books.Begin(buy);
+            Add($"Buying {buy.Count} {(buy.Count == 1 ? "book" : "books")} first: {string.Join(", ", buy.Select(b => plugin.Plans.Catalog!.ItemName(b.ItemId)))}.", false);
+            return;
+        }
+        ReadBooks();
+    }
+
+    private void ReadBooks()
+    {
+        buyingBooks = false;
         toLearn.Clear();
         foreach (var l in plugin.Plans.Plan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
         if (toLearn.Count == 0) { StartVendors(); return; }
@@ -447,6 +471,8 @@ internal sealed class RunEngine : IDisposable
         cleaning = false;
         Shopper.Cancel();
         Retainers.Cancel();
+        Books.Cancel();
+        buyingBooks = false;
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
 
@@ -485,6 +511,7 @@ internal sealed class RunEngine : IDisposable
         if (working && Crafting) Crafter.Tick();
         if (working && Stage == RunStage.Vendors) Shopper.Tick();
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
+        if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
 
@@ -577,6 +604,16 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Uses each book or tome from the bags and waits until the game counts it as learned.</summary>
     private unsafe void TickLearning()
     {
+        if (buyingBooks)
+        {
+            Detail = Books.Status;
+            if (Books.Failure is { } why) { Stop(why, true, now: true); return; }
+            if (Phase == RunPhase.Stopping) { Stop(pendingStop ?? "Stopped.", pendingStopProblem, now: true); return; }
+            if (!Books.Finished) return; // a pause waits until the books are bought
+            plugin.Plans.Invalidate();
+            ReadBooks();
+            return;
+        }
         if (Phase is RunPhase.Pausing) { Phase = RunPhase.Paused; Headline = "Paused"; return; }
         if (Phase != RunPhase.Running) return;
         if (!toLearn.TryPeek(out var item)) { plugin.Plans.Invalidate(); StartAfterLearning(); return; }

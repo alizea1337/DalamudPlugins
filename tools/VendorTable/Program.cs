@@ -2,8 +2,9 @@
 //
 // NPC positions aren't in the game's Excel sheets for most vendors, and reading the zone layout
 // files in game is unsafe (some crash Lumina's parser). Teamcraft (MIT) publishes NPC map positions;
-// this tool keeps only NPCs that sell something for gil and converts their map coordinates to world
-// X/Z with each map's scale and offset.
+// this tool keeps only NPCs that sell something (gil shops, and the scrip/token exchanges that sell
+// master books and folklore tomes) and converts their map coordinates to world X/Z with each map's
+// scale and offset.
 //
 // Usage: dotnet run -- <game sqpack folder> <teamcraft npcs.json> <output vendors.json>
 // npcs.json: https://raw.githubusercontent.com/ffxiv-teamcraft/ffxiv-teamcraft/staging/libs/data/src/lib/json/npcs.json
@@ -20,13 +21,15 @@ if (args.Length < 3)
 
 var game = new GameData(args[0], new LuminaOptions { DefaultExcelLanguage = Lumina.Data.Language.English });
 var gilShops = game.GetSubrowExcelSheet<GilShopItem>()!.Where(r => r.Count > 0).Select(r => r.RowId).ToHashSet();
+var exchanges = game.GetExcelSheet<SpecialShop>()!.Select(r => r.RowId)
+    .Concat(game.GetExcelSheet<InclusionShop>()!.Select(r => r.RowId)).ToHashSet();
 var topics = game.GetExcelSheet<TopicSelect>()!;
 var pre = game.GetExcelSheet<PreHandler>()!;
 var maps = game.GetExcelSheet<Map>()!;
 
 bool SellsForGil(uint data, int depth)
 {
-    if (gilShops.Contains(data)) return true;
+    if (gilShops.Contains(data) || exchanges.Contains(data)) return true;
     if (depth > 2) return false;
     if (topics.GetRowOrDefault(data) is { } t) return t.Shop.Any(s => s.RowId != 0 && SellsForGil(s.RowId, depth + 1));
     if (pre.GetRowOrDefault(data) is { } p) return SellsForGil(p.Target.RowId, depth + 1);
@@ -66,6 +69,6 @@ var output = new
     vendors = table.ToDictionary(kv => kv.Key.ToString(CultureInfo.InvariantCulture), kv => kv.Value),
 };
 File.WriteAllText(args[2], JsonSerializer.Serialize(output));
-Console.WriteLine($"{vendors.Count} gil vendors in the game data, {table.Count} with a position, written to {args[2]}");
+Console.WriteLine($"{vendors.Count} vendors and exchanges in the game data, {table.Count} with a position, written to {args[2]}");
 if (table.TryGetValue(1000999, out var check)) Console.WriteLine($"check: Soemrwyb (1000999) -> territory {check[0]}, X {check[1]}, Z {check[2]} (layout file: 128, -29, 198)");
 return 0;

@@ -90,6 +90,14 @@ internal static unsafe class GameState
         return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
     }
 
+    /// <summary>Scrips, tokens and other exchange currencies: the currency tab or the bags, whichever holds them.</summary>
+    public static int CurrencyCount(uint itemId)
+    {
+        var inv = InventoryManager.Instance();
+        if (inv == null) return 0;
+        return Math.Max(inv->GetItemCountInContainer(itemId, InventoryType.Currency, false, 0), inv->GetInventoryItemCount(itemId, false, false, false, 0));
+    }
+
     public static int BagCount(uint itemId, bool hq)
     {
         var inv = InventoryManager.Instance();

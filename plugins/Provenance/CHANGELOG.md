@@ -17,6 +17,10 @@
   Perception gathered items ask for, all against your best gearsets plus the picked food and
   medicine. Anything the character can't do keeps the run from starting.
 - Run page counts gathered items ("6 of 10 gathered") instead of finished kinds.
+- Master books and folklore tomes are bought at scrip and token exchanges when you have the
+  currency: the run travels to a scrip exchange it can reach, picks the page and subpage, buys the
+  book and reads it before anything else. The plan says what it costs and how much you have; a
+  book you can't afford still has to be got first. Exchange NPC positions are now in vendors.json.
 
 ## 0.5.0
 

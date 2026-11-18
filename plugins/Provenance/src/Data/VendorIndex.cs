@@ -81,7 +81,8 @@ internal sealed class VendorIndex
         return index;
     }
 
-    private static Dictionary<uint, (uint Territory, Vector2 Position)> LoadPositions()
+    /// <summary>NPC id → zone and world X/Z, from the shipped vendors.json (gil vendors and exchanges).</summary>
+    internal static Dictionary<uint, (uint Territory, Vector2 Position)> LoadPositions()
     {
         var result = new Dictionary<uint, (uint, Vector2)>();
         using var stream = typeof(VendorIndex).Assembly.GetManifestResourceStream(Resource);

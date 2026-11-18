@@ -99,6 +99,36 @@ public class CharacterTests
     }
 
     [Fact]
+    public void A_book_the_run_can_buy_does_not_block_the_start()
+    {
+        const uint Book = 9001;
+        var catalog = new FakeCatalog();
+        PlanLine Build(BookPurchase? purchase, out Plan plan)
+        {
+            plan = Planner.Build(OrderOf(Bow, 1), catalog, Nothing, new PlannerOptions
+            {
+                MissingBook = r => r.ItemId == Bow ? Book : 0,
+                BuyBook = id => id == Book ? purchase : null,
+            });
+            return plan[Book]!;
+        }
+
+        var affordable = Build(new BookPurchase(true, "300 Purple Crafters' Scrips"), out var buyPlan);
+        Assert.True(affordable.WillBuy);
+        Assert.True(buyPlan.CanStart);
+        Assert.Single(buyPlan.Learn);
+
+        var tooPoor = Build(new BookPurchase(false, "Costs 300 Purple Crafters' Scrips; you have 120"), out var poorPlan);
+        Assert.False(tooPoor.WillBuy);
+        Assert.False(poorPlan.CanStart);
+        Assert.Equal("Costs 300 Purple Crafters' Scrips; you have 120", tooPoor.ManualReason);
+
+        var nowhere = Build(null, out var nowherePlan);
+        Assert.False(nowhere.WillBuy);
+        Assert.False(nowherePlan.CanStart);
+    }
+
+    [Fact]
     public void A_recipe_without_a_missing_book_is_preferred()
     {
         var catalog = new FakeCatalog();

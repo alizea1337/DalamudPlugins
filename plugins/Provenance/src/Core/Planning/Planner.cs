@@ -65,10 +65,11 @@ public static class Planner
             var still = users.Where(u => lines.TryGetValue(u, out var l) && l.Remaining > 0).Distinct().ToList();
             if (still.Count == 0) continue;
             var have = Math.Min(1, Math.Max(0, owned.GetValueOrDefault(book)));
+            var purchase = have > 0 ? null : options.BuyBook?.Invoke(book);
             lines[book] = new PlanLine
             {
-                ItemId = book, Supply = Supply.Learn, Needed = 1, FromStock = have, NeededFor = still,
-                ManualReason = have > 0 ? null : "Not learned yet and not in your bags",
+                ItemId = book, Supply = Supply.Learn, Needed = 1, FromStock = have, NeededFor = still, Purchase = purchase,
+                ManualReason = have > 0 ? null : purchase?.Text ?? "Not learned yet and not in your bags",
             };
         }
         return new Plan(lines, craftSteps, tree);

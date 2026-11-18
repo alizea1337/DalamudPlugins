@@ -380,6 +380,7 @@ internal sealed class GameCatalog : IGameCatalog
             foreach (var receive in entry.ReceiveItems)
                 if (wanted.Contains(receive.Item.RowId)) soldAt.TryAdd(receive.Item.RowId, shopName);
         }
+        Exchanges = ExchangeIndex.Build(wanted, VendorIndex.LoadPositions());
 
         // Manipulation is learned through a class quest; the action rows (one per crafter) name it.
         foreach (var action in Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>())
@@ -440,6 +441,9 @@ internal sealed class GameCatalog : IGameCatalog
 
     /// <summary>The exchange that sells a book or tome, when the game data names one.</summary>
     public string? SoldAt(uint itemId) => soldAt.GetValueOrDefault(itemId);
+
+    /// <summary>Scrip and token exchanges that sell master books and folklore tomes.</summary>
+    public ExchangeIndex Exchanges { get; private set; } = new();
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 
