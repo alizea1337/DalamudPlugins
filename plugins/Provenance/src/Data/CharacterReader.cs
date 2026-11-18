@@ -35,7 +35,8 @@ internal static unsafe class CharacterReader
             BaseStats = previous?.BaseStats != null ? new Dictionary<string, int[]>(previous.BaseStats) : new(),
         };
 
-        var currentJob = (uint)ps->CurrentClassJobId;
+        // The player object is the reliable source for the job being played right now.
+        var currentJob = Services.Objects.LocalPlayer?.ClassJob.RowId ?? (uint)ps->CurrentClassJobId;
         var buffed = Services.Objects.LocalPlayer?.StatusList.Any(st => st.StatusId is WellFed or Medicated) ?? false;
         var notes = new List<string>();
 
@@ -89,7 +90,9 @@ internal static unsafe class CharacterReader
             var e = module->Entries[i];
             if ((e.Flags & RaptureGearsetModule.GearsetFlag.Exists) == 0 || e.ClassJob != job) continue;
             count++;
-            if (best < 0 || e.ItemLevel > module->Entries[best].ItemLevel) best = i;
+            // Highest item level wins; on a tie the gearset being worn wins, so it can be measured live.
+            if (best < 0 || e.ItemLevel > module->Entries[best].ItemLevel
+                || (e.ItemLevel == module->Entries[best].ItemLevel && i == module->CurrentGearsetIndex)) best = i;
         }
         if (best < 0) return stats;
 

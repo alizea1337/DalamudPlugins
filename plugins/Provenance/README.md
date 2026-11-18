@@ -19,12 +19,12 @@ Open it with `/provenance` (or `/prov`).
   takes the full amounts.
 - **Browse** every recipe with a name search, crafter filter and crafting-level range, and add
   recipes to the order.
-- **Plan** shows each item as a tree of its materials. Every row says how the item is obtained
-  (gather, timed node, fish, vendor, monster drop, or *get it yourself*) and how many you have
-  against how many the order needs. Owned items count from your inventory, crystals and
+- **Plan** lists what you're making, then every material once with its total for the whole
+  order, grouped by how it is obtained: to gather (timed nodes marked), to fish, to buy, monster
+  drops, and intermediates to craft first, plus the crystals. Each row shows how many are still
+  to get and how many you have against how many the order needs. Owned items count from your inventory, crystals and
   saddlebag; the armoury chest never counts. The plan lists anything the run can't get on its
   own, and the order can't start until you have those.
-
 - **Character**: *Check character* reads every crafter's and gatherer's level, the gearset a run
   would use (highest item level) with its Craftsmanship/Control/CP or Gathering/Perception/GP,
   specialist and Manipulation, and which master books and folklore tomes you have. The job you

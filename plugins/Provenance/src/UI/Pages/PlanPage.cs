@@ -12,15 +12,13 @@ using Provenance.UI.Theme;
 namespace Provenance.UI.Pages;
 
 /// <summary>
-/// The order as a material tree: every target is a card, its materials hang below it on curves coloured
-/// by where they come from, each with a have/need bar. Above it, the start check.
+/// The order as totals: what is being made, then every material once, summed over the whole order and
+/// grouped by how it is obtained (gather, fish, buy, monsters, craft first), with have/need for each.
 /// </summary>
 internal sealed class PlanPage : Page
 {
-    private const float NodeRow = 34f;
-    private const float Indent = 28f;
+    private const float RowHeight = 36f;
 
-    private readonly HashSet<string> collapsed = new();
     private DateTime clearArmedUntil = DateTime.MinValue;
 
     public PlanPage(Plugin plugin) : base(plugin) { }
@@ -55,7 +53,6 @@ internal sealed class PlanPage : Page
 
     public override void Draw()
     {
-        var s = Ui.S;
         var catalog = Plans.Catalog;
         if (catalog == null)
         {
@@ -68,18 +65,31 @@ internal sealed class PlanPage : Page
             return;
         }
 
-        DrawOrderHeader();
         var plan = Plans.Plan;
-        DrawReadiness(plan, catalog);
-        foreach (var root in plan.Tree) DrawTarget(root, plan, catalog);
+        DrawOrderHeader();
+        DrawMissing(plan, catalog);
+        DrawTargets(plan, catalog);
+
+        var materials = plan.Lines.Where(l => !l.IsTarget && !Items.IsCrystal(l.ItemId)).ToList();
+        Section("To gather", FontAwesomeIcon.Leaf, Palette.SupplyColor(Supply.Gather),
+            materials.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed), catalog, null);
+        Section("To fish", FontAwesomeIcon.Fish, Palette.SupplyColor(Supply.Fish),
+            materials.Where(l => l.Supply == Supply.Fish), catalog, null);
+        Section("To buy", FontAwesomeIcon.Store, Palette.SupplyColor(Supply.Vendor),
+            materials.Where(l => l.Supply == Supply.Vendor), catalog, plan.VendorGil > 0 ? $"about {plan.VendorGil:N0} gil" : null);
+        Section("Monster drops", FontAwesomeIcon.Paw, Palette.SupplyColor(Supply.Drop),
+            materials.Where(l => l.Supply == Supply.Drop), catalog, null);
+        Section("To craft first", FontAwesomeIcon.Hammer, Palette.Accent,
+            materials.Where(l => l.Supply == Supply.Craft), catalog, CraftSummary(plan));
+        DrawCrystals(plan, catalog);
     }
 
-    // ------------------------------------------------------------------ sections
+    // ------------------------------------------------------------------ header and checks
 
     private void DrawEmpty()
     {
         var s = Ui.S;
-        Ui.Heading("Nothing planned yet", "Import a Teamcraft list or pick recipes in Browse. The plan shows every material down to the crystals and where each one comes from.");
+        Ui.Heading("Nothing planned yet", "Import a Teamcraft list or pick recipes in Browse. The plan lists every material down to the crystals and where each one comes from.");
         ImGui.Dummy(new Vector2(0, 6 * s));
         if (Ui.Button("Import a list", Ui.Kind.Primary, FontAwesomeIcon.FileImport)) Go<ImportPage>();
         ImGui.SameLine(0, 10 * s);
@@ -92,7 +102,7 @@ internal sealed class PlanPage : Page
         var name = Config.Order.Name;
         using (Ui.F.Title.Push())
         {
-            ImGui.PushStyleColor(ImGuiCol.FrameBg, System.Numerics.Vector4.Zero);
+            ImGui.PushStyleColor(ImGuiCol.FrameBg, Vector4.Zero);
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(0, 4) * s);
             ImGui.SetNextItemWidth(MathF.Min(ImGui.GetContentRegionAvail().X - 160 * s, 520 * s));
             if (ImGui.InputText("##ordername", ref name, 80)) Config.Order.Name = name;
@@ -117,222 +127,201 @@ internal sealed class PlanPage : Page
         }
     }
 
-    private void DrawReadiness(Plan plan, GameCatalog catalog)
+    private static void DrawMissing(Plan plan, GameCatalog catalog)
     {
+        if (plan.Missing.Count == 0) return;
         var s = Ui.S;
-        if (plan.Missing.Count > 0)
-        {
-            Ui.BeginCard(Palette.WithAlpha(Palette.Danger, 0.08f));
-            Ui.Icon(FontAwesomeIcon.HandPaper, Palette.Danger);
-            ImGui.SameLine(0, 10 * s);
-            using (Ui.F.Strong.Push()) Ui.Text("Get these yourself before starting", Palette.Danger);
-            Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
-            ImGui.Dummy(new Vector2(0, 2 * s));
-            foreach (var line in plan.Missing)
-            {
-                Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
-                ImGui.SameLine(0, 10 * s);
-                ImGui.BeginGroup();
-                Ui.Text(catalog.ItemName(line.ItemId));
-                using (Ui.F.Small.Push()) Ui.Muted($"Need {line.Remaining} more. {line.ManualReason}.");
-                ImGui.EndGroup();
-            }
-            Ui.EndCard();
-            return;
-        }
-
-        Ui.BeginCard(Palette.WithAlpha(Palette.Accent, 0.07f));
-        Ui.Icon(FontAwesomeIcon.CheckCircle, Palette.Accent);
+        Ui.BeginCard(Palette.WithAlpha(Palette.Danger, 0.08f));
+        Ui.Icon(FontAwesomeIcon.HandPaper, Palette.Danger);
         ImGui.SameLine(0, 10 * s);
-        using (Ui.F.Strong.Push()) Ui.Text("Everything can be gathered, bought or crafted");
-        var chips = new List<(string Text, Vector4 Color, FontAwesomeIcon Icon)>();
-        void Add(Supply supply, string verb, FontAwesomeIcon icon)
+        using (Ui.F.Strong.Push()) Ui.Text("Get these yourself before starting", Palette.Danger);
+        Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var line in plan.Missing)
         {
-            var n = plan.Count(supply);
-            if (n > 0) chips.Add(($"{n} {verb}", Palette.SupplyColor(supply), icon));
-        }
-        Add(Supply.Gather, "to gather", FontAwesomeIcon.Leaf);
-        Add(Supply.GatherTimed, "on timed nodes", FontAwesomeIcon.Clock);
-        Add(Supply.Fish, "to fish", FontAwesomeIcon.Fish);
-        Add(Supply.Vendor, plan.VendorGil > 0 ? $"to buy for {plan.VendorGil:N0} gil" : "to buy", FontAwesomeIcon.Store);
-        Add(Supply.Drop, "monster drops", FontAwesomeIcon.Paw);
-        var crafts = plan.CraftSteps.Sum(l => l.Crafts);
-        if (crafts > 0) chips.Add(($"{crafts} crafts", Palette.Accent, FontAwesomeIcon.Hammer));
-        ChipRow(chips);
-
-        // Crystals are shared by everything, so they get one row here instead of a branch per item.
-        var crystals = plan.Lines.Where(l => Items.IsCrystal(l.ItemId) && l.Needed > 0).OrderBy(l => l.ItemId).ToList();
-        if (crystals.Count > 0)
-        {
-            ImGui.Dummy(new Vector2(0, 2 * s));
-            using (Ui.F.Small.Push()) Ui.Muted("Crystals");
-            var first = true;
-            foreach (var c in crystals)
-            {
-                if (!first) ImGui.SameLine(0, 14 * s);
-                first = false;
-                Ui.ItemIcon(catalog.ItemIcon(c.ItemId), 22);
-                Ui.Tooltip($"{catalog.ItemName(c.ItemId)}: need {c.Needed}, have {c.FromStock}");
-                ImGui.SameLine(0, 6 * s);
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2 * s);
-                Ui.Text($"{c.FromStock}/{c.Needed}", c.Remaining == 0 ? Palette.Accent : Palette.TextMuted);
-            }
+            Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
+            ImGui.SameLine(0, 10 * s);
+            ImGui.BeginGroup();
+            Ui.Text(catalog.ItemName(line.ItemId));
+            using (Ui.F.Small.Push()) Ui.Muted($"Need {line.Remaining} more. {line.ManualReason}.");
+            ImGui.EndGroup();
         }
         Ui.EndCard();
     }
 
-    private static void ChipRow(List<(string Text, Vector4 Color, FontAwesomeIcon Icon)> chips)
-    {
-        var s = Ui.S;
-        var avail = Ui.CardInnerWidth;
-        var x = 0f;
-        for (var i = 0; i < chips.Count; i++)
-        {
-            var w = Ui.ChipWidth(chips[i].Text, chips[i].Icon);
-            if (i > 0)
-            {
-                if (x + 8 * s + w <= avail) ImGui.SameLine(0, 8 * s);
-                else x = 0;
-            }
-            Ui.Chip(chips[i].Text, chips[i].Color, chips[i].Icon);
-            x += (i > 0 ? 8 * s : 0) + w;
-        }
-    }
+    // ------------------------------------------------------------------ what is being made
 
-    private void DrawTarget(PlanTreeNode root, Plan plan, GameCatalog catalog)
+    private void DrawTargets(Plan plan, GameCatalog catalog)
     {
         var s = Ui.S;
-        var line = plan[root.ItemId];
-        if (line == null) return;
         Ui.BeginCard();
+        SectionHeader("Making", FontAwesomeIcon.Box, Palette.Accent, Config.Order.Lines.Count == 1 ? "1 item" : $"{Config.Order.Lines.Count} items");
         var inner = Ui.CardInnerWidth;
-        var start = ImGui.GetCursorScreenPos();
 
-        // Header: icon, name, recipe, amount, remove
-        Ui.ItemIcon(catalog.ItemIcon(root.ItemId), 40);
-        var iconAnchor = start + new Vector2(20 * s, 40 * s);
-        ImGui.SameLine(0, 14 * s);
-        ImGui.BeginGroup();
-        using (Ui.F.Strong.Push()) Ui.Text(catalog.ItemName(root.ItemId));
-        if (line.Recipe is { } r)
+        foreach (var orderLine in Config.Order.Lines.ToList())
         {
-            Ui.Chip($"{r.Job.Abbreviation()} level {r.Level}", Palette.JobColor(r.Job));
-            if (line.Crafts > 0 && r.Yield > 1) { ImGui.SameLine(0, 6 * s); Ui.Chip($"{line.Crafts} crafts make {line.Produced}", Palette.TextMuted); }
-        }
-        else
-        {
-            Ui.Chip(Palette.SupplyLabel(line.Supply), Palette.SupplyColor(line.Supply));
-        }
-        ImGui.EndGroup();
+            var line = plan[orderLine.ItemId];
+            var start = ImGui.GetCursorScreenPos();
+            var h = 44 * s;
+            var dl = ImGui.GetWindowDrawList();
 
-        var orderLine = Config.Order.Lines.FirstOrDefault(l => l.ItemId == root.ItemId);
-        if (orderLine != null)
-        {
+            Ui.DrawItemIcon(dl, catalog.ItemIcon(orderLine.ItemId), start + new Vector2(0, (h - 32 * s) / 2), 32 * s);
+            var tx = start.X + 44 * s;
+            using (Ui.F.Strong.Push())
+                dl.AddText(new Vector2(tx, start.Y + 4 * s), Palette.U32(Palette.Text), catalog.ItemName(orderLine.ItemId));
+            ImGui.SetCursorScreenPos(new Vector2(tx, start.Y + 24 * s));
+            if (line?.Recipe is { } r)
+            {
+                Ui.Chip($"{r.Job.Abbreviation()} level {r.Level}", Palette.JobColor(r.Job));
+                if (line.Crafts == 0) { ImGui.SameLine(0, 6 * s); Ui.Chip("covered by what you own", Palette.Accent); }
+                else if (r.Yield > 1) { ImGui.SameLine(0, 6 * s); Ui.Chip($"{line.Crafts} crafts make {line.Produced}", Palette.TextMuted); }
+            }
+            else if (line != null)
+            {
+                Ui.Chip(Palette.SupplyLabel(line.Supply), Palette.SupplyColor(line.Supply));
+            }
+
             var qtyW = 104 * s;
-            ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s, start.Y + 4 * s));
+            ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s, start.Y + (h - 30 * s) / 2));
             var qty = orderLine.Quantity;
             ImGui.SetNextItemWidth(qtyW);
-            if (ImGui.InputInt("##tq" + root.ItemId, ref qty, 1, 10)) { orderLine.Quantity = Math.Clamp(qty, 1, 9999); Changed(); }
+            if (ImGui.InputInt("##tq" + orderLine.ItemId + "_" + orderLine.RecipeId, ref qty, 1, 10)) { orderLine.Quantity = Math.Clamp(qty, 1, 9999); Changed(); }
             Ui.Tooltip("How many to make");
-            ImGui.SetCursorScreenPos(new Vector2(start.X + inner - 30 * s, start.Y + 3 * s));
-            if (Ui.IconButton("##rm" + root.ItemId, FontAwesomeIcon.TrashAlt, "Remove from the order", Ui.Kind.Danger))
+            ImGui.SetCursorScreenPos(new Vector2(start.X + inner - 30 * s, start.Y + (h - 30 * s) / 2));
+            if (Ui.IconButton("##rm" + orderLine.ItemId + "_" + orderLine.RecipeId, FontAwesomeIcon.TrashAlt, "Remove from the order", Ui.Kind.Danger))
             {
-                Config.Order.Lines.RemoveAll(l => l.ItemId == root.ItemId);
+                Config.Order.Lines.Remove(orderLine);
                 Changed();
-                Ui.EndCard();
-                return;
             }
+            ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h + 4 * s));
         }
-
-        ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + 50 * s));
-        var children = root.Children.Where(c => !Items.IsCrystal(c.ItemId)).ToList();
-        if (children.Count == 0 && line.Crafts == 0 && line.Recipe != null)
-        {
-            using (Ui.F.Small.Push()) Ui.Muted("Covered by what you already own.");
-        }
-        foreach (var child in children)
-            DrawNode(child, plan, catalog, 1, iconAnchor, root.ItemId.ToString(), start.X, inner);
         Ui.EndCard();
     }
 
-    // ------------------------------------------------------------------ tree
+    // ------------------------------------------------------------------ material totals
 
-    private void DrawNode(PlanTreeNode node, Plan plan, GameCatalog catalog, int depth, Vector2 parentAnchor, string parentPath, float left, float width)
+    private static string? CraftSummary(Plan plan)
     {
-        var line = plan[node.ItemId];
-        if (line == null) return;
+        var crafts = plan.CraftSteps.Where(l => !l.IsTarget).Sum(l => l.Crafts);
+        return crafts > 0 ? $"{crafts} {(crafts == 1 ? "craft" : "crafts")}" : null;
+    }
+
+    private static void Section(string title, FontAwesomeIcon icon, Vector4 color, IEnumerable<PlanLine> source, GameCatalog catalog, string? extra)
+    {
+        var lines = source
+            .OrderByDescending(l => l.Remaining > 0)
+            .ThenByDescending(l => l.Remaining)
+            .ThenBy(l => catalog.ItemName(l.ItemId), StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (lines.Count == 0) return;
+
+        var left = lines.Sum(l => l.Remaining);
+        var summary = left == 0 ? "all in your bags" : $"{lines.Count} {(lines.Count == 1 ? "item" : "items")}, {left:N0} still to get";
+        if (title == "To craft first") summary = left == 0 ? "all in your bags" : $"{lines.Count} {(lines.Count == 1 ? "item" : "items")}";
+        if (extra != null) summary += ", " + extra;
+
+        Ui.BeginCard();
+        SectionHeader(title, icon, color, summary);
+        foreach (var line in lines) MaterialRow(line, catalog);
+        Ui.EndCard();
+    }
+
+    private static void SectionHeader(string title, FontAwesomeIcon icon, Vector4 color, string summary)
+    {
         var s = Ui.S;
-        var path = parentPath + "/" + node.ItemId;
-        var h = NodeRow * s;
-        var y = ImGui.GetCursorScreenPos().Y;
-        var x = left + (depth - 1) * Indent * s + 8 * s;
-        var icon = 24 * s;
-        var iconPos = new Vector2(x + 18 * s, y + (h - icon) / 2);
+        Ui.Icon(icon, color);
+        ImGui.SameLine(0, 10 * s);
+        using (Ui.F.Strong.Push()) Ui.Text(title);
+        ImGui.SameLine(0, 10 * s);
+        Ui.Muted(summary);
+        ImGui.Dummy(new Vector2(0, 2 * s));
+    }
+
+    private static void MaterialRow(PlanLine line, GameCatalog catalog)
+    {
+        var s = Ui.S;
+        var width = Ui.CardInnerWidth;
+        var h = RowHeight * s;
+        var start = ImGui.GetCursorScreenPos();
         var dl = ImGui.GetWindowDrawList();
-        var color = line.Supply == Supply.Craft && line.Recipe != null ? Palette.JobColor(line.Recipe.Job) : Palette.SupplyColor(line.Supply);
+        var hovered = ImGui.IsMouseHoveringRect(start, start + new Vector2(width, h)) && ImGui.IsWindowHovered();
+        if (hovered) dl.AddRectFilled(start - new Vector2(6 * s, 0), start + new Vector2(width + 6 * s, h), Palette.U32(Palette.WithAlpha(Palette.Raised, 0.6f)), Ui.InputRadius * s);
 
-        // Connector: down from the parent's icon, then a soft curve into this one.
-        var end = new Vector2(iconPos.X - 3 * s, iconPos.Y + icon / 2);
-        var cornerY = end.Y;
-        dl.AddLine(parentAnchor, new Vector2(parentAnchor.X, cornerY - 10 * s), Palette.U32(Palette.WithAlpha(Palette.Line, 1f)), 1.5f * s);
-        dl.AddBezierCubic(new Vector2(parentAnchor.X, cornerY - 10 * s), new Vector2(parentAnchor.X, cornerY - 2 * s), new Vector2(parentAnchor.X + 4 * s, end.Y), end,
-            Palette.U32(Palette.WithAlpha(color, 0.55f)), 1.5f * s);
+        var icon = 26 * s;
+        Ui.DrawItemIcon(dl, catalog.ItemIcon(line.ItemId), start + new Vector2(0, (h - icon) / 2), icon);
+        var tx = start.X + icon + 12 * s;
+        var textY = start.Y + (h - ImGui.GetTextLineHeight()) / 2;
+        var name = catalog.ItemName(line.ItemId);
+        dl.AddText(new Vector2(tx, textY), Palette.U32(line.Remaining == 0 ? Palette.TextMuted : Palette.Text), name);
+        var chipX = tx + ImGui.CalcTextSize(name).X + 10 * s;
 
-        var hasChildren = node.Children.Any(c => !Items.IsCrystal(c.ItemId));
-        var isCollapsed = collapsed.Contains(path) || (depth >= 3 && !collapsed.Contains(path + "+"));
-        var rowMin = new Vector2(x, y);
-        var rowMax = new Vector2(left + width, y + h);
-        ImGui.SetCursorScreenPos(rowMin);
-        if (ImGui.InvisibleButton("##node" + path, rowMax - rowMin) && hasChildren)
+        // Detail chip: how it is obtained when that needs saying.
+        (string Text, Vector4 Color)? chip = line.Supply switch
         {
-            if (isCollapsed) { collapsed.Remove(path); collapsed.Add(path + "+"); }
-            else { collapsed.Add(path); collapsed.Remove(path + "+"); }
-        }
-        var hovered = ImGui.IsItemHovered();
-        if (hovered) dl.AddRectFilled(rowMin + new Vector2(14 * s, 1 * s), rowMax - new Vector2(0, 1 * s), Palette.U32(Palette.WithAlpha(Palette.Raised, 0.6f)), Ui.InputRadius * s);
-        if (hasChildren)
+            Supply.GatherTimed => ("timed node", Palette.SupplyColor(Supply.GatherTimed)),
+            Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each", Palette.SupplyColor(Supply.Vendor)),
+            Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}", Palette.JobColor(line.Recipe.Job)),
+            _ => null,
+        };
+        if (chip is { } c && !(line.Supply == Supply.Craft && line.Crafts == 0))
         {
-            using (Ui.F.IconSmall.Push())
-            {
-                var chevron = (isCollapsed ? FontAwesomeIcon.ChevronRight : FontAwesomeIcon.ChevronDown).ToIconString();
-                var cs = ImGui.CalcTextSize(chevron);
-                dl.AddText(new Vector2(x + 2 * s, y + (h - cs.Y) / 2), Palette.U32(hovered ? Palette.Text : Palette.TextFaint), chevron);
-            }
+            ImGui.SetCursorScreenPos(new Vector2(chipX, start.Y + (h - 20 * s) / 2));
+            Ui.Chip(c.Text, c.Color);
         }
 
-        Ui.DrawItemIcon(dl, catalog.ItemIcon(node.ItemId), iconPos, icon);
-        var tx = iconPos.X + icon + 10 * s;
-        var textY = y + (h - ImGui.GetTextLineHeight()) / 2;
-        var name = catalog.ItemName(node.ItemId);
-        dl.AddText(new Vector2(tx, textY), Palette.U32(Palette.Text), name);
-        var nameW = ImGui.CalcTextSize(name).X;
-
-        // Chip: recipe job and crafts, or the source
-        var chip = line.Supply == Supply.Craft && line.Recipe != null
-            ? (line.Crafts > 0 ? $"{line.Recipe.Job.Abbreviation()} ×{line.Crafts}" : $"{line.Recipe.Job.Abbreviation()}, owned")
-            : Palette.SupplyLabel(line.Supply);
-        ImGui.SetCursorScreenPos(new Vector2(tx + nameW + 10 * s, y + (h - 20 * s) / 2));
-        Ui.Chip(chip, color);
-        if (line.Supply == Supply.Vendor) Ui.Tooltip($"{line.VendorUnitPrice:N0} gil each");
-        if (line.ManualReason != null) Ui.Tooltip(line.ManualReason);
-
-        // Have / need across the whole order
-        var barW = 110 * s;
+        // Right: still to get, then have/need with a bar.
         var have = line.FromStock;
         var need = line.Needed;
-        var label = $"{have}/{need}";
-        var lw = ImGui.CalcTextSize(label).X;
-        var right = left + width - 4 * s;
-        dl.AddText(new Vector2(right - lw, textY), Palette.U32(have >= need ? Palette.Accent : Palette.TextMuted), label);
-        ImGui.SetCursorScreenPos(new Vector2(right - lw - 12 * s - barW, y + (h - 6 * s) / 2));
-        Ui.Bar("##bar" + path, need == 0 ? 1f : have / (float)need, have >= need ? Palette.Accent : color, barW);
-        if (hovered)
-            Ui.ShowTooltip($"This branch uses {node.Quantity}. The whole order needs {need}, and you have {have}." + (hasChildren ? " Click to show or hide its materials." : ""));
+        var done = line.Remaining == 0;
+        var count = $"{have}/{need}";
+        var cw = ImGui.CalcTextSize(count).X;
+        var right = start.X + width;
+        dl.AddText(new Vector2(right - cw, textY), Palette.U32(done ? Palette.Accent : Palette.TextMuted), count);
+        var barW = 110 * s;
+        var barX = right - MathF.Max(cw, 52 * s) - 12 * s - barW;
+        var color = line.Supply == Supply.Craft && line.Recipe != null ? Palette.JobColor(line.Recipe.Job) : Palette.SupplyColor(line.Supply);
+        ImGui.SetCursorScreenPos(new Vector2(barX, start.Y + (h - 6 * s) / 2));
+        Ui.Bar("##bar" + line.ItemId, need == 0 ? 1f : have / (float)need, done ? Palette.Accent : color, barW);
 
-        ImGui.SetCursorScreenPos(new Vector2(left, y + h));
-        if (!hasChildren || isCollapsed) return;
-        var anchor = new Vector2(iconPos.X + icon / 2, iconPos.Y + icon);
-        foreach (var child in node.Children.Where(c => !Items.IsCrystal(c.ItemId)))
-            DrawNode(child, plan, catalog, depth + 1, anchor, path, left, width);
+        using (Ui.F.Strong.Push())
+        {
+            var left = done ? "done" : $"{line.Remaining:N0} left";
+            var lw = ImGui.CalcTextSize(left).X;
+            dl.AddText(new Vector2(barX - 14 * s - lw, textY), Palette.U32(done ? Palette.Accent : Palette.Text), left);
+        }
+
+        if (hovered)
+        {
+            var tip = $"The whole order needs {need:N0}; you have {have:N0}.";
+            if (line.Supply == Supply.Craft && line.Recipe is { } r && line.Crafts > 0)
+                tip += $" {line.Crafts} {(line.Crafts == 1 ? "craft makes" : "crafts make")} {line.Produced}.";
+            if (line.Supply == Supply.GatherTimed) tip += " Only on timed nodes; the run crafts while it waits for them.";
+            Ui.ShowTooltip(tip);
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
+        ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    private static void DrawCrystals(Plan plan, GameCatalog catalog)
+    {
+        var crystals = plan.Lines.Where(l => Items.IsCrystal(l.ItemId) && l.Needed > 0).OrderBy(l => l.ItemId).ToList();
+        if (crystals.Count == 0) return;
+        var s = Ui.S;
+        Ui.BeginCard();
+        var left = crystals.Sum(c => c.Remaining);
+        SectionHeader("Crystals", FontAwesomeIcon.Gem, Palette.SupplyColor(Supply.Gather), left == 0 ? "all in your bags" : $"{left:N0} still to get");
+        var first = true;
+        foreach (var c in crystals)
+        {
+            if (!first) ImGui.SameLine(0, 18 * s);
+            first = false;
+            Ui.ItemIcon(catalog.ItemIcon(c.ItemId), 24);
+            Ui.Tooltip($"{catalog.ItemName(c.ItemId)}: need {c.Needed}, have {c.FromStock}");
+            ImGui.SameLine(0, 6 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 3 * s);
+            Ui.Text($"{c.FromStock}/{c.Needed}", c.Remaining == 0 ? Palette.Accent : Palette.TextMuted);
+        }
+        Ui.EndCard();
     }
 }
