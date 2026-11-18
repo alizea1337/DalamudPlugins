@@ -19,7 +19,10 @@ public enum Supply
 
 public sealed class PlannerOptions
 {
-    /// <summary>Count finished items already in the bags against the order. Off: the order always makes its full amount.</summary>
+    /// <summary>
+    /// Count crafted order items already in the bags against the order. Off: the order always crafts its
+    /// full amount. Order items that aren't crafted always count what's owned.
+    /// </summary>
     public bool CountOwnedTargets { get; init; }
 
     /// <summary>Buy from a gil vendor even when the item can be gathered or fished.</summary>

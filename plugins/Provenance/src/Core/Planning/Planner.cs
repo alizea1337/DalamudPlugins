@@ -39,7 +39,10 @@ public static class Planner
         {
             var line = lines[postOrder[i]];
             line.Needed = demand.GetValueOrDefault(line.ItemId);
-            var stock = line.IsTarget && !options.CountOwnedTargets ? 0 : owned.GetValueOrDefault(line.ItemId);
+            // Crafted order items only count what's owned when asked to; everything else (gathered,
+            // fished, bought) is a material like any other: "have N".
+            var ignoreStock = line.IsTarget && line.Supply == Supply.Craft && !options.CountOwnedTargets;
+            var stock = ignoreStock ? 0 : owned.GetValueOrDefault(line.ItemId);
             line.FromStock = Math.Min(Math.Max(0, stock), line.Needed);
 
             if (line.Supply != Supply.Craft || line.Recipe == null) continue;

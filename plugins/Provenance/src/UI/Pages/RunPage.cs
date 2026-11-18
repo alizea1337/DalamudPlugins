@@ -86,7 +86,7 @@ internal sealed class RunPage : Page
         using (Ui.F.Title.Push()) Ui.Text(Runs.Headline);
         if (Runs.Detail.Length > 0) Ui.Wrapped(Runs.Detail, Palette.TextMuted);
         var targets = Runs.Targets;
-        var done = targets.Count(t => (plan[t.ItemId]?.Remaining ?? 0) <= 0);
+        var done = targets.Count(t => RunEngine.Left(t) == 0);
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Bar("##runprogress", targets.Count == 0 ? 1 : done / (float)targets.Count, color, MathF.Min(Ui.CardInnerWidth, 420 * s), 8);
         Ui.Muted($"{done} of {targets.Count} items gathered{Elapsed()}");
@@ -102,10 +102,9 @@ internal sealed class RunPage : Page
             ImGui.SameLine(0, 10 * s);
             Ui.Muted("with GatherBuddy Reborn");
             ImGui.Dummy(new Vector2(0, 2 * s));
-            foreach (var t in targets.OrderBy(t => (plan[t.ItemId]?.Remaining ?? 0) <= 0))
+            foreach (var t in targets.OrderBy(t => RunEngine.Left(t) == 0))
             {
-                var line = plan[t.ItemId];
-                var remaining = Math.Max(0, line?.Remaining ?? 0);
+                var remaining = RunEngine.Left(t);
                 var start = ImGui.GetCursorScreenPos();
                 var width = Ui.CardInnerWidth;
                 var h = 34 * s;
@@ -125,10 +124,10 @@ internal sealed class RunPage : Page
                     var lw = ImGui.CalcTextSize(label).X;
                     dl.AddText(new Vector2(start.X + width - lw, ty), Palette.U32(remaining == 0 ? Palette.Accent : Palette.Text), label);
                 }
-                var have = line?.FromStock ?? 0;
-                var need = line?.Needed ?? 0;
+                // Progress of this run: how much of what was missing at the start is in the bags now.
+                var gathered = Math.Max(0, t.Remaining - remaining);
                 ImGui.SetCursorScreenPos(new Vector2(start.X + width - 110 * s - 80 * s, start.Y + (h - 6 * s) / 2));
-                Ui.Bar("##rb" + t.ItemId, need == 0 ? 1 : have / (float)need, remaining == 0 ? Palette.Accent : Palette.SupplyColor(t.Supply), 110 * s);
+                Ui.Bar("##rb" + t.ItemId, t.Remaining == 0 ? 1 : gathered / (float)t.Remaining, remaining == 0 ? Palette.Accent : Palette.SupplyColor(t.Supply), 110 * s);
                 ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
                 ImGui.Dummy(new Vector2(width, 0));
             }

@@ -26,7 +26,10 @@ public static class GatherTargets
             .Select(l => new GatherTarget(l.ItemId, l.Supply, l.Remaining, (uint)Math.Max(0, bagCount(l.ItemId) + l.Remaining)))
             .ToList();
 
-    /// <summary>The gathering stage is done when the plan no longer needs any of the targets.</summary>
-    public static bool AllDone(IEnumerable<GatherTarget> targets, Plan plan)
-        => targets.All(t => (plan[t.ItemId]?.Remaining ?? 0) <= 0);
+    /// <summary>Still to gather for one target: GatherBuddy Reborn's own rule, the bags must hold the target.</summary>
+    public static int Left(GatherTarget t, Func<uint, int> bagCount) => Math.Max(0, (int)t.Target - bagCount(t.ItemId));
+
+    /// <summary>The gathering stage is done when the bags hold every target, exactly when GatherBuddy Reborn stops.</summary>
+    public static bool AllDone(IEnumerable<GatherTarget> targets, Func<uint, int> bagCount)
+        => targets.All(t => Left(t, bagCount) == 0);
 }

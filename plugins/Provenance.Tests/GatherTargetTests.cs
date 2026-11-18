@@ -50,12 +50,23 @@ public class GatherTargetTests
     }
 
     [Fact]
-    public void Done_once_the_plan_needs_none_of_the_targets()
+    public void Done_once_the_bags_hold_every_target()
     {
-        var before = PlanFor(Lumber, 1);
-        var targets = GatherTargets.Build(before, _ => 0);
-        Assert.False(GatherTargets.AllDone(targets, before));
-        var after = PlanFor(Lumber, 1, new Dictionary<uint, int> { [Log] = 3, [WindShard] = 1 });
-        Assert.True(GatherTargets.AllDone(targets, after));
+        var plan = PlanFor(Lumber, 1);
+        var targets = GatherTargets.Build(plan, _ => 0);       // 3 logs, 1 wind shard
+        Assert.False(GatherTargets.AllDone(targets, id => id == Log ? 3 : 0));
+        Assert.Equal(2, GatherTargets.Left(targets.Single(t => t.ItemId == Log), _ => 1));
+        Assert.True(GatherTargets.AllDone(targets, id => id == Log ? 5 : 1));
+    }
+
+    [Fact]
+    public void Gathered_order_items_count_what_is_owned()
+    {
+        // Ordering 2 logs with 5 owned: nothing to do. Crafted order items still ignore stock by default.
+        var plan = PlanFor(Log, 2, new Dictionary<uint, int> { [Log] = 5 });
+        Assert.Equal(0, plan[Log]!.Remaining);
+        Assert.Empty(GatherTargets.Build(plan, _ => 5));
+        var crafted = PlanFor(Lumber, 1, new Dictionary<uint, int> { [Lumber] = 1 });
+        Assert.Equal(1, crafted[Lumber]!.Crafts);
     }
 }

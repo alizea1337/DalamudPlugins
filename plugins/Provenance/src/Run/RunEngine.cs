@@ -190,7 +190,7 @@ internal sealed unsafe class RunEngine : IDisposable
             if (Phase == RunPhase.Gathering) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
         }
 
-        if (GatherTargets.AllDone(Targets, plugin.Plans.Plan)) { Finish(); return; }
+        if (GatherTargets.AllDone(Targets, BagCount)) { Finish(); return; }
 
         var busy = Services.Condition[ConditionFlag.Gathering] || Services.Condition[ConditionFlag.ExecutingGatheringAction] || Services.Condition[ConditionFlag.Fishing];
         switch (Phase)
@@ -233,6 +233,9 @@ internal sealed unsafe class RunEngine : IDisposable
         Add("GatherBuddy Reborn switched auto-gather off" + (status.Length > 0 ? $" ({status})" : "") + "; switching it back on.", true);
         GatherBuddyIpc.SetEnabled(true);
     }
+
+    /// <summary>Still to gather for one target right now.</summary>
+    public static int Left(GatherTarget t) => GatherTargets.Left(t, BagCount);
 
     /// <summary>What GatherBuddy Reborn counts: normal-quality items in the main bags.</summary>
     private static int BagCount(uint itemId)
