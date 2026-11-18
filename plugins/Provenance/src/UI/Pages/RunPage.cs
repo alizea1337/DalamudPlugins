@@ -271,7 +271,7 @@ internal sealed class RunPage : Page
         Ui.Icon(why == null ? FontAwesomeIcon.InfoCircle : FontAwesomeIcon.ExclamationTriangle, why == null ? Palette.Accent : Palette.Warn);
         ImGui.SameLine(0, 10 * s);
         Ui.Wrapped(why == null
-            ? "A run takes items from your retainers, reads any books, buys from vendors, gathers with GatherBuddy Reborn (crafting while timed nodes are closed) and crafts the rest. Monster drops follow in the next milestone."
+            ? "A run takes items from your retainers, reads any books, buys from vendors, gathers with GatherBuddy Reborn (crafting while timed nodes are closed) and crafts the rest. Monster drops are farmed with the combat job from Settings."
             : why, Palette.Text);
         Ui.EndCard();
 
@@ -283,7 +283,7 @@ internal sealed class RunPage : Page
             (FontAwesomeIcon.Box, "Take items from retainers", Config.Stock.Retainers ? "Opens your retainers at a summoning bell and takes out what the order can use." : "Off in Settings.", Config.Stock.Retainers, true),
             (FontAwesomeIcon.Book, "Learn books", plan.Learn.Count > 0 ? $"{plan.Learn.Count} master books or folklore tomes to read first" + (plan.Learn.Count(l => l.WillBuy) is > 0 and var buy ? $", {buy} bought at an exchange first." : ".") : "No books needed.", plan.Learn.Count > 0, true),
             (FontAwesomeIcon.Store, "Buy from vendors", plan.Count(Supply.Vendor) > 0 ? $"{plan.Count(Supply.Vendor)} items for about {plan.VendorGil:N0} gil." : "Nothing to buy for this order.", plan.Count(Supply.Vendor) > 0, true),
-            (FontAwesomeIcon.Paw, "Farm monster drops", plan.Count(Supply.Drop) > 0 ? $"{plan.Count(Supply.Drop)} items from monsters." : "No monster drops needed.", plan.Count(Supply.Drop) > 0, false),
+            (FontAwesomeIcon.Paw, "Farm monster drops", plan.Count(Supply.Drop) > 0 ? $"{plan.Count(Supply.Drop)} items from monsters, fought as {(Config.Combat.ClassJob == 0 ? "the combat job picked in Settings" : Core.Character.ClassJobs.Abbreviation(Config.Combat.ClassJob))}." : "No monster drops needed.", plan.Count(Supply.Drop) > 0, true),
             (FontAwesomeIcon.Leaf, "Gather", gather > 0 ? $"{gather} materials to gather or fish with GatherBuddy Reborn." : "Nothing to gather.", gather > 0, true),
             (FontAwesomeIcon.Hammer, "Craft", crafts > 0 ? $"{crafts} crafts with Raphael rotations, ingredients first." : "Nothing to craft.", crafts > 0, true),
         };

@@ -1,8 +1,8 @@
 # Provenance
 
 Turns a Teamcraft list into finished items. Provenance works out every material down to the
-crystals, shows where each one comes from, and (in later releases) gathers, buys and crafts
-them for you.
+crystals, shows where each one comes from, and then gets it all and crafts it for you: retainers,
+books, vendors, monster drops, gathering and crafting in one run.
 
 Open it with `/provenance` (or `/prov`).
 
@@ -44,6 +44,14 @@ Open it with `/provenance` (or `/prov`).
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
   (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
   being crafted. Recipes whose materials aren't in your bags are skipped and listed.
+- **Books and scrips**: master books and folklore tomes the order needs are bought at a scrip or
+  token exchange and read before anything else. With *Earn scrips for books* (Settings), a run that
+  is short of scrips first makes or gathers the quickest collectables your jobs can handle, turns
+  them in at a collectable appraiser, then buys the books.
+- **Monster drops**: items only monsters drop are farmed with a basic combo on the combat job picked
+  in Settings, in its highest item level gearset, one monster at a time. With Gysahl Greens in your
+  bags the chocobo is called and put in the stance you pick (attacker by default). Spawn areas
+  come from Teamcraft's crowd-sourced data, so not every drop is covered.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
@@ -58,8 +66,16 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver (done) |
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules (done) |
 | M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
-| M6 | Monster drops with a basic combo on a job you choose |
-| Later | Scrip items, several orders in a queue |
+| M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
+| Scrips | Buying books at exchanges, earning scrips with collectables (done) |
+
+### To do
+
+- Custom deliveries: a weekly mode that makes or gathers each client's items for crafters and
+  gatherers and hands them in.
+- Allied society (tribal) quests: a weekly mode for the crafter and gatherer societies.
+- Several orders in a queue.
+- An IPC for gathering lists in GatherBuddy Reborn (pull request upstream), instead of reflection.
 
 ## Requirements for a run
 

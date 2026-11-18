@@ -101,6 +101,7 @@ internal sealed class RunEngine : IDisposable
         Retainers = new RetainerRun(plugin, Add);
         Books = new BookBuyer(plugin, Add);
         TurnIn = new Appraiser(plugin, Add);
+        Hunt = new Hunter(plugin, Add);
         cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
@@ -115,6 +116,7 @@ internal sealed class RunEngine : IDisposable
     public Shopper Shopper { get; }
     public RetainerRun Retainers { get; }
     public BookBuyer Books { get; }
+    public Hunter Hunt { get; }
     /// <summary>The learn stage is buying books at exchanges before reading them.</summary>
     private bool buyingBooks;
     public IReadOnlyList<RunLogEntry> Log => log;
@@ -162,12 +164,13 @@ internal sealed class RunEngine : IDisposable
         if (Stock.FreeSlots() <= MinFreeSlots) return $"Your inventory has {MinFreeSlots} or fewer free slots.";
         var gather = GatherTargets.Build(plan, BagNq).Count > 0;
         var craft = plan.CraftSteps.Any(l => l.Crafts > 0);
-        if (!gather && !craft && plan.Learn.Count == 0 && plan.Count(Supply.Vendor) == 0) return "Nothing to gather, buy or craft for this order.";
+        if (!gather && !craft && plan.Learn.Count == 0 && plan.Count(Supply.Vendor) == 0 && plan.Count(Supply.Drop) == 0) return "Nothing to gather, buy or craft for this order.";
         if (gather && !GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
         if (gather && !Vnav.Available) return "vnavmesh isn't loaded.";
         if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
         if ((plan.Count(Supply.Vendor) > 0 || plan.Learn.Any(l => l.WillBuy) || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
             return "vnavmesh isn't loaded; it walks to vendors, exchanges and summoning bells.";
+        if (HuntBlocker() is { } hunt) return hunt;
         if (UnreachableVendorItem() is { } unreachable)
             return $"No vendor you can reach sells {plugin.Plans.Catalog!.ItemName(unreachable)} under your price cap; get it yourself, or attune to more aetherytes and aethernet shards.";
         if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
@@ -267,12 +270,70 @@ internal sealed class RunEngine : IDisposable
     {
         plugin.Plans.Invalidate();
         var purchases = Purchases();
-        if (purchases.Count == 0) { StartGatherOrCraft(); return; }
+        if (purchases.Count == 0) { StartHunt(); return; }
         Stage = RunStage.Vendors;
         Headline = "Buying from vendors";
         Shopper.Begin(purchases);
         var stops = purchases.Select(p => p.Offer.NpcId).Distinct().Count();
         Add($"Buying {purchases.Count} {(purchases.Count == 1 ? "item" : "items")} from {stops} {(stops == 1 ? "vendor" : "vendors")}.", false);
+    }
+
+    /// <summary>Monster drops still needed, with spawn areas the combat job can handle and the character can reach.</summary>
+    private List<HuntOrder> HuntOrders(out uint? noSpot)
+    {
+        noSpot = null;
+        var catalog = plugin.Plans.Catalog!;
+        var job = plugin.Config.Combat.ClassJob;
+        var level = job == 0 ? 0 : GameState.JobLevel(job);
+        var reach = new Dictionary<uint, bool>();
+        var orders = new List<HuntOrder>();
+        foreach (var line in ActivePlan.Lines.Where(l => l.Supply == Supply.Drop && l.Remaining > 0))
+        {
+            var spots = catalog.Mobs.For(line.ItemId)
+                .Where(s => s.Level <= level + 2)
+                .Where(s => reach.TryGetValue(s.TerritoryId, out var r) ? r : reach[s.TerritoryId] = Teleporter.CanReach(s.TerritoryId))
+                .ToList();
+            if (spots.Count == 0) { noSpot ??= line.ItemId; continue; }
+            orders.Add(new HuntOrder(line.ItemId, line.Remaining, spots));
+        }
+        return orders;
+    }
+
+    private DateTime huntCheckedAt;
+    private string? huntResult;
+
+    /// <summary>Why the monster drops can't be farmed (checked every few seconds), or null.</summary>
+    private string? HuntBlocker()
+    {
+        if (DateTime.UtcNow - huntCheckedAt < TimeSpan.FromSeconds(3)) return huntResult;
+        huntCheckedAt = DateTime.UtcNow;
+        huntResult = null;
+        var plan = plugin.Plans.Plan;
+        var drops = plan.Lines.Where(l => l.Supply == Supply.Drop && l.Remaining > 0).ToList();
+        if (drops.Count == 0) return null;
+        var catalog = plugin.Plans.Catalog!;
+        var job = plugin.Config.Combat.ClassJob;
+        if (job == 0) return huntResult = "This order has monster drops; pick a combat job in Settings.";
+        if (Combat.BasicCombo.For(job) == null) return huntResult = "Provenance has no combo for the combat job picked in Settings.";
+        if (GameState.BestGearset(job) < 0) return huntResult = $"No gearset saved for {Core.Character.ClassJobs.Abbreviation(job)}, the combat job picked in Settings.";
+        if (!Vnav.Available) return huntResult = "vnavmesh isn't loaded; it walks to the monsters.";
+        var noMobs = drops.FirstOrDefault(l => catalog.Mobs.For(l.ItemId).Count == 0);
+        if (noMobs != null) return huntResult = $"Provenance doesn't know where monsters that drop {catalog.ItemName(noMobs.ItemId)} spawn; get it yourself.";
+        HuntOrders(out var noSpot);
+        if (noSpot is { } item)
+            return huntResult = $"The monsters that drop {catalog.ItemName(item)} are too strong for your {Core.Character.ClassJobs.Abbreviation(job)} or in zones you can't teleport to yet.";
+        return null;
+    }
+
+    /// <summary>Monster drops after the vendors, before gathering.</summary>
+    private void StartHunt()
+    {
+        var orders = HuntOrders(out _);
+        if (orders.Count == 0) { StartGatherOrCraft(); return; }
+        Stage = RunStage.Hunt;
+        Headline = "Farming monster drops";
+        Hunt.Begin(orders, plugin.Config.Combat.ClassJob);
+        Add($"Farming {string.Join(", ", orders.Select(o => $"{o.Amount}× {plugin.Plans.Catalog!.ItemName(o.ItemId)}"))} as {Core.Character.ClassJobs.Abbreviation(plugin.Config.Combat.ClassJob)}.", false);
     }
 
     private void StartGatherOrCraft()
@@ -443,6 +504,7 @@ internal sealed class RunEngine : IDisposable
         }
         else if (Stage == RunStage.Vendors) { Shopper.RequestPause(); Headline = "Pausing after this vendor"; }
         else if (Stage == RunStage.Retainers) { Retainers.RequestPause(); Headline = "Pausing after this retainer"; }
+        else if (Stage == RunStage.Hunt) { Hunt.RequestPause(); Headline = "Pausing after this fight"; }
         else Headline = "Pausing after this node";
         Add("Pause asked for; finishing what's under way first.", false);
     }
@@ -455,6 +517,7 @@ internal sealed class RunEngine : IDisposable
         gbrOffSince = DateTime.MinValue;
         if (Stage == RunStage.Vendors) Shopper.Resume();
         else if (Stage == RunStage.Retainers) Retainers.Resume();
+        else if (Stage == RunStage.Hunt) Hunt.Resume();
         else if (Stage == RunStage.Craft || craftingBetween) Crafter.Resume();
         else if (Stage == RunStage.Gather && wasPaused) HandBackToGathering(log: false);
         Headline = Crafting ? "Crafting" : Stage switch
@@ -462,6 +525,8 @@ internal sealed class RunEngine : IDisposable
             RunStage.Learn => "Learning",
             RunStage.Retainers => "Taking items from retainers",
             RunStage.Vendors => "Buying from vendors",
+            RunStage.Hunt => "Farming monster drops",
+            RunStage.TurnIn => "Turning in collectables",
             _ => "Gathering",
         };
         Add("Resumed.", false);
@@ -493,6 +558,7 @@ internal sealed class RunEngine : IDisposable
         Retainers.Cancel();
         Books.Cancel();
         TurnIn.Cancel();
+        Hunt.Cancel();
         buyingBooks = false;
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
@@ -576,6 +642,7 @@ internal sealed class RunEngine : IDisposable
         if (working && Stage == RunStage.Vendors) Shopper.Tick();
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
         if (working && Stage == RunStage.TurnIn) TurnIn.Tick();
+        if (working && Stage == RunStage.Hunt) Hunt.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
@@ -591,7 +658,8 @@ internal sealed class RunEngine : IDisposable
         {
             case RunStage.Learn: TickLearning(); break;
             case RunStage.Retainers: TickErrand(Retainers.Finished, Retainers.Failure, Retainers.IsPaused, Retainers.Status, StartLearning); break;
-            case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartGatherOrCraft); break;
+            case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartHunt); break;
+            case RunStage.Hunt: TickErrand(Hunt.Finished, Hunt.Failure, Hunt.IsPaused, Hunt.Status, StartGatherOrCraft); break;
             case RunStage.Gather: TickGathering(); break;
             case RunStage.TurnIn: TickErrand(TurnIn.Finished, TurnIn.Failure, false, TurnIn.Status, AfterTurnIn); break;
             default: TickCrafting(); break;

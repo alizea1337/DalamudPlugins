@@ -46,6 +46,54 @@ internal sealed class SettingsPage : Page
         ImGui.EndPopup();
     }
 
+    private static readonly string[] Stances = { "Free", "Defender", "Attacker", "Healer" };
+
+    /// <summary>Combat job for monster drops (jobs with a saved gearset), the chocobo, and when to heal.</summary>
+    private void DrawCombat(float w)
+    {
+        var s = Ui.S;
+        var c = Config.Combat;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Monster drops");
+        Ui.Wrapped("Items only monsters drop are farmed with a basic combo on this job, in its highest item level gearset. One monster at a time; whatever attacks you is fought first.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0).OrderBy(j => j).ToList();
+        if (jobs.Count == 0) Ui.Wrapped("Save a gearset for a combat job to pick it here.", Palette.TextMuted);
+        foreach (var job in jobs)
+        {
+            var level = Data.PlanService.JobLevel(job);
+            if (Ui.ToggleChip("##combat" + job, $"{Core.Character.ClassJobs.Abbreviation(job)} {level}", Palette.ClassJobColor(job), c.ClassJob == job))
+            {
+                c.ClassJob = c.ClassJob == job ? 0 : job;
+                Config.Save();
+            }
+            ImGui.SameLine(0, 6 * s);
+            if (ImGui.GetContentRegionAvail().X < 80 * s) ImGui.NewLine();
+        }
+        ImGui.NewLine();
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var v = c.Chocobo;
+        var greens = Integrations.GameState.BagCount(Combat.Chocobo.GysahlGreens);
+        if (Ui.Checkbox("Call the chocobo", ref v, greens > 0
+                ? $"Uses Gysahl Greens from your bags ({greens} there) and puts the chocobo in the stance below."
+                : "Needs Gysahl Greens in your bags; without them the run fights alone."))
+        { c.Chocobo = v; Config.Save(); }
+        if (c.Chocobo)
+        {
+            var stance = (int)Math.Clamp(c.ChocoboStance, 4, 7) - 4;
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            if (Ui.Segmented("##stance", Stances, ref stance, 320 * s)) { c.ChocoboStance = (uint)(stance + 4); Config.Save(); }
+        }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.Text("Heal below");
+        ImGui.SameLine(0, 10 * s);
+        var heal = c.HealBelow;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##healbelow", ref heal, 10, 90, "%d%% health")) { c.HealBelow = heal; Config.Save(); }
+        Ui.Wrapped("The job's own heal (or Second Wind, or Rampart for tanks) when health drops under this.", Palette.TextMuted);
+        Ui.EndCard();
+    }
+
     private static string Ago(DateTime utc)
     {
         var span = DateTime.UtcNow - utc;
@@ -140,6 +188,9 @@ internal sealed class SettingsPage : Page
         v = rs.DiscardExtras;
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
         Ui.EndCard();
+
+        // Monster drops
+        DrawCombat(w);
 
         // Books and scrips
         Ui.BeginCard(width: w);

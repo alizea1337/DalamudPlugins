@@ -444,6 +444,7 @@ internal sealed class PlanPage : Page
         {
             Supply.GatherTimed => (TimedChip(catalog.TimedMask(line.ItemId)), Palette.SupplyColor(Supply.GatherTimed)),
             Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each" + VendorPlace(line.ItemId, catalog), Palette.SupplyColor(Supply.Vendor)),
+            Supply.Drop => (catalog.Mobs.For(line.ItemId).FirstOrDefault() is { } mob ? $"{mob.Name}, {mob.PlaceName} (level {mob.Level})" : "no known spawn", Palette.SupplyColor(Supply.Drop)),
             Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}" + CraftTime(line.Recipe), Palette.JobColor(line.Recipe.Job)),
             _ => null,
         };

@@ -389,7 +389,12 @@ internal sealed class GameCatalog : IGameCatalog
         foreach (var task in Services.Data.GetExcelSheet<RetainerTaskNormal>())
             if (task.Item.RowId != 0 && task.GatheringLog.RowId == 0 && task.FishingLog.RowId == 0)
                 Add(task.Item.RowId, Obtain.Drop);
+        Mobs = MobIndex.Load();
+        foreach (var item in Mobs.Items) Add(item, Obtain.Drop);
     }
+
+    /// <summary>Monsters that drop items, and where they spawn.</summary>
+    public MobIndex Mobs { get; private set; } = new();
 
     private void IndexNames()
     {

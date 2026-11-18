@@ -21,6 +21,7 @@ public sealed class Configuration : IPluginConfiguration
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();
+    public CombatSettings Combat { get; set; } = new();
     /// <summary>Timing figures for estimates, adjusted by every run.</summary>
     public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
@@ -45,6 +46,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Consumables ??= new();
         c.Crafting ??= new();
         c.Run ??= new();
+        c.Combat ??= new();
         c.Retainers ??= new();
         c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
@@ -107,6 +109,20 @@ public sealed class RunSettings
     public bool EarnScrips { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
+}
+
+/// <summary>Farming monster drops with a basic combo.</summary>
+[Serializable]
+public sealed class CombatSettings
+{
+    /// <summary>Combat job (ClassJob row) to fight with, in its highest item level gearset. 0: none picked yet.</summary>
+    public uint ClassJob { get; set; }
+    /// <summary>Summon the chocobo companion with Gysahl Greens from the bags.</summary>
+    public bool Chocobo { get; set; } = true;
+    /// <summary>Chocobo stance (BuddyAction row): 4 free, 5 defender, 6 attacker, 7 healer.</summary>
+    public uint ChocoboStance { get; set; } = 6;
+    /// <summary>Use the job's heal or defensive action below this much health (percent).</summary>
+    public int HealBelow { get; set; } = 50;
 }
 
 [Serializable]

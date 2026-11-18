@@ -26,6 +26,14 @@
   handle (fewest items for the scrips missing, counted at the middle reward), crafts them for the
   top collectability, turns them in at a collectable appraiser (job tab, row, submit; stops at the
   scrip cap), buys the books and then runs the order. Short after a round: up to three rounds.
+- Monster drops (M6): items only monsters drop are farmed after the vendors, before gathering, with
+  a basic combo on the combat job picked in Settings (highest item level gearset): one monster at
+  a time, never one someone else is fighting, attackers first, the job's heal or Rampart/Second
+  Wind below a health threshold. Spawn areas come from Teamcraft's drop data (Resources/mobs.json,
+  tools/MobTable); drops without a known spawn are "get it yourself".
+- Chocobo companion: "Call the chocobo" (on by default) uses Gysahl Greens from the bags and sets
+  the stance picked in Settings (attacker by default).
+- Travel mounts up for longer trips in open zones (and flies where the zone allows it).
 
 ## 0.5.0
 

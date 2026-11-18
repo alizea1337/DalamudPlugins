@@ -18,6 +18,10 @@ Adapted files:
 - `src/Run/BookBuyer.cs`: the exchange window callbacks (inclusion shop page, subpage and item;
   plain exchange rows; confirmation dialogs) and where the windows keep their item lists, from
   `GatherBuddy/Vulcan/Vendors/VendorInteractionHelper.cs` and `VendorPurchaseManager.cs`.
+- `src/Run/Appraiser.cs`: the collectable appraiser window callbacks (job tab, row, submit, the
+  scrip-cap prompt) and reading its item list, from `GatherBuddy/AutoGather/Collectables/`.
+- `tools/VendorTable`: corrected positions of two collectable appraisers, from
+  `GatherBuddy/Vulcan/Vendors/VendorNpcLocationCache.cs`.
 
 A copy of the Apache License 2.0 is at <https://www.apache.org/licenses/LICENSE-2.0>.
 
@@ -41,11 +45,13 @@ IMPLIED WARRANTIES ARE DISCLAIMED.
 Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds). Provenance runs it as a
 separate program to work out crafting rotations.
 
-## FFXIV Teamcraft (vendor positions)
+## FFXIV Teamcraft (vendor positions, monster drops)
 
-`Resources/vendors.json` holds world positions of gil vendors, converted by `tools/VendorTable` from
-Teamcraft's NPC data (<https://github.com/ffxiv-teamcraft/ffxiv-teamcraft>), MIT License,
-Copyright (c) 2017 Flavien Normand.
+`Resources/vendors.json` holds world positions of gil vendors, scrip exchanges and collectable
+appraisers, converted by `tools/VendorTable` from Teamcraft's NPC data. `Resources/mobs.json` holds
+which monsters drop which items and where they spawn, built by `tools/MobTable` from Teamcraft's
+`drop-sources.json` and `monsters.json`. Both from <https://github.com/ffxiv-teamcraft/ffxiv-teamcraft>,
+MIT License, Copyright (c) 2017 Flavien Normand.
 
 ## ECommons
 

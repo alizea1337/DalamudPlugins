@@ -30,6 +30,7 @@
       <Visible>false</Visible>
     </Content>
     <EmbeddedResource Include="Resources/vendors.json" LogicalName="Provenance.Resources.vendors.json" />
+    <EmbeddedResource Include="Resources/mobs.json" LogicalName="Provenance.Resources.mobs.json" />
     <Content Include="NOTICE.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
