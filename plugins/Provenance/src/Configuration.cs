@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Configuration;
+using Provenance.Core.Character;
 using Provenance.Core.Orders;
 
 namespace Provenance;
@@ -16,6 +18,8 @@ public sealed class Configuration : IPluginConfiguration
     public ImportSettings Import { get; set; } = new();
     public BrowseSettings Browse { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
+    /// <summary>Last "Check character" result per character (content id).</summary>
+    public Dictionary<ulong, CharacterProfile> Characters { get; set; } = new();
 
     public void Save() => Services.PluginInterface.SavePluginConfig(this);
 
@@ -30,6 +34,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Import ??= new();
         c.Browse ??= new();
         c.Window ??= new();
+        c.Characters ??= new();
         return c;
     }
 }

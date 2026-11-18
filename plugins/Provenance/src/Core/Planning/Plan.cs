@@ -28,8 +28,14 @@ public sealed class PlannerOptions
     /// <summary>Highest gil per unit the run may pay a vendor. 0 means no limit.</summary>
     public uint VendorMaxPrice { get; init; }
 
-    /// <summary>Picks among several recipes for the same item. Defaults to the lowest-level one.</summary>
+    /// <summary>Picks among several usable recipes for the same item. Defaults to the lowest-level one.</summary>
     public System.Func<IReadOnlyList<RecipeInfo>, RecipeInfo?>? ChooseRecipe { get; init; }
+
+    /// <summary>Why the character can't use a recipe (level, master book), or null when it can.</summary>
+    public System.Func<RecipeInfo, string?>? RecipeBlocker { get; init; }
+
+    /// <summary>Whether the character has read a folklore tome (by GatheringSubCategory division). Null: assume yes.</summary>
+    public System.Func<uint, bool>? HasTome { get; init; }
 }
 
 /// <summary>Everything the plan knows about one item, summed over the whole order.</summary>

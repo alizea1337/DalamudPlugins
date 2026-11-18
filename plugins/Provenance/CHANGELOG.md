@@ -12,3 +12,7 @@ First testing build: plan an order, but don't run it yet.
   Anything the run can't get on its own is listed at the top and blocks the start.
 - Owned items from inventory, crystals and saddlebag are used first; the armoury chest never is.
 - Vendor price cap and a choice to buy vendor materials instead of gathering them.
+- Character page with *Check character*: levels, the best gearset per crafter and gatherer with
+  its stats, specialist and Manipulation, master books and folklore tomes. Recipes above your
+  level or behind an unlearned master book, and legendary nodes behind an unread tome, show up
+  in the plan as items to get yourself, with the reason.

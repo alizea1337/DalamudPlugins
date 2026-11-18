@@ -39,11 +39,12 @@ public sealed class Plugin : IDalamudPlugin
             new BrowsePage(this),
             new PlanPage(this),
             new RunPage(this),
+            new CharacterPage(this),
             new SettingsPage(this),
         });
         windows.AddWindow(Main);
 
-        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | settings" };
+        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings" };
         Services.Commands.AddHandler(Command, help);
         Services.Commands.AddHandler(Alias, new CommandInfo(OnCommand) { ShowInHelp = false });
         pluginInterface.UiBuilder.Draw += windows.Draw;
@@ -69,6 +70,7 @@ public sealed class Plugin : IDalamudPlugin
             case "browse": Main.IsOpen = true; Main.Select<BrowsePage>(); break;
             case "import": Main.IsOpen = true; Main.Select<ImportPage>(); break;
             case "settings": OpenSettings(); break;
+            case "character": Main.IsOpen = true; Main.Select<CharacterPage>(); break;
             default: Main.Toggle(); break;
         }
     }

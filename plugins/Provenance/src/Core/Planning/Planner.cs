@@ -88,7 +88,7 @@ public static class Planner
             var line = new PlanLine { ItemId = itemId, IsTarget = isTarget };
             lines[itemId] = line;
 
-            var recipe = PickRecipe(itemId, recipeId);
+            var (recipe, blocked) = PickRecipe(itemId, recipeId);
             if (recipe != null)
             {
                 line.Supply = Supply.Craft;
@@ -96,22 +96,30 @@ public static class Planner
             }
             else
             {
+                // No recipe, or none the character can use yet: buy or gather it instead if possible.
                 DecideAcquire(line);
+                if (blocked != null && line.Supply == Supply.Manual) line.ManualReason = blocked;
             }
             return line;
         }
 
-        RecipeInfo? PickRecipe(uint itemId, uint recipeId)
+        (RecipeInfo? Recipe, string? Blocked) PickRecipe(uint itemId, uint recipeId)
         {
+            var all = catalog.RecipesFor(itemId);
+            if (all.Count == 0) return (null, null);
+            var usable = options.RecipeBlocker == null ? all : all.Where(r => options.RecipeBlocker(r) == null).ToList();
+            if (usable.Count == 0)
+            {
+                var easiest = all.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First();
+                return (null, options.RecipeBlocker!(easiest));
+            }
             if (recipeId != 0)
             {
-                var exact = catalog.Recipe(recipeId);
-                if (exact != null && exact.ItemId == itemId) return exact;
+                var exact = usable.FirstOrDefault(r => r.RecipeId == recipeId);
+                if (exact != null) return (exact, null);
             }
-            var all = catalog.RecipesFor(itemId);
-            if (all.Count == 0) return null;
-            if (all.Count == 1) return all[0];
-            return options.ChooseRecipe?.Invoke(all) ?? all.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First();
+            if (usable.Count == 1) return (usable[0], null);
+            return (options.ChooseRecipe?.Invoke(usable) ?? usable.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First(), null);
         }
 
         void DecideAcquire(PlanLine line)
@@ -121,19 +129,22 @@ public static class Planner
             var vendorOk = src.Has(Obtain.Vendor) && (options.VendorMaxPrice == 0 || src.VendorPrice <= options.VendorMaxPrice);
             line.VendorUnitPrice = src.VendorPrice;
             line.ManualReason = null;
+            var tomeOk = src.Tome == 0 || options.HasTome == null || options.HasTome(src.Tome);
 
             if (vendorOk && options.PreferVendor) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Gather)) line.Supply = Supply.Gather;
-            else if (src.Has(Obtain.GatherTimed)) line.Supply = Supply.GatherTimed;
-            else if (src.Has(Obtain.Fish)) line.Supply = Supply.Fish;
+            else if (src.Has(Obtain.GatherTimed) && tomeOk) line.Supply = Supply.GatherTimed;
+            else if (src.Has(Obtain.Fish) && tomeOk) line.Supply = Supply.Fish;
             else if (vendorOk) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Drop)) line.Supply = Supply.Drop;
             else
             {
                 line.Supply = Supply.Manual;
-                line.ManualReason = src.Has(Obtain.Vendor)
-                    ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
-                    : "No gathering, fishing, vendor or monster source";
+                line.ManualReason = !tomeOk && (src.Has(Obtain.GatherTimed) || src.Has(Obtain.Fish))
+                    ? "Only found on legendary nodes or fishing holes that need a folklore tome you haven't read"
+                    : src.Has(Obtain.Vendor)
+                        ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
+                        : "No gathering, fishing, vendor or monster source";
             }
         }
 

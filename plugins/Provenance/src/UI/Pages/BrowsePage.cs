@@ -118,7 +118,14 @@ internal sealed class BrowsePage : Page
         Ui.Chip("level " + e.Level, Palette.TextMuted);
         if (e.Stars > 0) { ImGui.SameLine(0, 6 * s); Ui.Chip(e.Stars == 1 ? "1 star" : $"{e.Stars} stars", Palette.Warn, FontAwesomeIcon.Star); }
         if (e.Expert) { ImGui.SameLine(0, 6 * s); Ui.Chip("expert", Palette.Danger); }
-        if (e.MasterBook) { ImGui.SameLine(0, 6 * s); Ui.Chip("master book", Palette.TextMuted, FontAwesomeIcon.Book); }
+        if (e.MasterBook != 0)
+        {
+            ImGui.SameLine(0, 6 * s);
+            var learned = Plans.Profile?.MasterBooks.Contains(e.MasterBook);
+            Ui.Chip(learned switch { true => "master book, learned", false => "master book missing", _ => "master book" },
+                learned == false ? Palette.Warn : Palette.TextMuted, FontAwesomeIcon.Book);
+            Ui.Tooltip(Plans.Catalog?.MasterBookName(e.MasterBook) + (learned == null ? ". Check your character to see whether you have it." : ""));
+        }
 
         // Right side: amount + add
         var inOrder = Config.Order.Lines.Where(l => l.ItemId == e.ItemId).Sum(l => l.Quantity);

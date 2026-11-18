@@ -43,6 +43,16 @@ internal static class Palette
         _ => TextMuted,
     };
 
+    /// <summary>Colour for any crafter or gatherer by ClassJob row.</summary>
+    public static Vector4 ClassJobColor(uint classJob) => classJob switch
+    {
+        >= 8 and <= 15 => JobColor((Job)(classJob - 8)),
+        16 => Hex(0xC9BBA6), // stone
+        17 => Hex(0x9FD39A), // leaf
+        18 => Hex(0x93C5F0), // water
+        _ => TextMuted,
+    };
+
     public static Vector4 SupplyColor(Supply supply) => supply switch
     {
         Supply.Gather => Hex(0x9FD39A),

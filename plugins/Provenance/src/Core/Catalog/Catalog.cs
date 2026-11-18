@@ -51,7 +51,9 @@ public sealed record RecipeInfo(
     int Stars,
     int Yield,
     bool Expert,
-    IReadOnlyList<Ingredient> Ingredients);
+    IReadOnlyList<Ingredient> Ingredients,
+    /// <summary>SecretRecipeBook row the recipe needs, 0 when it needs none.</summary>
+    uint MasterBook = 0);
 
 /// <summary>Ways to get an item without crafting it. An item can have several.</summary>
 [Flags]
@@ -69,7 +71,11 @@ public enum Obtain
     Drop = 1 << 4,
 }
 
-public readonly record struct ItemSources(Obtain Flags, uint VendorPrice)
+/// <param name="Tome">
+/// Folklore tome (GatheringSubCategory division) needed for the item's timed nodes or fishing holes,
+/// or 0 when at least one of them needs no tome.
+/// </param>
+public readonly record struct ItemSources(Obtain Flags, uint VendorPrice, uint Tome = 0)
 {
     public bool Has(Obtain flag) => (Flags & flag) != 0;
 }

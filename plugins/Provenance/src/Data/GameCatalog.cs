@@ -8,8 +8,12 @@ using Provenance.Core.Catalog;
 
 namespace Provenance.Data;
 
+internal sealed record MasterBook(uint Id, string Name, Job? Job);
+
+internal sealed record FolkloreTome(uint Division, string Name, uint ClassJobId);
+
 /// <summary>One row of the recipe browser.</summary>
-internal sealed record BrowseEntry(uint RecipeId, uint ItemId, string Name, Job Job, int Level, int Stars, uint Icon, int Yield, bool Expert, bool MasterBook)
+internal sealed record BrowseEntry(uint RecipeId, uint ItemId, string Name, Job Job, int Level, int Stars, uint Icon, int Yield, bool Expert, uint MasterBook)
 {
     public readonly string NameLower = Name.ToLowerInvariant();
 }
@@ -30,6 +34,12 @@ internal sealed class GameCatalog : IGameCatalog
     private readonly ConcurrentDictionary<uint, (string Name, uint Icon)> itemCache = new();
 
     public IReadOnlyList<BrowseEntry> Browse { get; private set; } = Array.Empty<BrowseEntry>();
+    public IReadOnlyList<MasterBook> MasterBooks { get; private set; } = Array.Empty<MasterBook>();
+    public IReadOnlyList<FolkloreTome> FolkloreTomes { get; private set; } = Array.Empty<FolkloreTome>();
+
+    /// <summary>Folklore tome needed per item for timed nodes / fishing holes; 0 = at least one needs none.</summary>
+    private readonly Dictionary<uint, uint> tomeByItem = new();
+    private readonly HashSet<uint> tomeFree = new();
 
     public static GameCatalog Build()
     {
@@ -41,6 +51,8 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexVendors();
         c.IndexDrops();
         c.IndexNames();
+        c.IndexBooks();
+        c.ApplyTomes();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items in {Ms} ms", c.recipesById.Count, c.sources.Count, sw.ElapsedMilliseconds);
         return c;
     }
@@ -87,7 +99,7 @@ internal sealed class GameCatalog : IGameCatalog
             var info = new RecipeInfo(
                 r.RowId, result, (Job)r.CraftType.RowId,
                 level?.ClassJobLevel ?? 0, level?.Stars ?? 0,
-                Math.Max(1, (int)r.AmountResult), r.IsExpert, ingredients);
+                Math.Max(1, (int)r.AmountResult), r.IsExpert, ingredients, r.SecretRecipeBook.RowId);
             recipesById[r.RowId] = info;
             if (!recipesByItem.TryGetValue(result, out var list)) recipesByItem[result] = list = new List<RecipeInfo>(1);
             list.Add(info);
@@ -96,7 +108,7 @@ internal sealed class GameCatalog : IGameCatalog
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
-                    browse.Add(new BrowseEntry(r.RowId, result, name, info.Job, info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId != 0));
+                    browse.Add(new BrowseEntry(r.RowId, result, name, info.Job, info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId));
             }
         }
         browse.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
@@ -114,12 +126,14 @@ internal sealed class GameCatalog : IGameCatalog
             // Types 0–3 are mining, quarrying, logging and harvesting; spearfishing rows point elsewhere.
             if (pointBase.GatheringType.RowId > 3) continue;
             var timed = IsTimed(transient.GetRowOrDefault(point.RowId));
+            var tome = timed ? TomeOf(point.GatheringSubCategory.ValueNullable) : 0;
             foreach (var reference in pointBase.Item)
             {
                 if (reference.RowId == 0 || gatheringItems.GetRowOrDefault(reference.RowId) is not { } gi) continue;
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                if (timed) NoteTome(itemId, tome);
             }
         }
     }
@@ -137,9 +151,17 @@ internal sealed class GameCatalog : IGameCatalog
     private void IndexFishing()
     {
         foreach (var f in Services.Data.GetExcelSheet<FishParameter>())
-            if (f.Item.RowId is > 0 and < 1_000_000 && f.FishingSpot.RowId != 0) Add(f.Item.RowId, Obtain.Fish);
+            if (f.Item.RowId is > 0 and < 1_000_000 && f.FishingSpot.RowId != 0)
+            {
+                Add(f.Item.RowId, Obtain.Fish);
+                NoteTome(f.Item.RowId, TomeOf(f.GatheringSubCategory.ValueNullable));
+            }
         foreach (var s in Services.Data.GetExcelSheet<SpearfishingItem>())
-            if (s.Item.RowId is > 0 and < 1_000_000) Add(s.Item.RowId, Obtain.Fish);
+            if (s.Item.RowId is > 0 and < 1_000_000)
+            {
+                Add(s.Item.RowId, Obtain.Fish);
+                NoteTome(s.Item.RowId, 0);
+            }
     }
 
     private void IndexVendors()
@@ -177,6 +199,56 @@ internal sealed class GameCatalog : IGameCatalog
 
         bool IsUseful(uint id) => recipesByItem.ContainsKey(id) || sources.ContainsKey(id);
     }
+
+    /// <summary>A sub category only locks nodes when it names a folklore book.</summary>
+    private static uint TomeOf(GatheringSubCategory? sub)
+        => sub is { } sc && !sc.FolkloreBook.IsEmpty ? sc.Division : 0u;
+
+    private void NoteTome(uint itemId, uint tome)
+    {
+        if (tome == 0) tomeFree.Add(itemId);
+        else tomeByItem.TryAdd(itemId, tome);
+    }
+
+    private void ApplyTomes()
+    {
+        foreach (var (item, tome) in tomeByItem)
+        {
+            if (tomeFree.Contains(item) || !sources.TryGetValue(item, out var src)) continue;
+            sources[item] = src with { Tome = tome };
+        }
+    }
+
+    private void IndexBooks()
+    {
+        var jobsByBook = new Dictionary<uint, HashSet<Job>>();
+        foreach (var r in recipesById.Values)
+        {
+            if (r.MasterBook == 0) continue;
+            if (!jobsByBook.TryGetValue(r.MasterBook, out var set)) jobsByBook[r.MasterBook] = set = new HashSet<Job>();
+            set.Add(r.Job);
+        }
+        var books = new List<MasterBook>();
+        foreach (var b in Services.Data.GetExcelSheet<SecretRecipeBook>())
+        {
+            if (!jobsByBook.TryGetValue(b.RowId, out var jobs)) continue;
+            var name = b.Name.ExtractText();
+            if (name.Length == 0) name = b.Item.ValueNullable?.Name.ExtractText() ?? "Master book " + b.RowId;
+            books.Add(new MasterBook(b.RowId, name, jobs.Count == 1 ? jobs.First() : null));
+        }
+        MasterBooks = books;
+
+        var tomes = new Dictionary<uint, FolkloreTome>();
+        foreach (var sc in Services.Data.GetExcelSheet<GatheringSubCategory>())
+        {
+            if (sc.FolkloreBook.IsEmpty || sc.Division == 0 || tomes.ContainsKey(sc.Division)) continue;
+            var name = sc.Item.ValueNullable?.Name.ExtractText() is { Length: > 0 } n ? n : sc.FolkloreBook.ExtractText();
+            tomes[sc.Division] = new FolkloreTome(sc.Division, name, sc.ClassJob.RowId);
+        }
+        FolkloreTomes = tomes.Values.OrderBy(t => t.ClassJobId).ThenBy(t => t.Division).ToList();
+    }
+
+    public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 
     private void Add(uint itemId, Obtain flag)
     {

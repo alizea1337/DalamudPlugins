@@ -38,6 +38,8 @@ internal sealed class FakeCatalog : IGameCatalog
         Name(RareLumber, "Elder Lumber"); AddRecipe(RareLumber, Job.Carpenter, 50, yield: 1, (TimedLog, 3));
     }
 
+    public void SetSources(uint id, ItemSources src) => sources[id] = src;
+
     private void Name(uint id, string name) => names[id] = name;
     private void Gatherable(uint id) => sources[id] = new ItemSources(Obtain.Gather, 0);
 

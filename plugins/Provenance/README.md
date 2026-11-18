@@ -25,6 +25,14 @@ Open it with `/provenance` (or `/prov`).
   saddlebag; the armoury chest never counts. The plan lists anything the run can't get on its
   own, and the order can't start until you have those.
 
+- **Character**: *Check character* reads every crafter's and gatherer's level, the gearset a run
+  would use (highest item level) with its Craftsmanship/Control/CP or Gathering/Perception/GP,
+  specialist and Manipulation, and which master books and folklore tomes you have. The job you
+  are on is measured live; other jobs are worked out from their gearset's items and materia plus
+  the base stats measured on a job of the same kind. The plan uses levels, master books and
+  folklore tomes live: a recipe you can't craft yet or a legendary node you can't see becomes
+  *get it yourself*, with the reason.
+
 ## Planned
 
 | Milestone | Scope |
@@ -43,4 +51,5 @@ settings page shows which ones are loaded.
 
 ## License
 
-MIT. Nunito is under the SIL Open Font License (`Resources/Fonts/LICENSE-Nunito.txt`).
+MIT. Parts are adapted from GatherBuddy Reborn (Apache 2.0); Nunito is under the SIL Open Font
+License. See [NOTICE.md](NOTICE.md).

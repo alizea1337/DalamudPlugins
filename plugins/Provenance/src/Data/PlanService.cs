@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Lumina.Excel.Sheets;
 using Provenance.Core.Catalog;
+using Provenance.Core.Character;
 using Provenance.Core.Planning;
 
 namespace Provenance.Data;
@@ -22,6 +23,7 @@ internal sealed class PlanService : IDisposable
     private readonly Task<GameCatalog> loading;
     private Dictionary<uint, int> owned = new();
     private DateTime nextStockCheck = DateTime.MinValue;
+    private DateTime nextRebuild = DateTime.MinValue;
     private bool dirty = true;
 
     public PlanService(Func<Configuration> config)
@@ -55,8 +57,11 @@ internal sealed class PlanService : IDisposable
             }
         }
 
+        // Levels and books change without touching the bags; rebuild now and then to pick them up.
+        if (DateTime.UtcNow >= nextRebuild) dirty = true;
         if (!dirty) return;
         dirty = false;
+        nextRebuild = DateTime.UtcNow.AddSeconds(10);
         var c = config();
         Plan = Planner.Build(c.Order, catalog, owned, new PlannerOptions
         {
@@ -64,7 +69,50 @@ internal sealed class PlanService : IDisposable
             PreferVendor = c.Buying.PreferVendor,
             VendorMaxPrice = c.Buying.VendorMaxPrice,
             ChooseRecipe = ChooseRecipe,
+            RecipeBlocker = r => RecipeBlocker(r, catalog),
+            HasTome = HasTome,
         });
+    }
+
+    /// <summary>The logged-in character's last check, if any.</summary>
+    public CharacterProfile? Profile
+        => Services.PlayerState.IsLoaded && config().Characters.TryGetValue(Services.PlayerState.ContentId, out var p) ? p : null;
+
+    /// <summary>Reads gearsets, stats, master books and folklore tomes now and stores them. Framework thread.</summary>
+    public CharacterProfile? CheckCharacter()
+    {
+        var catalog = Catalog;
+        if (catalog == null) return null;
+        var profile = CharacterReader.Read(catalog, Profile);
+        if (profile == null) return null;
+        var c = config();
+        c.Characters[profile.ContentId] = profile;
+        c.Save();
+        dirty = true;
+        return profile;
+    }
+
+    /// <summary>Live checks, so a newly learned book or level counts at once.</summary>
+    private static unsafe string? RecipeBlocker(RecipeInfo recipe, GameCatalog catalog)
+    {
+        if (!Services.PlayerState.IsLoaded) return null;
+        var level = JobLevel(recipe.Job);
+        if (level == 0) return $"Needs {recipe.Job}, which this character hasn't unlocked";
+        if (level < recipe.Level) return $"Needs {recipe.Job} level {recipe.Level}; yours is {level}";
+        if (recipe.MasterBook != 0)
+        {
+            var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+            if (ps != null && !ps->IsSecretRecipeBookUnlocked(recipe.MasterBook))
+                return $"Needs the master book {catalog.MasterBookName(recipe.MasterBook)}";
+        }
+        return null;
+    }
+
+    private static unsafe bool HasTome(uint division)
+    {
+        if (!Services.PlayerState.IsLoaded) return true;
+        var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+        return ps == null || ps->IsFolkloreBookUnlocked(division);
     }
 
     /// <summary>Among several recipes for one item, take one the character can craft now on its best-levelled job.</summary>
