@@ -50,7 +50,13 @@ internal static class Palette
         16 => Hex(0xC9BBA6), // stone
         17 => Hex(0x9FD39A), // leaf
         18 => Hex(0x93C5F0), // water
-        _ => TextMuted,
+        _ => Core.Character.ClassJobs.RoleOf(classJob) switch
+        {
+            Core.Character.ClassJobs.Role.Tank => Hex(0x8FB4EA),   // soft blue
+            Core.Character.ClassJobs.Role.Healer => Hex(0x9ED8A8), // soft green
+            Core.Character.ClassJobs.Role.Dps => Hex(0xE9A0A0),    // soft red
+            _ => TextMuted,
+        },
     };
 
     public static Vector4 SupplyColor(Supply supply) => supply switch

@@ -176,9 +176,14 @@ internal sealed class PlanService : IDisposable
     {
         var catalog = Catalog;
         if (catalog == null) return null;
+        // Prices in different currencies don't compare: first what you can pay now, then a scrip the
+        // run can earn with collectables, then the most of the price you already have; cheapest within that.
+        var earnable = catalog.Collectables.Select(c => c.Currency).ToHashSet();
         return catalog.Exchanges.For(itemId).Where(o => CanReach(o.TerritoryId))
-            .OrderBy(o => o.Cost)
-            .ThenByDescending(o => GameState.CurrencyCount(o.CurrencyItemId) >= o.Cost)
+            .OrderByDescending(o => GameState.CurrencyCount(o.CurrencyItemId) >= o.Cost)
+            .ThenByDescending(o => earnable.Contains(o.CurrencyItemId))
+            .ThenByDescending(o => Math.Min(1.0, GameState.CurrencyCount(o.CurrencyItemId) / (double)Math.Max(1, o.Cost)))
+            .ThenBy(o => o.Cost)
             .ThenBy(o => o.NpcEntries)
             .ThenBy(o => Services.Data.GetExcelSheet<TerritoryType>().GetRowOrDefault(o.TerritoryId)?.TerritoryIntendedUse.RowId == 0 ? 0 : 1)
             .FirstOrDefault();

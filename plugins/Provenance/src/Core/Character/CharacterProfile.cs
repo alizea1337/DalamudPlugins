@@ -33,7 +33,22 @@ public static class ClassJobs
     {
         8 => "CRP", 9 => "BSM", 10 => "ARM", 11 => "GSM", 12 => "LTW", 13 => "WVR", 14 => "ALC", 15 => "CUL",
         16 => "MIN", 17 => "BTN", 18 => "FSH",
+        1 => "GLA", 2 => "PGL", 3 => "MRD", 4 => "LNC", 5 => "ARC", 6 => "CNJ", 7 => "THM", 26 => "ACN", 29 => "ROG",
+        19 => "PLD", 20 => "MNK", 21 => "WAR", 22 => "DRG", 23 => "BRD", 24 => "WHM", 25 => "BLM", 27 => "SMN", 28 => "SCH",
+        30 => "NIN", 31 => "MCH", 32 => "DRK", 33 => "AST", 34 => "SAM", 35 => "RDM", 36 => "BLU", 37 => "GNB", 38 => "DNC",
+        39 => "RPR", 40 => "SGE", 41 => "VPR", 42 => "PCT",
         _ => "?",
+    };
+
+    public enum Role { Tank, Healer, Dps, Other }
+
+    /// <summary>Combat role of a job or starting class.</summary>
+    public static Role RoleOf(uint classJob) => classJob switch
+    {
+        1 or 3 or 19 or 21 or 32 or 37 => Role.Tank,
+        6 or 24 or 28 or 33 or 40 => Role.Healer,
+        2 or 4 or 5 or 7 or 26 or 29 or 20 or 22 or 23 or 25 or 27 or 30 or 31 or 34 or 35 or 36 or 38 or 39 or 41 or 42 => Role.Dps,
+        _ => Role.Other,
     };
 
     public static string StatName(Discipline d, int index) => (d, index) switch

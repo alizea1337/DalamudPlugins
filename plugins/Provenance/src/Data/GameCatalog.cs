@@ -88,6 +88,23 @@ internal sealed class GameCatalog : IGameCatalog
     // ------------------------------------------------------------------ IGameCatalog
 
     public string ItemName(uint itemId) => Lookup(itemId).Name;
+
+    /// <summary>"Purple Crafters' Scrips": the plural with the singular's capitals (the game's plurals are lower case).</summary>
+    public string ItemNamePlural(uint itemId)
+        => Services.Data.GetExcelSheet<Item>().GetRowOrDefault(itemId) is { } row ? Plural(row) : ItemName(itemId);
+
+    public static string Plural(Item row)
+    {
+        var singular = row.Name.ExtractText();
+        var plural = row.Plural.ExtractText();
+        if (plural.Length == 0) return singular;
+        var s = singular.Split(' ');
+        var p = plural.Split(' ');
+        if (s.Length != p.Length) return plural;
+        for (var i = 0; i < p.Length; i++)
+            if (s[i].Length > 0 && p[i].Length > 0 && char.IsUpper(s[i][0])) p[i] = char.ToUpperInvariant(p[i][0]) + p[i][1..];
+        return string.Join(' ', p);
+    }
     public uint ItemIcon(uint itemId) => Lookup(itemId).Icon;
     public IReadOnlyList<RecipeInfo> RecipesFor(uint itemId) => recipesByItem.TryGetValue(itemId, out var l) ? l : NoRecipes;
     public RecipeInfo? Recipe(uint recipeId) => recipesById.GetValueOrDefault(recipeId);

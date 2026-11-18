@@ -57,7 +57,8 @@ internal sealed class SettingsPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Monster drops");
         Ui.Wrapped("Items only monsters drop are farmed with a basic combo on this job, in its highest item level gearset. One monster at a time; whatever attacks you is fought first.");
         ImGui.Dummy(new Vector2(0, 2 * s));
-        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0).OrderBy(j => j).ToList();
+        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
+            .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(j => Core.Character.ClassJobs.Abbreviation(j)).ToList();
         if (jobs.Count == 0) Ui.Wrapped("Save a gearset for a combat job to pick it here.", Palette.TextMuted);
         foreach (var job in jobs)
         {

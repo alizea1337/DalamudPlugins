@@ -214,7 +214,7 @@ internal sealed class RunEngine : IDisposable
         scripPhase = plugin.Plans.ScripTasks.Count > 0;
         if (scripPhase)
             Add("Earning scrips for books first: " + string.Join(", ", plugin.Plans.ScripTasks.Select(t =>
-                $"{t.Count}× {plugin.Plans.Catalog!.ItemName(t.Option.ItemId)} for about {t.Expected:N0} {plugin.Plans.Catalog!.ItemName(t.Option.Currency)}")) + ".", false);
+                $"{t.Count}× {plugin.Plans.Catalog!.ItemName(t.Option.ItemId)} for about {t.Expected:N0} {plugin.Plans.Catalog!.ItemNamePlural(t.Option.Currency)}")) + ".", false);
 
         // Retainers first (a book may be with a retainer), then books, vendors, gathering, crafting.
         StartRetainers();

@@ -134,7 +134,7 @@ internal sealed class ExchangeIndex
                     if (!index.offers.TryGetValue(item, out var list)) index.offers[item] = list = new();
                     if (list.Any(o => o.NpcId == npcId && o.SpecialShopId == special)) continue;
                     var row = items.GetRowOrDefault(currency);
-                    var currencyName = (cost > 1 ? row?.Plural.ExtractText() : null) is { Length: > 0 } plural ? plural : row?.Name.ExtractText() ?? "currency";
+                    var currencyName = row is { } r ? (cost > 1 ? GameCatalog.Plural(r) : r.Name.ExtractText()) : "currency";
                     list.Add(new ExchangeOffer(item, npcId, npcName, territory, position, currency, currencyName, cost, special, inclusion, page, sub, labels, services));
                 }
             }

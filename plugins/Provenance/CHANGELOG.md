@@ -34,6 +34,10 @@
 - Chocobo companion: "Call the chocobo" (on by default) uses Gysahl Greens from the bags and sets
   the stance picked in Settings (attacker by default).
 - Travel mounts up for longer trips in open zones (and flies where the zone allows it).
+- Books: the exchange is picked by what you can pay now, then a scrip the run can earn, then the
+  cheapest; a tome no longer lands on a token exchange you have no tokens for. Scrip names are
+  written properly ("Purple Crafters' Scrips").
+- Combat job picker shows job names and role colours (tanks blue, healers green, damage red).
 
 ## 0.5.0
 
