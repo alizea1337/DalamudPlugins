@@ -47,6 +47,75 @@ internal sealed class SettingsPage : Page
     }
 
     private static readonly string[] Stances = { "Free", "Defender", "Attacker", "Healer" };
+    private static readonly string[] AfterPlaces = { "Stay", "Where it started", "Inn room", "Home" };
+    private List<Integrations.Teleporter.Destination>? homes;
+
+    /// <summary>Where to go once an order is finished: stay, back to the start, an inn room, or a house or apartment.</summary>
+    private void DrawAfterOrder(float w)
+    {
+        var s = Ui.S;
+        var a = Config.AfterOrder;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("After the order");
+        Ui.Wrapped("Where to go once an order is finished. A stopped run stays where it is.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var place = (int)a.Place;
+        if (Ui.Segmented("##afterplace", AfterPlaces, ref place, 440 * s)) { a.Place = (AfterOrderPlace)place; Config.Save(); }
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        var catalog = Plans.Catalog;
+        switch (a.Place)
+        {
+            case AfterOrderPlace.Stay:
+                Ui.Wrapped("The character stays wherever the last step ended.", Palette.TextMuted);
+                break;
+            case AfterOrderPlace.WhereStarted:
+                Ui.Wrapped("Teleports and walks back to the spot where you pressed Start. Started in an inn room: back into that inn.", Palette.TextMuted);
+                break;
+            case AfterOrderPlace.Inn:
+            {
+                var inns = catalog?.Inns ?? Array.Empty<Data.GameCatalog.Inn>();
+                var current = inns.FirstOrDefault(i => i.NpcId == a.InnNpc);
+                if (Ui.Button(current == null ? "Pick an inn" : $"{current.City} ({current.NpcName})", current == null ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.Bed, id: "##innpick"))
+                    ImGui.OpenPopup("##innpopup");
+                ImGui.SetNextWindowSize(new Vector2(320 * s, 0));
+                if (ImGui.BeginPopup("##innpopup"))
+                {
+                    foreach (var inn in inns)
+                        if (ImGui.Selectable($"{inn.City} ({inn.NpcName})##inn{inn.NpcId}", inn.NpcId == a.InnNpc)) { a.InnNpc = inn.NpcId; Config.Save(); ImGui.CloseCurrentPopup(); }
+                    ImGui.EndPopup();
+                }
+                Ui.Wrapped("Travels to the innkeeper and takes a room.", Palette.TextMuted);
+                break;
+            }
+            case AfterOrderPlace.Home:
+            {
+                var label = a.HomeAetheryte == 0 ? "Pick a house or apartment" : a.HomeLabel;
+                if (Ui.Button(label, a.HomeAetheryte == 0 ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.Home, id: "##homepick"))
+                {
+                    homes = Integrations.Teleporter.Homes();
+                    ImGui.OpenPopup("##homepopup");
+                }
+                ImGui.SetNextWindowSize(new Vector2(360 * s, 0));
+                if (ImGui.BeginPopup("##homepopup"))
+                {
+                    if (homes is not { Count: > 0 }) Ui.Muted("No house or apartment in your teleport list.");
+                    foreach (var h in homes ?? new())
+                        if (ImGui.Selectable($"{h.Estate}##home{h.AetheryteId}_{h.SubIndex}", h.AetheryteId == a.HomeAetheryte && h.SubIndex == a.HomeSubIndex))
+                        {
+                            a.HomeAetheryte = h.AetheryteId;
+                            a.HomeSubIndex = h.SubIndex;
+                            a.HomeLabel = h.Estate ?? h.Name;
+                            Config.Save();
+                            ImGui.CloseCurrentPopup();
+                        }
+                    ImGui.EndPopup();
+                }
+                Ui.Wrapped("Teleports to the house or apartment entrance (any house or apartment in your teleport list).", Palette.TextMuted);
+                break;
+            }
+        }
+        Ui.EndCard();
+    }
     private string jobSearch = "";
 
     /// <summary>A button with the picked job; it opens a searchable list of combat jobs with a saved gearset.</summary>
@@ -226,6 +295,9 @@ internal sealed class SettingsPage : Page
         v = rs.DiscardExtras;
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
         Ui.EndCard();
+
+        // After the order
+        DrawAfterOrder(w);
 
         // Monster drops
         DrawCombat(w);

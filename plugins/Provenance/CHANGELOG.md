@@ -54,6 +54,10 @@
   walking, it walks to the nearest crystal, takes the aethernet and walks the rest. Aetheryte and
   shard positions now come from the zone map's markers (the game data has no other position for
   them), which also picks the right aetheryte to teleport to in a zone with several.
+- After the order (Settings): once an order is finished the run can stay, go back to where it was
+  started (into the same inn if it started in an inn room), take a room at an inn you pick (the
+  innkeepers of the eight cities with inn rooms), or teleport to a house or apartment from your
+  teleport list. A stopped run stays where it is.
 
 ## 0.5.0
 

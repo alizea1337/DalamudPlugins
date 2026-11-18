@@ -22,6 +22,7 @@ public sealed class Configuration : IPluginConfiguration
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();
     public CombatSettings Combat { get; set; } = new();
+    public AfterOrderSettings AfterOrder { get; set; } = new();
     /// <summary>Timing figures for estimates, adjusted by every run.</summary>
     public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
@@ -47,6 +48,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Crafting ??= new();
         c.Run ??= new();
         c.Combat ??= new();
+        c.AfterOrder ??= new();
         c.Retainers ??= new();
         c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
@@ -109,6 +111,21 @@ public sealed class RunSettings
     public bool EarnScrips { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
+}
+
+public enum AfterOrderPlace { Stay, WhereStarted, Inn, Home }
+
+/// <summary>Where to go once an order is finished.</summary>
+[Serializable]
+public sealed class AfterOrderSettings
+{
+    public AfterOrderPlace Place { get; set; } = AfterOrderPlace.Stay;
+    /// <summary>Innkeeper (ENpcBase) of the inn picked.</summary>
+    public uint InnNpc { get; set; }
+    /// <summary>House or apartment from the teleport list: its aetheryte and sub index.</summary>
+    public uint HomeAetheryte { get; set; }
+    public byte HomeSubIndex { get; set; }
+    public string HomeLabel { get; set; } = "";
 }
 
 /// <summary>Farming monster drops with a basic combo.</summary>

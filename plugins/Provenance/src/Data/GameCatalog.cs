@@ -367,6 +367,42 @@ internal sealed class GameCatalog : IGameCatalog
         }
         Collectables = list;
         if (AppraiserShop != 0) IndexAppraisers();
+        IndexInns();
+    }
+
+    /// <summary>An innkeeper: the NPC, where they stand, and the inn room zone they lead to.</summary>
+    internal sealed record Inn(uint NpcId, string NpcName, uint TerritoryId, System.Numerics.Vector2 Position, uint RoomTerritory, string City);
+
+    public IReadOnlyList<Inn> Inns { get; private set; } = Array.Empty<Inn>();
+
+    private void IndexInns()
+    {
+        var territories = Services.Data.GetExcelSheet<TerritoryType>();
+        var warps = Services.Data.GetExcelSheet<Warp>()
+            .Where(w => territories.GetRowOrDefault(w.TerritoryType.RowId)?.TerritoryIntendedUse.RowId == 2)
+            .ToDictionary(w => w.RowId, w => w.TerritoryType.RowId);
+        var pre = Services.Data.GetExcelSheet<PreHandler>();
+        var topics = Services.Data.GetExcelSheet<TopicSelect>();
+        var npcs = Services.Data.GetExcelSheet<ENpcBase>();
+        var names = Services.Data.GetExcelSheet<ENpcResident>();
+        uint Room(uint id, int depth)
+        {
+            if (warps.TryGetValue(id, out var room)) return room;
+            if (id == 0 || depth > 2) return 0;
+            if (pre.GetRowOrDefault(id) is { } p) return Room(p.Target.RowId, depth + 1);
+            if (topics.GetRowOrDefault(id) is { } t) return t.Shop.Select(s => Room(s.RowId, depth + 1)).FirstOrDefault(r => r != 0);
+            return 0;
+        }
+        var found = new List<Inn>();
+        foreach (var (npcId, (territory, position)) in VendorIndex.LoadPositions())
+        {
+            if (npcs.GetRowOrDefault(npcId) is not { } npc) continue;
+            var room = npc.ENpcData.Select(d => Room(d.RowId, 0)).FirstOrDefault(r => r != 0);
+            if (room == 0 || found.Any(f => f.RoomTerritory == room)) continue;
+            var city = territories.GetRowOrDefault(territory)?.PlaceName.ValueNullable?.Name.ExtractText() ?? "";
+            found.Add(new Inn(npcId, names.GetRowOrDefault(npcId)?.Singular.ExtractText() ?? "innkeeper", territory, position, room, city));
+        }
+        Inns = found.OrderBy(i => i.City).ToList();
     }
 
     /// <summary>Collectable appraisers with a known position (cities and open zones).</summary>

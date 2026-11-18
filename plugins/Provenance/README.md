@@ -52,6 +52,8 @@ Open it with `/provenance` (or `/prov`).
   in Settings, in its highest item level gearset, one monster at a time. With Gysahl Greens in your
   bags the chocobo is called and put in the stance you pick (attacker by default). Spawn areas
   come from Teamcraft's crowd-sourced data, so not every drop is covered.
+- **After the order**: stay, go back to where the run started, take an inn room in a city you pick,
+  or teleport to your house or apartment (Settings).
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 

@@ -33,7 +33,7 @@ internal enum RunPhase
 /// Learn books, take items out of retainers, buy from vendors, gather (crafting while timed nodes are
 /// closed), then craft the rest.
 /// </summary>
-internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn }
+internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn, Return }
 
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
@@ -102,6 +102,7 @@ internal sealed class RunEngine : IDisposable
         Books = new BookBuyer(plugin, Add);
         TurnIn = new Appraiser(plugin, Add);
         Hunt = new Hunter(plugin, Add);
+        Home = new Homecoming(plugin, Add);
         cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
@@ -117,6 +118,11 @@ internal sealed class RunEngine : IDisposable
     public RetainerRun Retainers { get; }
     public BookBuyer Books { get; }
     public Hunter Hunt { get; }
+    public Homecoming Home { get; }
+    /// <summary>Where the run was started (for "back to where the run started").</summary>
+    private (uint Territory, System.Numerics.Vector3 Position)? startedAt;
+    /// <summary>The finished order's result, shown once the trip home is over.</summary>
+    private (string Headline, string Detail, bool Problem)? pendingEnd;
     /// <summary>The learn stage is buying books at exchanges before reading them.</summary>
     private bool buyingBooks;
     public IReadOnlyList<RunLogEntry> Log => log;
@@ -212,6 +218,8 @@ internal sealed class RunEngine : IDisposable
         Crafter.Begin(Array.Empty<CraftJob>());
         scripRounds = 0;
         extrasCrafted = false;
+        pendingEnd = null;
+        startedAt = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
         scripPhase = plugin.Plans.ScripTasks.Count > 0;
         if (scripPhase)
             Add("Earning scrips for books first: " + string.Join(", ", plugin.Plans.ScripTasks.Select(t =>
@@ -527,6 +535,7 @@ internal sealed class RunEngine : IDisposable
             RunStage.Retainers => "Taking items from retainers",
             RunStage.Vendors => "Buying from vendors",
             RunStage.Hunt => "Farming monster drops",
+            RunStage.Return => "Heading back",
             RunStage.TurnIn => "Turning in collectables",
             _ => "Gathering",
         };
@@ -560,6 +569,8 @@ internal sealed class RunEngine : IDisposable
         Books.Cancel();
         TurnIn.Cancel();
         Hunt.Cancel();
+        Home.Cancel();
+        pendingEnd = null;
         buyingBooks = false;
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
@@ -585,7 +596,26 @@ internal sealed class RunEngine : IDisposable
         var detail = skipped.Count == 0
             ? "Everything for this order is gathered and crafted."
             : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ".";
-        End(RunPhase.Finished, skipped.Count > 0 ? "Order not finished" : "Order done", detail, skipped.Count > 0);
+        var headline = skipped.Count > 0 ? "Order not finished" : "Order done";
+        if (Home.Begin(plugin.Config.AfterOrder, startedAt))
+        {
+            pendingEnd = (headline, detail, skipped.Count > 0);
+            Stage = RunStage.Return;
+            Headline = headline + "; heading back";
+            Add(detail, skipped.Count > 0);
+            return;
+        }
+        End(RunPhase.Finished, headline, detail, skipped.Count > 0);
+    }
+
+    /// <summary>The trip after the order: when it's over (or failed), the run ends with the order's result.</summary>
+    private void TickReturn()
+    {
+        Detail = Home.Status;
+        if (!Home.Finished || pendingEnd is not { } end) return;
+        if (Home.Failure is { } why) Add("Couldn't get back: " + why, true);
+        pendingEnd = null;
+        End(RunPhase.Finished, end.Headline, end.Detail, end.Problem);
     }
 
     private bool extrasCrafted;
@@ -678,6 +708,7 @@ internal sealed class RunEngine : IDisposable
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
         if (working && Stage == RunStage.TurnIn) TurnIn.Tick();
         if (working && Stage == RunStage.Hunt) Hunt.Tick();
+        if (Stage == RunStage.Return && !pausedForDuty && !knockedOut) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
@@ -695,6 +726,7 @@ internal sealed class RunEngine : IDisposable
             case RunStage.Retainers: TickErrand(Retainers.Finished, Retainers.Failure, Retainers.IsPaused, Retainers.Status, StartLearning); break;
             case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartHunt); break;
             case RunStage.Hunt: TickErrand(Hunt.Finished, Hunt.Failure, Hunt.IsPaused, Hunt.Status, StartGatherOrCraft); break;
+            case RunStage.Return: TickReturn(); break;
             case RunStage.Gather: TickGathering(); break;
             case RunStage.TurnIn: TickErrand(TurnIn.Finished, TurnIn.Failure, false, TurnIn.Status, AfterTurnIn); break;
             default: TickCrafting(); break;

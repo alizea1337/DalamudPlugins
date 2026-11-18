@@ -25,13 +25,17 @@ var exchanges = game.GetExcelSheet<SpecialShop>()!.Select(r => r.RowId)
     .Concat(game.GetExcelSheet<InclusionShop>()!.Select(r => r.RowId))
     .Concat(game.GetExcelSheet<CollectablesShop>()!.Select(r => r.RowId)).ToHashSet();
 var customTalk = game.GetExcelSheet<CustomTalk>()!;
+// Innkeepers: their menu leads to a warp into an inn room (territory use 2).
+var innWarps = game.GetExcelSheet<Warp>()!
+    .Where(w => game.GetExcelSheet<TerritoryType>()!.GetRowOrDefault(w.TerritoryType.RowId)?.TerritoryIntendedUse.RowId == 2)
+    .Select(w => w.RowId).ToHashSet();
 var topics = game.GetExcelSheet<TopicSelect>()!;
 var pre = game.GetExcelSheet<PreHandler>()!;
 var maps = game.GetExcelSheet<Map>()!;
 
 bool SellsForGil(uint data, int depth)
 {
-    if (gilShops.Contains(data) || exchanges.Contains(data)) return true;
+    if (gilShops.Contains(data) || exchanges.Contains(data) || innWarps.Contains(data)) return true;
     if (depth > 2) return false;
     if (topics.GetRowOrDefault(data) is { } t) return t.Shop.Any(s => s.RowId != 0 && SellsForGil(s.RowId, depth + 1));
     if (pre.GetRowOrDefault(data) is { } p) return SellsForGil(p.Target.RowId, depth + 1);

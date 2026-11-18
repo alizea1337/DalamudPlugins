@@ -14,7 +14,8 @@ namespace Provenance.Integrations;
 /// </summary>
 internal static unsafe class Teleporter
 {
-    public sealed record Destination(uint AetheryteId, byte SubIndex, string Name, uint TerritoryId, uint GilCost);
+    /// <param name="Estate">For houses and apartments: "Mist, ward 5, plot 12 (free company)"; null for aetherytes.</param>
+    public sealed record Destination(uint AetheryteId, byte SubIndex, string Name, uint TerritoryId, uint GilCost, string? Estate = null);
 
     /// <summary>Aetherytes the character can teleport to right now, with their current gil cost.</summary>
     public static List<Destination> Unlocked()
@@ -29,9 +30,28 @@ internal static unsafe class Teleporter
             if (info.AetheryteId == 0) continue;
             var row = sheet.GetRowOrDefault(info.AetheryteId);
             var name = row?.PlaceName.ValueNullable?.Name.ExtractText() ?? "Aetheryte " + info.AetheryteId;
-            result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost));
+            result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost, EstateLabel(info)));
         }
         return result;
+    }
+
+    /// <summary>Houses and apartments in the teleport list (their zone is a housing area).</summary>
+    public static List<Destination> Homes() => Unlocked().Where(d => d.Estate != null).ToList();
+
+    private static string? EstateLabel(TeleportInfo info)
+    {
+        var territory = Services.Data.GetExcelSheet<TerritoryType>().GetRowOrDefault(info.TerritoryId);
+        if (territory?.TerritoryIntendedUse.RowId != 13) return null;
+        var area = territory.Value.PlaceName.ValueNullable?.Name.ExtractText() ?? "Housing";
+        var kind = info.EstateType switch
+        {
+            FFXIVClientStructs.FFXIV.Client.Game.EstateType.FreeCompanyEstate => "free company house",
+            FFXIVClientStructs.FFXIV.Client.Game.EstateType.PersonalChambers => "private chambers",
+            FFXIVClientStructs.FFXIV.Client.Game.EstateType.SharedEstate => "shared house",
+            FFXIVClientStructs.FFXIV.Client.Game.EstateType.ApartmentBuilding or FFXIVClientStructs.FFXIV.Client.Game.EstateType.ApartmentRoom => "apartment",
+            _ => "house",
+        };
+        return info.IsApartment ? $"{area}, ward {info.Ward + 1} ({kind})" : $"{area}, ward {info.Ward + 1}, plot {info.Plot + 1} ({kind})";
     }
 
     /// <summary>Best match by name: exact first, then starts-with, then contains.</summary>
