@@ -80,6 +80,7 @@ internal sealed class PlanPage : Page
         var plan = Plans.Plan;
         currentEstimate = Plans.Estimate;
         DrawOrderHeader();
+        DrawLearnFirst(plan, catalog);
         DrawMissing(plan, catalog);
         DrawTargets(plan, catalog);
 
@@ -161,9 +162,38 @@ internal sealed class PlanPage : Page
         }
     }
 
+    /// <summary>Master books and folklore tomes the order needs, with what the run does about them.</summary>
+    private static void DrawLearnFirst(Plan plan, GameCatalog catalog)
+    {
+        if (plan.Learn.Count == 0) return;
+        var s = Ui.S;
+        Ui.BeginCard(Palette.WithAlpha(Palette.Warn, 0.07f));
+        Ui.Icon(FontAwesomeIcon.Book, Palette.Warn);
+        ImGui.SameLine(0, 10 * s);
+        using (Ui.F.Strong.Push()) Ui.Text("Learn first", Palette.Warn);
+        Ui.Wrapped("Some recipes or legendary nodes in this order need a book you haven't learned. The run reads it before anything else once it's in your bags.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var line in plan.Learn)
+        {
+            Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
+            ImGui.SameLine(0, 10 * s);
+            ImGui.BeginGroup();
+            Ui.Text(catalog.ItemName(line.ItemId));
+            ImGui.SameLine(0, 8 * s);
+            if (line.Remaining == 0) Ui.Chip("in your bags, read first", Palette.Accent);
+            else Ui.Chip("get it first", Palette.Danger);
+            var forText = "Needed for " + string.Join(", ", line.NeededFor.Take(4).Select(catalog.ItemName)) + (line.NeededFor.Count > 4 ? $" and {line.NeededFor.Count - 4} more" : "") + ".";
+            if (line.Remaining > 0 && catalog.SoldAt(line.ItemId) is { } shop) forText += $" Sold at the {shop} exchange.";
+            using (Ui.F.Small.Push()) Ui.Muted(forText);
+            ImGui.EndGroup();
+        }
+        Ui.EndCard();
+    }
+
     private static void DrawMissing(Plan plan, GameCatalog catalog)
     {
-        if (plan.Missing.Count == 0) return;
+        var missing = plan.Missing.Where(l => l.Supply != Supply.Learn).ToList();
+        if (missing.Count == 0) return;
         var s = Ui.S;
         Ui.BeginCard(Palette.WithAlpha(Palette.Danger, 0.08f));
         Ui.Icon(FontAwesomeIcon.HandPaper, Palette.Danger);
@@ -171,7 +201,7 @@ internal sealed class PlanPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Get these yourself before starting", Palette.Danger);
         Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
         ImGui.Dummy(new Vector2(0, 2 * s));
-        foreach (var line in plan.Missing)
+        foreach (var line in missing)
         {
             Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
             ImGui.SameLine(0, 10 * s);

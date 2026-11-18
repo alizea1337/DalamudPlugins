@@ -9,7 +9,7 @@ using Provenance.Core.Character;
 
 namespace Provenance.Data;
 
-internal sealed record MasterBook(uint Id, string Name, Job? Job);
+internal sealed record MasterBook(uint Id, string Name, Job? Job, uint ItemId);
 
 internal sealed record FolkloreTome(uint ItemId, string Name, uint ClassJobId);
 
@@ -272,9 +272,10 @@ internal sealed class GameCatalog : IGameCatalog
             if (!jobsByBook.TryGetValue(b.RowId, out var jobs)) continue;
             var name = b.Name.ExtractText();
             if (name.Length == 0) name = b.Item.ValueNullable?.Name.ExtractText() ?? "Master book " + b.RowId;
-            books.Add(new MasterBook(b.RowId, name, jobs.Count == 1 ? jobs.First() : null));
+            books.Add(new MasterBook(b.RowId, name, jobs.Count == 1 ? jobs.First() : null, b.Item.RowId));
         }
         MasterBooks = books;
+        bookItemById = books.Where(b => b.ItemId != 0).ToDictionary(b => b.Id, b => b.ItemId);
 
         var tomes = new Dictionary<uint, FolkloreTome>();
         foreach (var sc in Services.Data.GetExcelSheet<GatheringSubCategory>())
@@ -285,6 +286,17 @@ internal sealed class GameCatalog : IGameCatalog
             tomes[item] = new FolkloreTome(item, name, sc.ClassJob.RowId);
         }
         FolkloreTomes = tomes.Values.OrderBy(t => t.ClassJobId).ThenBy(t => t.ItemId).ToList();
+
+        // Where books and tomes are sold (scrip and tomestone exchanges).
+        var wanted = new HashSet<uint>(books.Select(b => b.ItemId).Concat(tomes.Keys).Where(i => i != 0));
+        foreach (var shop in Services.Data.GetExcelSheet<SpecialShop>())
+        {
+            var shopName = shop.Name.ExtractText();
+            if (shopName.Length == 0) continue;
+            foreach (var entry in shop.Item)
+            foreach (var receive in entry.ReceiveItems)
+                if (wanted.Contains(receive.Item.RowId)) soldAt.TryAdd(receive.Item.RowId, shopName);
+        }
 
         // Manipulation is learned through a class quest; the action rows (one per crafter) name it.
         foreach (var action in Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>())
@@ -336,6 +348,15 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     public ConsumableInfo? Consumable(uint itemId) => itemId == 0 ? null : Consumables.FirstOrDefault(c => c.ItemId == itemId);
+
+    private Dictionary<uint, uint> bookItemById = new();
+    private readonly Dictionary<uint, string> soldAt = new();
+
+    /// <summary>Item id of a master book (SecretRecipeBook row), or 0.</summary>
+    public uint MasterBookItem(uint bookId) => bookItemById.GetValueOrDefault(bookId);
+
+    /// <summary>The exchange that sells a book or tome, when the game data names one.</summary>
+    public string? SoldAt(uint itemId) => soldAt.GetValueOrDefault(itemId);
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 

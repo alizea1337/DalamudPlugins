@@ -21,6 +21,10 @@ Crafting.
   the order the run works), the plan shows the whole order split into gathering and crafting,
   and the Run page and compact strip show the time left. Crafting times come from Raphael's
   rotation length at your checked stats; every craft and gathering session adjusts the timings.
+- Master books and folklore tomes: Browse names the book a recipe needs ("needs Master
+  Carpenter VIII") and where it's sold. Ordering such a recipe, or a material only found on
+  legendary nodes, adds a "Learn first" step to the plan: once the book is in your bags the run
+  reads it before anything else; until then it's listed as something to get first.
 
 ## 0.2.0
 

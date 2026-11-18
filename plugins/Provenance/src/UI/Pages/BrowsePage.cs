@@ -134,10 +134,18 @@ internal sealed class BrowsePage : Page
                 if (e.MasterBook != 0)
                 {
                     ImGui.SameLine(0, 6 * s);
-                    var learned = Plans.Profile?.MasterBooks.Contains(e.MasterBook);
-                    Ui.Chip(learned switch { true => "master book, learned", false => "master book missing", _ => "master book" },
-                        learned == false ? Palette.Warn : Palette.TextMuted, FontAwesomeIcon.Book);
-                    Ui.Tooltip(Plans.Catalog?.MasterBookName(e.MasterBook) + (learned == null ? ". Check your character to see whether you have it." : ""));
+                    var catalog = Plans.Catalog!;
+                    var bookName = catalog.MasterBookName(e.MasterBook);
+                    var learned = PlanService.IsBookLearned(e.MasterBook);
+                    Ui.Chip(learned ? "master book learned" : "needs " + bookName, learned ? Palette.TextMuted : Palette.Warn, FontAwesomeIcon.Book);
+                    if (!learned)
+                    {
+                        var item = catalog.MasterBookItem(e.MasterBook);
+                        var where = catalog.SoldAt(item) is { } shop ? $" It's sold at the {shop} exchange." : "";
+                        var have = item != 0 && Plans.Owned.GetValueOrDefault(item) > 0;
+                        Ui.Tooltip($"This recipe needs {bookName}, which you haven't learned." +
+                                   (have ? " It's in your bags: a run reads it before anything else." : where + " Add the recipe anyway: the plan lists the book first, and once it's in your bags the run reads it before anything else."));
+                    }
                 }
                 break;
             case BrowseKind.Gather:

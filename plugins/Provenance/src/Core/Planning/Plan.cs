@@ -15,6 +15,8 @@ public enum Supply
     Drop,
     /// <summary>No automated source: the user has to provide it before the order can start.</summary>
     Manual,
+    /// <summary>A master book or folklore tome to read before anything else (needed by a recipe or a node).</summary>
+    Learn,
 }
 
 public sealed class PlannerOptions
@@ -34,8 +36,11 @@ public sealed class PlannerOptions
     /// <summary>Picks among several usable recipes for the same item. Defaults to the lowest-level one.</summary>
     public System.Func<IReadOnlyList<RecipeInfo>, RecipeInfo?>? ChooseRecipe { get; init; }
 
-    /// <summary>Why the character can't use a recipe (level, master book), or null when it can.</summary>
+    /// <summary>Why the character can't use a recipe (level, job), or null when it can.</summary>
     public System.Func<RecipeInfo, string?>? RecipeBlocker { get; init; }
+
+    /// <summary>Item id of the master book a recipe needs that the character hasn't learned, or 0.</summary>
+    public System.Func<RecipeInfo, uint>? MissingBook { get; init; }
 
     /// <summary>Whether the character has read a folklore tome (by the tome's item id). Null: assume yes.</summary>
     public System.Func<uint, bool>? HasTome { get; init; }
@@ -63,6 +68,9 @@ public sealed class PlanLine
 
     public uint VendorUnitPrice { get; internal set; }
     public string? ManualReason { get; internal set; }
+
+    /// <summary>For books and tomes to learn: the items that need it.</summary>
+    public IReadOnlyList<uint> NeededFor { get; internal set; } = System.Array.Empty<uint>();
 }
 
 /// <summary>A node of the display tree: one target and the materials under it.</summary>
@@ -86,7 +94,8 @@ public sealed class Plan
         this.lines = lines;
         CraftSteps = craftSteps;
         Tree = tree;
-        Missing = lines.Values.Where(l => l.Supply == Supply.Manual && l.Remaining > 0).ToList();
+        Missing = lines.Values.Where(l => l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0).ToList();
+        Learn = lines.Values.Where(l => l.Supply == Supply.Learn).ToList();
         VendorGil = lines.Values.Where(l => l.Supply == Supply.Vendor).Sum(l => (long)l.Remaining * l.VendorUnitPrice);
     }
 
@@ -97,8 +106,11 @@ public sealed class Plan
 
     public IReadOnlyList<PlanTreeNode> Tree { get; }
 
-    /// <summary>Items the run cannot get by itself. Non-empty blocks the start.</summary>
+    /// <summary>Items the run cannot get by itself (including books not in the bags). Non-empty blocks the start.</summary>
     public IReadOnlyList<PlanLine> Missing { get; }
+
+    /// <summary>Master books and folklore tomes to read before anything else.</summary>
+    public IReadOnlyList<PlanLine> Learn { get; }
 
     public long VendorGil { get; }
 

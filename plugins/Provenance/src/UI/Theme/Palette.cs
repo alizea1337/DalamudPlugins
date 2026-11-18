@@ -61,6 +61,7 @@ internal static class Palette
         Supply.Vendor => Hex(0xE8CF8F),
         Supply.Drop => Hex(0xE9A3B8),
         Supply.Manual => Danger,
+        Supply.Learn => Warn,
         _ => TextMuted,
     };
 
@@ -73,6 +74,7 @@ internal static class Palette
         Supply.Vendor => "vendor",
         Supply.Drop => "monster drop",
         Supply.Manual => "get it yourself",
+        Supply.Learn => "learn first",
         _ => supply.ToString(),
     };
 

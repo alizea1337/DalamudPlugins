@@ -21,6 +21,7 @@ public static class Planner
 
         var lines = new Dictionary<uint, PlanLine>();
         var postOrder = new List<uint>();
+        var learn = new Dictionary<uint, List<uint>>(); // book or tome item -> items that need it
         var state = new Dictionary<uint, VisitState>();
 
         // 1. Decide how every reachable item is supplied, and record a post-order (ingredients first).
@@ -57,6 +58,19 @@ public static class Planner
         // Materials below an intermediate that stock fully covers are not needed at all.
         foreach (var id in lines.Where(kv => kv.Value.Needed == 0 && !kv.Value.IsTarget).Select(kv => kv.Key).ToList())
             lines.Remove(id);
+
+        // Books and tomes to read first, but only for what is still made or gathered.
+        foreach (var (book, users) in learn)
+        {
+            var still = users.Where(u => lines.TryGetValue(u, out var l) && l.Remaining > 0).Distinct().ToList();
+            if (still.Count == 0) continue;
+            var have = Math.Min(1, Math.Max(0, owned.GetValueOrDefault(book)));
+            lines[book] = new PlanLine
+            {
+                ItemId = book, Supply = Supply.Learn, Needed = 1, FromStock = have, NeededFor = still,
+                ManualReason = have > 0 ? null : "Not learned yet and not in your bags",
+            };
+        }
         return new Plan(lines, craftSteps, tree);
 
         void Visit(uint itemId)
@@ -96,6 +110,7 @@ public static class Planner
             {
                 line.Supply = Supply.Craft;
                 line.Recipe = recipe;
+                if (options.MissingBook?.Invoke(recipe) is > 0 and var book) NeedToLearn(book, itemId);
             }
             else
             {
@@ -121,8 +136,17 @@ public static class Planner
                 var exact = usable.FirstOrDefault(r => r.RecipeId == recipeId);
                 if (exact != null) return (exact, null);
             }
-            if (usable.Count == 1) return (usable[0], null);
-            return (options.ChooseRecipe?.Invoke(usable) ?? usable.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First(), null);
+            // Prefer recipes that need no book the character still has to learn.
+            var ready = options.MissingBook == null ? usable : usable.Where(r => options.MissingBook(r) == 0).ToList();
+            var pool = ready.Count > 0 ? ready : usable;
+            if (pool.Count == 1) return (pool[0], null);
+            return (options.ChooseRecipe?.Invoke(pool) ?? pool.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First(), null);
+        }
+
+        void NeedToLearn(uint book, uint forItem)
+        {
+            if (!learn.TryGetValue(book, out var users)) learn[book] = users = new List<uint>();
+            users.Add(forItem);
         }
 
         void DecideAcquire(PlanLine line)
@@ -136,19 +160,19 @@ public static class Planner
 
             if (vendorOk && options.PreferVendor) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Gather)) line.Supply = Supply.Gather;
-            else if (src.Has(Obtain.GatherTimed) && tomeOk) line.Supply = Supply.GatherTimed;
-            else if (src.Has(Obtain.Fish) && tomeOk) line.Supply = Supply.Fish;
+            else if (src.Has(Obtain.GatherTimed)) line.Supply = Supply.GatherTimed;
+            else if (src.Has(Obtain.Fish)) line.Supply = Supply.Fish;
             else if (vendorOk) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Drop)) line.Supply = Supply.Drop;
             else
             {
                 line.Supply = Supply.Manual;
-                line.ManualReason = !tomeOk && (src.Has(Obtain.GatherTimed) || src.Has(Obtain.Fish))
-                    ? "Only found on legendary nodes or fishing holes that need a folklore tome you haven't read"
-                    : src.Has(Obtain.Vendor)
-                        ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
-                        : "No gathering, fishing, vendor or monster source";
+                line.ManualReason = src.Has(Obtain.Vendor)
+                    ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
+                    : "No gathering, fishing, vendor or monster source";
             }
+            // Legendary nodes and some fishing holes only show up once their folklore tome is read.
+            if (!tomeOk && line.Supply is Supply.GatherTimed or Supply.Fish) NeedToLearn(src.Tome, line.ItemId);
         }
 
         PlanTreeNode BuildTree(uint itemId, int quantity, int depth)

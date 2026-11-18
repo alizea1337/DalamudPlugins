@@ -58,16 +58,57 @@ public class CharacterTests
     }
 
     [Fact]
-    public void Missing_folklore_tome_blocks_legendary_only_items()
+    public void Missing_folklore_tome_becomes_a_learn_first_step()
     {
         var catalog = new FakeCatalog();
         catalog.SetSources(TimedLog, new ItemSources(Obtain.GatherTimed, 0, Tome: 7));
         var without = Planner.Build(OrderOf(RareLumber, 1), catalog, Nothing, new PlannerOptions { HasTome = _ => false });
-        Assert.Equal(Supply.Manual, without[TimedLog]!.Supply);
-        Assert.Contains("folklore tome", without[TimedLog]!.ManualReason);
+        Assert.Equal(Supply.GatherTimed, without[TimedLog]!.Supply);
+        var tome = Assert.Single(without.Learn);
+        Assert.Equal(7u, tome.ItemId);
+        Assert.Equal(new[] { TimedLog }, tome.NeededFor);
+        Assert.Contains(tome, without.Missing);           // not in the bags: get it first
+        Assert.False(without.CanStart);
 
-        var with = Planner.Build(OrderOf(RareLumber, 1), catalog, Nothing, new PlannerOptions { HasTome = t => t == 7 });
-        Assert.Equal(Supply.GatherTimed, with[TimedLog]!.Supply);
+        var inBags = Planner.Build(OrderOf(RareLumber, 1), catalog, new Dictionary<uint, int> { [7] = 1 }, new PlannerOptions { HasTome = _ => false });
+        Assert.Equal(0, inBags[7]!.Remaining);            // the run reads it first
+        Assert.True(inBags.CanStart);
+
+        var read = Planner.Build(OrderOf(RareLumber, 1), catalog, Nothing, new PlannerOptions { HasTome = _ => true });
+        Assert.Empty(read.Learn);
+    }
+
+    [Fact]
+    public void Missing_master_book_keeps_the_recipe_and_adds_the_book_first()
+    {
+        const uint Book = 9001;
+        var catalog = new FakeCatalog();
+        var plan = Planner.Build(OrderOf(Bow, 1), catalog, Nothing, new PlannerOptions
+        {
+            MissingBook = r => r.ItemId == Bow ? Book : 0,
+        });
+        Assert.Equal(Supply.Craft, plan[Bow]!.Supply);
+        Assert.Equal(1, plan[Bow]!.Crafts);
+        var book = Assert.Single(plan.Learn);
+        Assert.Equal(Book, book.ItemId);
+        Assert.Equal(new[] { Bow }, book.NeededFor);
+        Assert.False(plan.CanStart);
+
+        var owned = Planner.Build(OrderOf(Bow, 1), catalog, new Dictionary<uint, int> { [Book] = 1 }, new PlannerOptions { MissingBook = r => r.ItemId == Bow ? Book : 0 });
+        Assert.True(owned.CanStart);
+    }
+
+    [Fact]
+    public void A_recipe_without_a_missing_book_is_preferred()
+    {
+        var catalog = new FakeCatalog();
+        var other = catalog.AddRecipe(Lumber, Job.Weaver, 1, 1, (Ore, 1));
+        var plan = Planner.Build(OrderOf(Lumber, 1), catalog, Nothing, new PlannerOptions
+        {
+            MissingBook = r => r.Job == Job.Carpenter ? 9001u : 0u,
+        });
+        Assert.Equal(other.RecipeId, plan[Lumber]!.Recipe!.RecipeId);
+        Assert.Empty(plan.Learn);
     }
 
     [Fact]

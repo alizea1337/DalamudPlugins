@@ -25,7 +25,7 @@ internal enum RunPhase
     Stopped,
 }
 
-internal enum RunStage { Gather, Craft }
+internal enum RunStage { Learn, Gather, Craft }
 
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
@@ -48,6 +48,9 @@ internal sealed class RunEngine : IDisposable
     private bool pausedForDuty;
     private string? pendingStop;
     private double gatherActiveSeconds;
+    private readonly Queue<uint> toLearn = new();
+    private DateTime learnDeadline;
+    private bool learnUsed;
     private DateTime lastGatherTick;
     private bool pendingStopProblem;
 
@@ -115,10 +118,27 @@ internal sealed class RunEngine : IDisposable
         Detail = "";
         Phase = RunPhase.Running;
 
+        // Books and tomes come first: recipes and legendary nodes need them.
+        toLearn.Clear();
+        foreach (var l in plugin.Plans.Plan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
+        if (toLearn.Count > 0) StartLearning();
+        else StartAfterLearning();
+        if (Active) Notify("Run started for " + plugin.Config.Order.Name + ".", false);
+    }
+
+    private void StartLearning()
+    {
+        Stage = RunStage.Learn;
+        Headline = "Learning";
+        learnDeadline = default;
+        Add($"Reading {toLearn.Count} {(toLearn.Count == 1 ? "book" : "books")} first.", false);
+    }
+
+    private void StartAfterLearning()
+    {
         var targets = GatherTargets.Build(plugin.Plans.Plan, GbrCount);
         if (targets.Count > 0) StartGathering(targets);
         else StartCrafting();
-        if (Active) Notify("Run started for " + plugin.Config.Order.Name + ".", false);
     }
 
     private void StartGathering(List<GatherTarget> targets)
@@ -171,6 +191,7 @@ internal sealed class RunEngine : IDisposable
     public void Resume()
     {
         if (Phase is not (RunPhase.Paused or RunPhase.Pausing)) return;
+        if (Stage == RunStage.Learn) { Phase = RunPhase.Running; Add("Resumed.", false); return; }
         if (Stage == RunStage.Craft) Crafter.Resume();
         else if (Phase == RunPhase.Paused) GatherBuddyIpc.SetEnabled(true);
         Phase = RunPhase.Running;
@@ -238,8 +259,51 @@ internal sealed class RunEngine : IDisposable
         if (player.IsDead) { Stop("You were knocked out. Retrying after a knock-out comes with the full run.", true, now: true); return; }
         if (Stock.FreeSlots() <= MinFreeSlots && Phase != RunPhase.Stopping) { Stop($"Only {MinFreeSlots} inventory slots left.", true); return; }
 
-        if (Stage == RunStage.Gather) TickGathering();
+        if (Stage == RunStage.Learn) TickLearning();
+        else if (Stage == RunStage.Gather) TickGathering();
         else TickCrafting();
+    }
+
+    /// <summary>Uses each book or tome from the bags and waits until the game counts it as learned.</summary>
+    private unsafe void TickLearning()
+    {
+        if (Phase is RunPhase.Pausing) { Phase = RunPhase.Paused; Headline = "Paused"; return; }
+        if (Phase != RunPhase.Running) return;
+        if (!toLearn.TryPeek(out var item)) { plugin.Plans.Invalidate(); StartAfterLearning(); return; }
+        var name = plugin.Plans.Catalog!.ItemName(item);
+        Headline = "Learning";
+        Detail = "Reading " + name;
+
+        if (Learned(item))
+        {
+            Add($"Learned {name}.", false);
+            toLearn.Dequeue();
+            learnDeadline = default;
+            learnUsed = false;
+            plugin.Plans.Invalidate();
+            return;
+        }
+        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("SelectYesno", out var yesno)
+            && ECommons.GenericHelpers.IsAddonReady(yesno))
+        {
+            new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.SelectYesno((nint)yesno).Yes();
+            return;
+        }
+        if (learnDeadline == default)
+        {
+            if (GameState.InCraftingStance || Services.Condition[ConditionFlag.Gathering]) return;
+            learnDeadline = DateTime.UtcNow.AddSeconds(12);
+            learnUsed = GameState.UseItem(item, false);
+            return;
+        }
+        if (DateTime.UtcNow > learnDeadline) Stop($"Couldn't read {name}. Use it from your bags yourself, then start again.", true);
+    }
+
+    /// <summary>Master books by their recipe book flag, folklore tomes by the item's learned state.</summary>
+    private bool Learned(uint item)
+    {
+        var book = plugin.Plans.Catalog!.MasterBooks.FirstOrDefault(b => b.ItemId == item);
+        return book != null ? PlanService.IsBookLearned(book.Id) : ItemUnlocks.IsLearned(item);
     }
 
     private void TickGathering()

@@ -84,7 +84,8 @@ internal sealed class PlanService : IDisposable
             PreferVendor = c.Buying.PreferVendor,
             VendorMaxPrice = c.Buying.VendorMaxPrice,
             ChooseRecipe = ChooseRecipe,
-            RecipeBlocker = r => RecipeBlocker(r, catalog),
+            RecipeBlocker = RecipeBlocker,
+            MissingBook = r => MissingBook(r, catalog),
             HasTome = HasTome,
         });
     }
@@ -129,20 +130,25 @@ internal sealed class PlanService : IDisposable
         return profile;
     }
 
-    /// <summary>Live checks, so a newly learned book or level counts at once.</summary>
-    private static unsafe string? RecipeBlocker(RecipeInfo recipe, GameCatalog catalog)
+    /// <summary>Live level check, so a level-up counts at once.</summary>
+    private static string? RecipeBlocker(RecipeInfo recipe)
     {
         if (!Services.PlayerState.IsLoaded) return null;
         var level = JobLevel(recipe.Job);
         if (level == 0) return $"Needs {recipe.Job}, which this character hasn't unlocked";
         if (level < recipe.Level) return $"Needs {recipe.Job} level {recipe.Level}; yours is {level}";
-        if (recipe.MasterBook != 0)
-        {
-            var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
-            if (ps != null && !ps->IsSecretRecipeBookUnlocked(recipe.MasterBook))
-                return $"Needs the master book {catalog.MasterBookName(recipe.MasterBook)}";
-        }
         return null;
+    }
+
+    /// <summary>The master book item a recipe needs and the character hasn't learned, or 0. Live check.</summary>
+    private static uint MissingBook(RecipeInfo recipe, GameCatalog catalog)
+        => recipe.MasterBook != 0 && !IsBookLearned(recipe.MasterBook) ? catalog.MasterBookItem(recipe.MasterBook) : 0;
+
+    public static unsafe bool IsBookLearned(uint secretRecipeBook)
+    {
+        if (!Services.PlayerState.IsLoaded) return true;
+        var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+        return ps == null || ps->IsSecretRecipeBookUnlocked(secretRecipeBook);
     }
 
     private static bool HasTome(uint tomeItem)
