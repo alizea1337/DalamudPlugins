@@ -211,6 +211,7 @@ internal sealed class RunEngine : IDisposable
         nextTripCheck = default;
         Crafter.Begin(Array.Empty<CraftJob>());
         scripRounds = 0;
+        extrasCrafted = false;
         scripPhase = plugin.Plans.ScripTasks.Count > 0;
         if (scripPhase)
             Add("Earning scrips for books first: " + string.Join(", ", plugin.Plans.ScripTasks.Select(t =>
@@ -565,6 +566,17 @@ internal sealed class RunEngine : IDisposable
 
     private void Finish()
     {
+        if (scripPhase && !extrasCrafted && ExtraCollectables() is { Count: > 0 } extra)
+        {
+            // Leftover materials make more collectables: craft them before going to the appraiser.
+            extrasCrafted = true;
+            Crafter.Begin(extra);
+            Crafter.FinalPass();
+            Stage = RunStage.Craft;
+            Headline = "Crafting more collectables";
+            Add($"Materials left for {extra.Sum(j => j.Crafts)} more {plugin.Plans.Catalog!.ItemName(extra[0].Recipe.ItemId)}; crafting them too.", false);
+            return;
+        }
         if (scripPhase) { StartTurnIn(); return; }
         CancelNodeTrip();
         GatherBuddyIpc.SetEnabled(false);
@@ -574,6 +586,22 @@ internal sealed class RunEngine : IDisposable
             ? "Everything for this order is gathered and crafted."
             : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ".";
         End(RunPhase.Finished, skipped.Count > 0 ? "Order not finished" : "Order done", detail, skipped.Count > 0);
+    }
+
+    private bool extrasCrafted;
+
+    /// <summary>More of each scrip collectable the bags still hold every ingredient for (at most 20).</summary>
+    private List<CraftJob> ExtraCollectables()
+    {
+        var catalog = plugin.Plans.Catalog!;
+        var jobs = new List<CraftJob>();
+        foreach (var task in plugin.Plans.ScripTasks.Where(t => t.Option.Crafted))
+        {
+            if (catalog.RecipesFor(task.Option.ItemId).FirstOrDefault() is not { } recipe) continue;
+            var more = recipe.Ingredients.Min(i => GameState.BagCount(i.ItemId) / Math.Max(1, i.Amount));
+            if (more > 0) jobs.Add(new CraftJob(recipe, Math.Min(20, more), false, task.Option.HighCollectability * 10));
+        }
+        return jobs;
     }
 
     /// <summary>Collectables made: take them to an appraiser.</summary>
@@ -591,6 +619,12 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Scrips earned: plan again; earn more if still short (up to three rounds), else on to the order.</summary>
     private void AfterTurnIn()
     {
+        if (TurnIn.TurnedIn == 0)
+        {
+            // Another round would end the same way: say why and stop.
+            Stop(TurnIn.Problem ?? "The appraiser took none of the collectables.", true, now: true);
+            return;
+        }
         scripPhase = false;
         plugin.Plans.Rebuild();
         ResetForNextPlan();
@@ -601,6 +635,7 @@ internal sealed class RunEngine : IDisposable
             Add("Still short of scrips; another round of collectables.", true);
         }
         else Add("Scrips earned; on to the order.", false);
+        extrasCrafted = false;
         StartRetainers();
     }
 
@@ -822,7 +857,8 @@ internal sealed class RunEngine : IDisposable
             LearnGatheringRate();
             NextWindow = null;
             Add("Gathering done.", false);
-            if (Settings.DiscardExtras)
+            // While earning scrips the extras stay: they become more collectables.
+            if (Settings.DiscardExtras && !scripPhase)
             {
                 cleanup.Begin(Targets.Where(t => !Items.IsCrystal(t.ItemId))
                     .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))));

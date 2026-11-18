@@ -252,13 +252,18 @@ internal sealed class MainWindow : Window
         y += 28 * s;
         if (fraction is { } f)
         {
-            ImGui.SetCursorScreenPos(new Vector2(x0, y + 4 * s));
-            Ui.Bar("##compactbar", f, dot, inner - 120 * s, 6);
+            // The text keeps its width; the bar takes what's left (at least a third of the row).
+            float pw;
+            var text = progress;
             using (Ui.F.Small.Push())
             {
-                var pw = ImGui.CalcTextSize(progress).X;
-                dl.AddText(new Vector2(x0 + inner - pw, y), Palette.U32(Palette.TextMuted), progress);
+                var maxText = inner * 0.66f - 12 * s;
+                while (text.Length > 4 && ImGui.CalcTextSize(text).X > maxText) text = text[..^2].TrimEnd() + "…";
+                pw = ImGui.CalcTextSize(text).X;
             }
+            ImGui.SetCursorScreenPos(new Vector2(x0, y + 4 * s));
+            Ui.Bar("##compactbar", f, dot, Math.Max(40 * s, inner - pw - 14 * s), 6);
+            using (Ui.F.Small.Push()) dl.AddText(new Vector2(x0 + inner - pw, y), Palette.U32(Palette.TextMuted), text);
         }
         else if (progress.Length > 0)
         {

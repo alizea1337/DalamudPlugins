@@ -230,8 +230,8 @@ internal sealed class PlanPage : Page
             ImGui.SameLine(0, 8 * s);
             Ui.Chip(Core.Character.ClassJobs.Abbreviation(t.Option.ClassJobId), Palette.ClassJobColor(t.Option.ClassJobId));
             using (Ui.F.Small.Push())
-                Ui.Muted($"About {t.Expected:N0} {catalog.ItemNamePlural(t.Option.Currency)} at collectability {t.Option.MidCollectability}+ " +
-                         $"({t.Option.HighReward * t.Count:N0} at {t.Option.HighCollectability}+).");
+                Ui.Muted($"At least {t.Expected:N0} {catalog.ItemNamePlural(t.Option.Currency)} (collectability {t.Option.LowCollectability}+), " +
+                         $"{t.Option.HighReward * t.Count:N0} at {t.Option.HighCollectability}+. Leftover materials become more collectables.");
             ImGui.EndGroup();
         }
         var gather = scripPlan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed && l.Remaining > 0).Sum(l => l.Remaining);

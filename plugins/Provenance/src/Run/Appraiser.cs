@@ -46,17 +46,35 @@ internal sealed unsafe class Appraiser
     public string? Failure { get; private set; }
     public bool Finished => step is Step.Done or Step.Failed;
     public bool Capped { get; private set; }
+    /// <summary>Collectables handed over this time.</summary>
+    public int TurnedIn => turnedIn;
+    /// <summary>Why nothing could be turned in (collectability too low), when that was the case.</summary>
+    public string? Problem { get; private set; }
 
     /// <summary>Turns in every collectable of these items that is in the bags.</summary>
     public void Begin(IEnumerable<uint> collectables)
     {
         items.Clear();
-        items.AddRange(collectables.Where(i => GameState.BagCount(i) > 0));
         Failure = null;
+        Problem = null;
         Capped = false;
         turnedIn = 0;
-        if (items.Count == 0) { step = Step.Done; return; }
         var catalog = plugin.Plans.Catalog!;
+        var low = new List<string>();
+        foreach (var item in collectables.Distinct())
+        {
+            var have = GameState.Collectables(item);
+            if (have.Count == 0) continue;
+            var min = catalog.Collectable(item)?.LowCollectability ?? 0;
+            if (Eligible(item) > 0) items.Add(item);
+            else low.Add($"{catalog.ItemName(item)} reached collectability {have.Max()}, the appraiser wants {min}");
+        }
+        if (low.Count > 0)
+        {
+            Problem = "Collectability too low to turn in: " + string.Join("; ", low) + ".";
+            log(Problem, true);
+        }
+        if (items.Count == 0) { step = Step.Done; return; }
         var reachable = catalog.Appraisers.Where(a => Teleporter.CanReach(a.TerritoryId)).ToList();
         if (reachable.Count == 0) { Fail("No collectable appraiser you can teleport to is known."); return; }
         // Here first, then a city whose aetheryte costs the least.
@@ -159,12 +177,12 @@ internal sealed unsafe class Appraiser
             return;
         }
 
-        items.RemoveAll(i => GameState.BagCount(i) == 0);
+        items.RemoveAll(i => Eligible(i) == 0);
         if (items.Count == 0) { step = Step.Closing; return; }
         var item = items[0];
         var option = catalog.Collectable(item);
         var name = catalog.ItemName(item);
-        Status = $"Turning in {name} ({GameState.BagCount(item)} left)";
+        Status = $"Turning in {name} ({Eligible(item)} left)";
         if (option == null) { items.RemoveAt(0); return; }
 
         switch (phase)
@@ -188,7 +206,7 @@ internal sealed unsafe class Appraiser
                 Wait(0.6);
                 return;
             default:
-                var before = GameState.BagCount(item);
+                var before = Eligible(item);
                 Callback.Fire(window, true, 15, 0u);
                 submittedAt = DateTime.UtcNow;
                 turnedIn++;
@@ -197,6 +215,13 @@ internal sealed unsafe class Appraiser
                 Wait(1.0);
                 return;
         }
+    }
+
+    /// <summary>Collectables of an item in the bags at or above the appraiser's minimum.</summary>
+    private int Eligible(uint item)
+    {
+        var min = plugin.Plans.Catalog?.Collectable(item)?.LowCollectability ?? 0;
+        return GameState.Collectables(item).Count(c => c >= min);
     }
 
     /// <summary>Row of an item in the appraiser's list (the tree list, headers skipped), matched by name.</summary>

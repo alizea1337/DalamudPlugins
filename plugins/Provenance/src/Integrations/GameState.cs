@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.ClientState.Conditions;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -88,6 +89,26 @@ internal static unsafe class GameState
     {
         var inv = InventoryManager.Instance();
         return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
+    }
+
+    /// <summary>Collectability of each collectable of an item in the main bags (collectables don't count as normal items).</summary>
+    public static List<int> Collectables(uint itemId)
+    {
+        var result = new List<int>();
+        var inv = InventoryManager.Instance();
+        if (inv == null) return result;
+        foreach (var bag in new[] { InventoryType.Inventory1, InventoryType.Inventory2, InventoryType.Inventory3, InventoryType.Inventory4 })
+        {
+            var c = inv->GetInventoryContainer(bag);
+            if (c == null) continue;
+            for (var i = 0; i < c->Size; i++)
+            {
+                var slot = c->GetInventorySlot(i);
+                if (slot == null || slot->GetBaseItemId() != itemId || !slot->IsCollectable()) continue;
+                for (var n = 0; n < Math.Max(1, (int)slot->GetQuantity()); n++) result.Add(slot->GetCollectability());
+            }
+        }
+        return result;
     }
 
     /// <summary>Scrips, tokens and other exchange currencies: the currency tab or the bags, whichever holds them.</summary>

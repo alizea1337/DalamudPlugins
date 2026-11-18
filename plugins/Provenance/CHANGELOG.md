@@ -41,6 +41,15 @@
 - Earning scrips weighs the materials: every candidate collectable is planned, those needing
   monster drops, books or items to get yourself are left out, and crafts, gathering and timed
   nodes count as effort; the least work wins. The card says how many materials are on timed nodes.
+- Scrips in one round: collectables are counted at the appraiser's lowest reward, extra gathered
+  materials are kept while earning scrips, and leftovers become more collectables before the
+  turn-in. Collectables in the bags are found by their collectable flag (they don't count as normal
+  items); ones below the appraiser's minimum are named with their collectability, and a turn-in
+  that takes nothing stops the run with the reason instead of starting another round.
+- Crafting: the rotation is planned only once the live stats have settled after a gearset change
+  or food (a rotation planned on the previous job's numbers fell short). If one still falls short,
+  the next craft gets a fresh rotation.
+- Compact view: the progress text no longer runs into the bar.
 
 ## 0.5.0
 

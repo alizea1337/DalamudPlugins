@@ -23,8 +23,8 @@ public static class ScripPlanner
 {
     /// <summary>
     /// The quickest way to earn <paramref name="missing"/> of a scrip: the collectable that needs the
-    /// fewest items (counted at its middle reward, so a run that misses the top collectability still
-    /// earns enough), the lower level first on a tie because its materials and rotation are simpler.
+    /// fewest items (counted at its lowest reward, so any collectable the appraiser takes at all
+    /// covers it in one round), the lower level first on a tie because its materials and rotation are simpler.
     /// Only collectables the character's job is high enough for, and that <paramref name="usable"/> accepts.
     /// </summary>
     public static ScripTask? Plan(uint currency, int missing, IEnumerable<CollectableOption> options, Func<uint, int> jobLevel,
@@ -37,12 +37,12 @@ public static class ScripPlanner
     {
         if (missing <= 0) return Enumerable.Empty<ScripTask>();
         return options
-            .Where(o => o.Currency == currency && o.MidReward > 0 && jobLevel(o.ClassJobId) >= o.Level && (usable?.Invoke(o) ?? true))
+            .Where(o => o.Currency == currency && o.LowReward > 0 && jobLevel(o.ClassJobId) >= o.Level && (usable?.Invoke(o) ?? true))
             .OrderBy(o => Count(o, missing))
             .ThenBy(o => o.Level)
             .ThenBy(o => o.ItemId)
-            .Select(o => new ScripTask(o, Count(o, missing), Count(o, missing) * o.MidReward));
+            .Select(o => new ScripTask(o, Count(o, missing), Count(o, missing) * o.LowReward));
     }
 
-    private static int Count(CollectableOption o, int missing) => (missing + o.MidReward - 1) / o.MidReward;
+    private static int Count(CollectableOption o, int missing) => (missing + o.LowReward - 1) / o.LowReward;
 }

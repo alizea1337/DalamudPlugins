@@ -332,6 +332,10 @@ internal sealed unsafe class Crafter
         Go(Step.Solve);
     }
 
+    /// <summary>Stats seen last tick while waiting for them to settle after a gearset change or food.</summary>
+    private int[]? settling;
+    private DateTime settledAt;
+
     private void Solve()
     {
         var r = Current!.Recipe;
@@ -339,6 +343,19 @@ internal sealed unsafe class Crafter
         {
             if (macro.Count > 0) { Go(Step.OpenRecipe); return; }
             var stats = GameState.LiveStats(Discipline.Hand);
+            // Right after a gearset change or food the game can still show the previous numbers: wait
+            // until they are on the right job and have stayed the same for a moment.
+            if (GameState.CurrentJob != r.Job.ClassJobId() || stats[0] <= 0 || settling == null || !stats.SequenceEqual(settling))
+            {
+                settling = stats;
+                settledAt = DateTime.UtcNow.AddSeconds(1.5);
+                Status = "Reading your stats";
+                Wait(0.3);
+                return;
+            }
+            if (DateTime.UtcNow < settledAt) { Wait(0.2); return; }
+            settling = null;
+            Services.Log.Information("Solving {Recipe} at Craftsmanship {C}, Control {Co}, CP {Cp}, level {L}", r.RecipeId, stats[0], stats[1], stats[2], GameState.JobLevel(r.Job.ClassJobId()));
             var c = plugin.Config.Crafting;
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
@@ -477,7 +494,12 @@ internal sealed unsafe class Crafter
         if (!fallback && actionIndex < macro.Count) raphaelId = macro[actionIndex];
         else
         {
-            if (!fallback) log("The rotation ended before the item was finished; completing it with Basic Synthesis.", true);
+            if (!fallback)
+            {
+                log("The rotation ended before the item was finished; completing it with Basic Synthesis. The next craft gets a fresh rotation.", true);
+                // Planned on stats that weren't right: plan the next one again from the live numbers.
+                macro = new List<uint>();
+            }
             fallback = true;
             raphaelId = BasicSynthesis;
         }

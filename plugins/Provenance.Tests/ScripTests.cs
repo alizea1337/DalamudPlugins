@@ -22,19 +22,19 @@ public class ScripTests
     };
 
     [Fact]
-    public void Fewest_items_at_the_middle_reward()
+    public void Fewest_items_at_the_lowest_reward()
     {
         var task = ScripPlanner.Plan(Purple, 300, Options, _ => 100)!;
-        Assert.Equal(2u, task.Option.ItemId);   // 3 × 117, item 3 ties but has the higher id
+        Assert.Equal(2u, task.Option.ItemId);   // 3 × 112 at the lowest reward, item 3 ties but has the higher id
         Assert.Equal(3, task.Count);
-        Assert.Equal(351, task.Expected);
+        Assert.Equal(336, task.Expected);
     }
 
     [Fact]
     public void Only_what_the_job_level_allows()
     {
         var task = ScripPlanner.Plan(Purple, 300, Options, job => job == 8 ? 85 : 1)!;
-        Assert.Equal(5u, task.Option.ItemId);   // level 80, 4 × 97
+        Assert.Equal(5u, task.Option.ItemId);   // level 80, 4 × 92 at the lowest reward
         Assert.Equal(4, task.Count);
     }
 
