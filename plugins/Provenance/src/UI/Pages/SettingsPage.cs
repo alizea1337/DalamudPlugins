@@ -123,11 +123,13 @@ internal sealed class SettingsPage : Page
         // Run
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Timed nodes");
-        Ui.Wrapped("When only timed nodes are left and none is up, the run can craft what it already has materials for, and hands back to gathering shortly before the next window opens.");
+        Ui.Wrapped("When only timed nodes are left and none is up, the run goes to where the next one spawns, crafts what it already has materials for, and hands back to gathering shortly before the window opens.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         var rs = Config.Run;
         v = rs.CraftWhileWaiting;
         if (Ui.Checkbox("Craft while waiting for timed nodes", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
+        v = rs.TravelAhead;
+        if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits or crafts there.")) { rs.TravelAhead = v; Config.Save(); }
         Ui.Text("Back to gathering");
         ImGui.SameLine(0, 10 * s);
         var lead = rs.TimedLeadMinutes;

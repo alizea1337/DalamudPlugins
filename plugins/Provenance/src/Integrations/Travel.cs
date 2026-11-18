@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
+using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace Provenance.Integrations;
 
@@ -17,6 +18,9 @@ internal sealed unsafe class Travel
     private static readonly string[] AethernetEntry = { "Aethernet", "Ätheryten", "éthernet", "エーテライト" };
 
     private static readonly TimeSpan StuckAfter = TimeSpan.FromSeconds(6);
+    /// <summary>Further than this, mount up first (where the zone allows mounts).</summary>
+    private const float RideFrom = 40f;
+    private const uint MountRoulette = 9;
 
     private uint territory;
     private Vector2 approx;
@@ -34,6 +38,8 @@ internal sealed unsafe class Travel
     private Travel? crystalTrip;
     private (Teleporter.Destination Main, uint Shard)? route;
     private int tries;
+    private DateTime mountUntil;
+    private bool flying;
 
     public State Current { get; private set; } = State.Idle;
     public string Status { get; private set; } = "";
@@ -51,6 +57,7 @@ internal sealed unsafe class Travel
         stuckCount = 0;
         Failure = null;
         walkingTo = null;
+        mountUntil = default;
         trail.Clear();
         walkDeadline = DateTime.UtcNow.AddMinutes(5);
         route = null;
@@ -81,6 +88,12 @@ internal sealed unsafe class Travel
         {
             case State.Teleporting:
                 if (DateTime.UtcNow < nextTry) return;
+                // Something else (GatherBuddy Reborn) may have brought us here already.
+                if (Services.ClientState.TerritoryType == territory && !Services.Condition[ConditionFlag.BetweenAreas] && !Services.Condition[ConditionFlag.Casting])
+                {
+                    Enter(State.WaitingForMap, 90);
+                    return;
+                }
                 var dest = Teleporter.NearestTo(territory, new Vector3(approx.X, 0, approx.Y));
                 if (dest == null) { Fail($"No unlocked aetheryte leads to {Place(territory)}."); return; }
                 Status = $"Teleporting to {dest.Name}";
@@ -162,15 +175,30 @@ internal sealed unsafe class Travel
         }
         if (DateTime.UtcNow > walkDeadline) { Vnav.Stop(); Fail($"Took too long to reach {what}."); return; }
 
+        // A long way in an open zone: mount up first.
+        if (mountUntil != default)
+        {
+            if (!Services.Condition[ConditionFlag.Mounted] && DateTime.UtcNow < mountUntil) return;
+            mountUntil = default;
+        }
+        else if (!Vnav.Busy && !Services.Condition[ConditionFlag.Mounted] && Vector3.Distance(me, target) > RideFrom && TryMount())
+        {
+            mountUntil = DateTime.UtcNow.AddSeconds(4);
+            Status = "Mounting up";
+            return;
+        }
+
         // (Re)issue the walk when idle, or when the real target came into view somewhere else.
         var retarget = walkingTo is { } w && Vector3.Distance(w, target) > 3;
         if (!Vnav.Busy || retarget)
         {
             if (retarget) Vnav.Stop();
-            if (Vnav.MoveCloseTo(target, false, Math.Max(1, range - 1))) walkingTo = target;
+            flying = CanFlyHere();
+            if (Vnav.MoveCloseTo(target, flying, Math.Max(1, range - 1))) walkingTo = target;
             trail.Clear();
             return;
         }
+        if (flying) Status = "Flying to " + what;
 
         // Stuck: barely moved in the last few seconds while a path is running.
         var now = DateTime.UtcNow;
@@ -197,7 +225,26 @@ internal sealed unsafe class Travel
     private Vector3 Approximate(Vector3 me)
     {
         var guess = new Vector3(approx.X, me.Y, approx.Y);
-        return Vnav.NearestPoint(guess, 5, 200) ?? guess;
+        return Vnav.NearestPoint(guess, 5, 200) ?? Vnav.NearestPoint(guess, 40, 300) ?? guess;
+    }
+
+    /// <summary>Mount roulette, when the game allows it here. True when the cast started.</summary>
+    private static bool TryMount()
+    {
+        var am = ActionManager.Instance();
+        if (am == null || am->GetActionStatus(ActionType.GeneralAction, MountRoulette) != 0) return false;
+        return am->UseAction(ActionType.GeneralAction, MountRoulette);
+    }
+
+    /// <summary>Mounted in a zone whose aether currents are all attuned.</summary>
+    private static bool CanFlyHere()
+    {
+        if (Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return true;
+        if (!Services.Condition[ConditionFlag.Mounted]) return false;
+        var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(Services.ClientState.TerritoryType);
+        var set = row?.AetherCurrentCompFlgSet.RowId ?? 0;
+        var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+        return set != 0 && ps != null && ps->IsAetherCurrentZoneComplete(set);
     }
 
     private void Enter(State next, double seconds = 20)

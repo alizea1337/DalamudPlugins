@@ -75,6 +75,15 @@ internal sealed class RunEngine : IDisposable
     /// <summary>The crafter got this run's recipes; never build them twice (ordered items would be crafted again).</summary>
     private bool craftQueueBuilt;
 
+    /// <summary>Trip to the next timed node's spawn area while it's still closed.</summary>
+    private readonly Travel nodeTrip = new();
+    private TimedSpot? tripSpot;
+    private uint tripItem;
+    private DateTime nextTripCheck;
+    private readonly HashSet<TimedSpot> tripFailed = new();
+    /// <summary>Closer to the window than this, GatherBuddy Reborn goes on its own.</summary>
+    private static readonly TimeSpan TripCutoff = TimeSpan.FromSeconds(20);
+
     private int knockOuts;
     private bool knockedOut;
     private DateTime knockedOutAt;
@@ -168,6 +177,9 @@ internal sealed class RunEngine : IDisposable
         Targets = Array.Empty<GatherTarget>();
         Phase = RunPhase.Running;
         craftQueueBuilt = false;
+        tripSpot = null;
+        tripFailed.Clear();
+        nextTripCheck = default;
         Crafter.Begin(Array.Empty<CraftJob>());
 
         // Retainers first (a book may be with a retainer), then books, vendors, gathering, crafting.
@@ -423,6 +435,7 @@ internal sealed class RunEngine : IDisposable
         }
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
+        CancelNodeTrip();
         Shopper.Cancel();
         Retainers.Cancel();
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
@@ -430,6 +443,7 @@ internal sealed class RunEngine : IDisposable
 
     private void Finish()
     {
+        CancelNodeTrip();
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
         var skipped = Crafter.History.Where(h => h.Skipped != null).ToList();
@@ -623,6 +637,7 @@ internal sealed class RunEngine : IDisposable
         switch (Phase)
         {
             case RunPhase.Pausing when !busy:
+                CancelNodeTrip();
                 GatherBuddyIpc.SetEnabled(false);
                 Phase = RunPhase.Paused;
                 Headline = "Paused";
@@ -637,6 +652,7 @@ internal sealed class RunEngine : IDisposable
 
         var decision = Decide();
         NextWindow = decision.NextWindow;
+        if (TickNodeTrip(decision, busy)) return;
         if (decision.Mode == GatherMode.CraftMeanwhile && !busy)
         {
             // Only timed nodes left, none up for a while: craft what can be crafted until shortly before.
@@ -683,6 +699,94 @@ internal sealed class RunEngine : IDisposable
             return;
         }
         Headline = "Crafting while timed nodes are closed" + (decision.NextWindow is { } w ? $" (next opens in {Estimator.Describe(w).Replace("about ", "")})" : "");
+    }
+
+    /// <summary>
+    /// While only closed timed nodes are left: go to where the next one spawns, so crafting and waiting
+    /// happen there and gathering starts the moment it opens. True while the trip is under way.
+    /// </summary>
+    private bool TickNodeTrip(GatherDecision decision, bool busy)
+    {
+        var catalog = plugin.Plans.Catalog!;
+        if (tripSpot is { } spot)
+        {
+            var name = catalog.ItemName(tripItem);
+            if (decision.NextWindow is not { } left || left <= TripCutoff)
+            {
+                EndNodeTrip();
+                return false;
+            }
+            if (GatherBuddyIpc.Enabled) GatherBuddyIpc.SetEnabled(false);
+            nodeTrip.Tick();
+            Headline = $"Heading to the {name} node (opens in {Estimator.Describe(left).Replace("about ", "")})";
+            Detail = nodeTrip.Status;
+            if (nodeTrip.Current == Travel.State.Failed)
+            {
+                tripFailed.Add(spot);
+                Add($"Couldn't get to the {name} node ahead of time ({nodeTrip.Failure}); GatherBuddy Reborn goes there when it opens.", true);
+                EndNodeTrip();
+                return false;
+            }
+            if (nodeTrip.Current != Travel.State.Arrived) return true;
+            Add($"At the {name} node; it opens in {Estimator.Describe(left).Replace("about ", "")}.", false);
+            EndNodeTrip();
+            return false;
+        }
+
+        if (busy || !Settings.TravelAhead || DateTime.UtcNow < nextTripCheck) return false;
+        if (decision.NextWindow is not { } wait || wait <= TripCutoff * 3) return false;
+        nextTripCheck = DateTime.UtcNow.AddSeconds(10);
+        if (NextTimedSpot() is not { } next) return false;
+        if (Near(next.Spot)) return false;
+
+        GatherBuddyIpc.SetEnabled(false);
+        tripSpot = next.Spot;
+        tripItem = next.ItemId;
+        // Aim for the middle of the spawn area; anywhere well inside it is close enough.
+        nodeTrip.GoTo($"the {catalog.ItemName(next.ItemId)} node", next.Spot.TerritoryId, next.Spot.Position, Math.Clamp(next.Spot.Radius * 0.4f, 15f, 40f), null);
+        Add($"Heading to where {catalog.ItemName(next.ItemId)} spawns while its node is closed.", false);
+        return true;
+    }
+
+    /// <summary>The spawn area of the soonest timed node still needed, among zones the character can reach.</summary>
+    private (uint ItemId, TimedSpot Spot)? NextTimedSpot()
+    {
+        var catalog = plugin.Plans.Catalog!;
+        var now = DateTimeOffset.UtcNow;
+        var reach = new Dictionary<uint, bool>();
+        (uint, TimedSpot)? best = null;
+        var bestWait = TimeSpan.MaxValue;
+        foreach (var t in Targets.Where(t => t.Supply == Supply.GatherTimed && Left(t) > 0))
+            foreach (var s in catalog.TimedSpots(t.ItemId))
+            {
+                if (tripFailed.Contains(s) || Core.Timing.Eorzea.UntilOpen(s.Mask, now) is not { } wait) continue;
+                if (wait > bestWait || (wait == bestWait && s.TerritoryId != Services.ClientState.TerritoryType)) continue;
+                if (!(reach.TryGetValue(s.TerritoryId, out var ok) ? ok : reach[s.TerritoryId] = Teleporter.CanReach(s.TerritoryId))) continue;
+                best = (t.ItemId, s);
+                bestWait = wait;
+            }
+        return best;
+    }
+
+    private static bool Near(TimedSpot spot)
+    {
+        if (Services.ClientState.TerritoryType != spot.TerritoryId || Services.Objects.LocalPlayer is not { } me) return false;
+        return System.Numerics.Vector2.Distance(new System.Numerics.Vector2(me.Position.X, me.Position.Z), spot.Position) <= Math.Max(spot.Radius, 40f) + 20f;
+    }
+
+    /// <summary>Trip over (arrived, gave up, or the window is near): GatherBuddy Reborn carries on.</summary>
+    private void EndNodeTrip()
+    {
+        CancelNodeTrip();
+        GatherBuddyIpc.SetEnabled(true);
+        gbrOffSince = DateTime.MinValue;
+    }
+
+    private void CancelNodeTrip()
+    {
+        if (tripSpot == null) return;
+        nodeTrip.Cancel();
+        tripSpot = null;
     }
 
     private void HandBackToGathering(bool log)
@@ -758,7 +862,9 @@ internal sealed class RunEngine : IDisposable
         var t = plugin.Config.Timings;
         var left = Targets.Where(x => x.Supply != Supply.Fish).Sum(Left);
         var fish = Targets.Where(x => x.Supply == Supply.Fish).Sum(Left);
-        return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute)) + crafting;
+        // Only closed timed nodes left: the wait for the window comes on top.
+        var wait = NextWindow is { } w && w > TimeSpan.Zero ? w : TimeSpan.Zero;
+        return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute)) + wait + crafting;
     }
 
     /// <summary>GatherBuddy Reborn can switch itself off; turn it back on a few times before giving up.</summary>

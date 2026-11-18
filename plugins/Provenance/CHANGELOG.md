@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Timed nodes: while waiting for one, the run goes to where it spawns (teleport, then mount up and
+  ride or fly there) and crafts or waits on the spot, so gathering starts as soon as it opens.
+  "Go to the next timed node while waiting" in Settings turns this off. During a run, GatherBuddy
+  Reborn's "teleport to next node" setting is on (your own value comes back afterwards), so it
+  doesn't go home while waiting.
+- Trips to vendors and nodes mount up for longer distances and fly where the zone allows it.
+- Time left while waiting for a timed node includes the wait.
+
 ## 0.5.0
 
 Retainers and vendors.

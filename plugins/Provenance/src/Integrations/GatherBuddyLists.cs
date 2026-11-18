@@ -25,6 +25,8 @@ internal sealed class GatherBuddyLists
     private IDictionary? fishes;
     private object? ourList;
     private readonly List<object> disabledLists = new();
+    private object? autoConfig;
+    private bool? teleportBefore;
 
     public string? Error { get; private set; }
     public bool Installed => ourList != null;
@@ -61,6 +63,7 @@ internal sealed class GatherBuddyLists
             }
             Set(list2, "Enabled", true);
 
+            WaitNearTimedNodes(true);
             Call(manager!, "AddList", list2, null);
             Call(manager!, "SetActiveItems", false);
             Call(manager!, "Save");
@@ -102,6 +105,7 @@ internal sealed class GatherBuddyLists
         try
         {
             RemoveOurLists();
+            WaitNearTimedNodes(false);
             foreach (var list in disabledLists) Set(list, "Enabled", true);
             disabledLists.Clear();
             Call(manager, "SetActiveItems", false);
@@ -112,6 +116,36 @@ internal sealed class GatherBuddyLists
             Services.Log.Warning(e, "Couldn't restore GatherBuddy Reborn lists");
         }
         ourList = null;
+    }
+
+    /// <summary>
+    /// GatherBuddy Reborn's "teleport to next node" setting, on for the run: while it waits for a timed
+    /// node it then stays in that node's zone instead of going home (which would undo Provenance's trip
+    /// to the node). The user's own value comes back when the run ends.
+    /// </summary>
+    private void WaitNearTimedNodes(bool on)
+    {
+        try
+        {
+            if (on)
+            {
+                var asm = PluginLookup.Instance(GatherBuddyIpc.InternalName)?.GetType().Assembly;
+                var config = asm?.GetType("GatherBuddy.GatherBuddy")?.GetProperty("Config", All)?.GetValue(null);
+                autoConfig = config == null ? null : Get<object>(config, "AutoGatherConfig");
+                if (autoConfig == null) return;
+                teleportBefore ??= Get<bool>(autoConfig, "TeleportToNextNode");
+                Set(autoConfig, "TeleportToNextNode", true);
+            }
+            else if (autoConfig != null && teleportBefore is { } before)
+            {
+                Set(autoConfig, "TeleportToNextNode", before);
+                teleportBefore = null;
+            }
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't change GatherBuddy Reborn's teleport-to-next-node setting");
+        }
     }
 
     private bool Resolve()

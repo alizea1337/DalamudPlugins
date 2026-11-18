@@ -13,6 +13,9 @@ internal sealed record MasterBook(uint Id, string Name, Job? Job, uint ItemId);
 
 internal sealed record FolkloreTome(uint ItemId, string Name, uint ClassJobId);
 
+/// <summary>Where a timed node shows up: its zone, the centre of its spawn area (world X/Z) and that area's radius.</summary>
+internal sealed record TimedSpot(uint TerritoryId, System.Numerics.Vector2 Position, float Radius, uint Mask);
+
 /// <summary>One row of the recipe browser.</summary>
 internal enum BrowseKind { Recipe, Gather, Fish }
 
@@ -137,6 +140,7 @@ internal sealed class GameCatalog : IGameCatalog
     {
         var gatheringItems = Services.Data.GetExcelSheet<GatheringItem>();
         var transient = Services.Data.GetExcelSheet<GatheringPointTransient>();
+        var exported = Services.Data.GetExcelSheet<ExportedGatheringPoint>();
         foreach (var point in Services.Data.GetExcelSheet<GatheringPoint>())
         {
             if (point.TerritoryType.RowId == 0) continue;
@@ -157,6 +161,12 @@ internal sealed class GameCatalog : IGameCatalog
                 if (timed) timedMasks[itemId] = timedMasks.GetValueOrDefault(itemId) | mask;
                 NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
                 if (timed) NoteTome(itemId, tome);
+                if (timed && exported.GetRowOrDefault(pointBase.RowId) is { } at)
+                {
+                    if (!timedSpots.TryGetValue(itemId, out var spots)) timedSpots[itemId] = spots = new List<TimedSpot>(1);
+                    if (!spots.Any(x => x.TerritoryId == point.TerritoryType.RowId && x.Position == new System.Numerics.Vector2(at.X, at.Y)))
+                        spots.Add(new TimedSpot(point.TerritoryType.RowId, new System.Numerics.Vector2(at.X, at.Y), at.Radius, mask));
+                }
             }
         }
     }
@@ -177,6 +187,10 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     private readonly Dictionary<uint, uint> timedMasks = new();
+    private readonly Dictionary<uint, List<TimedSpot>> timedSpots = new();
+
+    /// <summary>The timed nodes an item comes from, with where they spawn.</summary>
+    public IReadOnlyList<TimedSpot> TimedSpots(uint itemId) => timedSpots.TryGetValue(itemId, out var s) ? s : Array.Empty<TimedSpot>();
 
     /// <summary>Eorzea hours an item's timed nodes are up (24-bit mask); 0 when it has none.</summary>
     public uint TimedMask(uint itemId) => timedMasks.GetValueOrDefault(itemId);

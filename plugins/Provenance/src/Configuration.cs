@@ -99,6 +99,8 @@ public sealed class RunSettings
     public bool CraftWhileWaiting { get; set; } = true;
     /// <summary>Real minutes before a timed node opens to hand back to gathering.</summary>
     public int TimedLeadMinutes { get; set; } = 2;
+    /// <summary>While waiting for a timed node, travel to where it spawns (and craft or wait there).</summary>
+    public bool TravelAhead { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
 }
