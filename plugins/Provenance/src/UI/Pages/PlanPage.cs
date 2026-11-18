@@ -237,8 +237,9 @@ internal sealed class PlanPage : Page
         var gather = scripPlan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed && l.Remaining > 0).Sum(l => l.Remaining);
         var buy = scripPlan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0).Sum(l => l.Remaining);
         var crafts = scripPlan.CraftSteps.Sum(l => l.Crafts);
+        var timed = scripPlan.Lines.Count(l => l.Supply == Supply.GatherTimed && l.Remaining > 0);
         var parts = new List<string>();
-        if (gather > 0) parts.Add($"{gather:N0} materials to gather");
+        if (gather > 0) parts.Add($"{gather:N0} materials to gather" + (timed > 0 ? $" ({timed} from timed nodes)" : ""));
         if (buy > 0) parts.Add($"{buy:N0} to buy");
         if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
         if (parts.Count > 0) using (Ui.F.Small.Push()) Ui.Muted("That takes " + string.Join(", ", parts) + ".");

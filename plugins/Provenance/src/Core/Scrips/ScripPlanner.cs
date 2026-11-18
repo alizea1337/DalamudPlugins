@@ -29,17 +29,19 @@ public static class ScripPlanner
     /// </summary>
     public static ScripTask? Plan(uint currency, int missing, IEnumerable<CollectableOption> options, Func<uint, int> jobLevel,
         Func<CollectableOption, bool>? usable = null)
+        => Candidates(currency, missing, options, jobLevel, usable).FirstOrDefault();
+
+    /// <summary>Every usable way to earn the scrips, best first (see <see cref="Plan"/>), for a caller that weighs the materials too.</summary>
+    public static IEnumerable<ScripTask> Candidates(uint currency, int missing, IEnumerable<CollectableOption> options, Func<uint, int> jobLevel,
+        Func<CollectableOption, bool>? usable = null)
     {
-        if (missing <= 0) return null;
-        var pick = options
+        if (missing <= 0) return Enumerable.Empty<ScripTask>();
+        return options
             .Where(o => o.Currency == currency && o.MidReward > 0 && jobLevel(o.ClassJobId) >= o.Level && (usable?.Invoke(o) ?? true))
             .OrderBy(o => Count(o, missing))
             .ThenBy(o => o.Level)
             .ThenBy(o => o.ItemId)
-            .FirstOrDefault();
-        if (pick == null) return null;
-        var count = Count(pick, missing);
-        return new ScripTask(pick, count, count * pick.MidReward);
+            .Select(o => new ScripTask(o, Count(o, missing), Count(o, missing) * o.MidReward));
     }
 
     private static int Count(CollectableOption o, int missing) => (missing + o.MidReward - 1) / o.MidReward;

@@ -37,7 +37,10 @@
 - Books: the exchange is picked by what you can pay now, then a scrip the run can earn, then the
   cheapest; a tome no longer lands on a token exchange you have no tokens for. Scrip names are
   written properly ("Purple Crafters' Scrips").
-- Combat job picker shows job names and role colours (tanks blue, healers green, damage red).
+- Combat job picker is a dropdown with a search box; job names and role colours.
+- Earning scrips weighs the materials: every candidate collectable is planned, those needing
+  monster drops, books or items to get yourself are left out, and crafts, gathering and timed
+  nodes count as effort; the least work wins. The card says how many materials are on timed nodes.
 
 ## 0.5.0
 

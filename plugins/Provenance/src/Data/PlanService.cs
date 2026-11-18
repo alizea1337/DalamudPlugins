@@ -113,7 +113,7 @@ internal sealed class PlanService : IDisposable
         foreach (var (currency, total) in cost)
         {
             var missing = total - GameState.CurrencyCount(currency);
-            if (Core.Scrips.ScripPlanner.Plan(currency, missing, catalog.Collectables, JobLevel, o => CanEarnWith(o, catalog)) is { } task)
+            if (EasiestEarning(currency, missing, catalog) is { } task)
             {
                 tasks.Add(task);
                 earning[currency] = task;
@@ -125,6 +125,32 @@ internal sealed class PlanService : IDisposable
         foreach (var t in tasks) scripOrder.Lines.Add(new Core.Orders.OrderLine(t.Option.ItemId, t.Count, 0, false));
         ScripPlan = BuildPlan(scripOrder, catalog);
         Plan = BuildPlan(c.Order, catalog); // books now count the scrips the collectables bring in
+    }
+
+    /// <summary>
+    /// Among the collectables that earn the scrips, the one whose materials are least work: each
+    /// candidate is planned like an order. Candidates needing monster drops, books or items to get
+    /// yourself are left out; crafts, gathering and especially timed nodes add to the effort.
+    /// </summary>
+    private Core.Scrips.ScripTask? EasiestEarning(uint currency, int missing, GameCatalog catalog)
+    {
+        Core.Scrips.ScripTask? best = null;
+        var bestEffort = double.MaxValue;
+        foreach (var task in Core.Scrips.ScripPlanner.Candidates(currency, missing, catalog.Collectables, JobLevel, o => CanEarnWith(o, catalog)).Take(40))
+        {
+            var order = new Core.Orders.Order { Name = "Scrips" };
+            order.Lines.Add(new Core.Orders.OrderLine(task.Option.ItemId, task.Count, 0, false));
+            var plan = BuildPlan(order, catalog);
+            if (plan.Missing.Count > 0 || plan.Learn.Count > 0) continue;
+            if (plan.Lines.Any(l => l.Supply == Supply.Drop && l.Remaining > 0)) continue;
+            var effort = plan.CraftSteps.Sum(l => l.Crafts) * 6.0
+                         + plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.Fish && !Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 1.0
+                         + plan.Lines.Where(l => l.Supply == Supply.GatherTimed).Sum(l => 60.0 + l.Remaining)
+                         + plan.Lines.Where(l => l.Supply == Supply.Vendor).Sum(l => 2.0)
+                         + plan.Lines.Where(l => l.Supply is Supply.Gather && Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 0.1;
+            if (effort < bestEffort) { best = task; bestEffort = effort; }
+        }
+        return best;
     }
 
     /// <summary>A collectable the character can make or gather now: level, book, stats and folklore all fine; no fishing.</summary>
