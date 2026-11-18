@@ -1,0 +1,80 @@
+using System;
+using Provenance.Core.Planning;
+using Provenance.Core.Run;
+using Provenance.Core.Timing;
+using Xunit;
+
+namespace Provenance.Tests;
+
+public class TimingTests
+{
+    /// <summary>A real moment at Eorzea hour h (plus a fraction).</summary>
+    private static DateTimeOffset AtEorzeaHour(double h)
+    {
+        // Unix second 0 is Eorzea 00:00 of a day; pick a later day with the same phase.
+        var day = 24 * Eorzea.RealSecondsPerHour;
+        return DateTimeOffset.FromUnixTimeMilliseconds((long)((10_000 * day + h * Eorzea.RealSecondsPerHour) * 1000));
+    }
+
+    [Fact]
+    public void Eorzea_hour_runs_175_seconds()
+    {
+        Assert.Equal(9.0, Eorzea.Hour(AtEorzeaHour(9)), 3);
+        Assert.Equal(9.5, Eorzea.Hour(AtEorzeaHour(9.5)), 3);
+    }
+
+    [Fact]
+    public void Windows_from_game_data()
+    {
+        Assert.Equal(0b111u << 9, Eorzea.Window(900, 300));          // 9:00 for 3 hours
+        Assert.Equal(0b11u << 9, Eorzea.Window(900, 160));           // 1h60 is two hours
+        Assert.Equal((1u << 23) | 1u, Eorzea.Window(2300, 200));     // wraps midnight
+        Assert.Equal(0xFu << 4, Eorzea.Between(400, 800));           // ephemeral 4-8
+        Assert.Equal(0xFu << 20, Eorzea.Between(2000, 0));           // 20-24
+        Assert.Equal(Eorzea.AllHours, Eorzea.Between(0, 0));
+    }
+
+    [Fact]
+    public void Until_open_and_up_for()
+    {
+        var mask = Eorzea.Window(900, 300);
+        Assert.Equal(TimeSpan.Zero, Eorzea.UntilOpen(mask, AtEorzeaHour(10)));
+        Assert.Equal(TimeSpan.FromSeconds(2 * 175), Eorzea.UntilOpen(mask, AtEorzeaHour(7)));
+        Assert.Equal(TimeSpan.FromSeconds(1.5 * 175), Eorzea.UpFor(mask, AtEorzeaHour(10.5)));
+        Assert.Equal(TimeSpan.FromSeconds(21 * 175), Eorzea.UntilOpen(mask, AtEorzeaHour(12)));  // next day
+        Assert.Null(Eorzea.UntilOpen(0, AtEorzeaHour(1)));
+    }
+
+    private static readonly uint NineToNoon = Eorzea.Window(900, 300);
+
+    [Fact]
+    public void Normal_targets_keep_gathering()
+    {
+        var d = Interleave.Decide(new[]
+        {
+            new ScheduledTarget(1, Supply.Gather, 5, 0),
+            new ScheduledTarget(2, Supply.GatherTimed, 3, NineToNoon),
+        }, AtEorzeaHour(1), TimeSpan.FromMinutes(2), canCraft: true);
+        Assert.Equal(GatherMode.Gather, d.Mode);
+    }
+
+    [Fact]
+    public void Only_closed_timed_nodes_left_means_craft_meanwhile_or_wait()
+    {
+        var targets = new[] { new ScheduledTarget(1, Supply.Gather, 0, 0), new ScheduledTarget(2, Supply.GatherTimed, 3, NineToNoon) };
+        var craft = Interleave.Decide(targets, AtEorzeaHour(1), TimeSpan.FromMinutes(2), canCraft: true);
+        Assert.Equal(GatherMode.CraftMeanwhile, craft.Mode);
+        Assert.Equal(TimeSpan.FromSeconds(8 * 175), craft.NextWindow);
+        Assert.Equal(GatherMode.Wait, Interleave.Decide(targets, AtEorzeaHour(1), TimeSpan.FromMinutes(2), canCraft: false).Mode);
+    }
+
+    [Fact]
+    public void Hand_back_before_the_window_opens()
+    {
+        var targets = new[] { new ScheduledTarget(2, Supply.GatherTimed, 3, NineToNoon) };
+        // 8:30: the window opens in half an Eorzea hour (87.5 s), inside a 2 minute lead.
+        Assert.Equal(GatherMode.Gather, Interleave.Decide(targets, AtEorzeaHour(8.5), TimeSpan.FromMinutes(2), true).Mode);
+        // 10:00: up now.
+        Assert.Equal(GatherMode.Gather, Interleave.Decide(targets, AtEorzeaHour(10), TimeSpan.FromMinutes(2), true).Mode);
+    }
+}

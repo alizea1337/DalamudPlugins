@@ -78,6 +78,22 @@ internal sealed class SettingsPage : Page
         Ui.Wrapped("Self-repair needs Dark Matter of a high enough grade in your bags.", Palette.TextMuted);
         Ui.EndCard();
 
+        // Run
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Timed nodes");
+        Ui.Wrapped("When only timed nodes are left and none is up, the run can craft what it already has materials for, and hands back to gathering shortly before the next window opens.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var rs = Config.Run;
+        v = rs.CraftWhileWaiting;
+        if (Ui.Checkbox("Craft while waiting for timed nodes", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
+        Ui.Text("Back to gathering");
+        ImGui.SameLine(0, 10 * s);
+        var lead = rs.TimedLeadMinutes;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
+        Ui.Wrapped("Real minutes before a window opens; enough for the craft under way and the trip to the node.", Palette.TextMuted);
+        Ui.EndCard();
+
         // Plugins
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Plugins Provenance works with");

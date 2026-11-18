@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+The whole run.
+
+- One run takes the order start to finish: books first, then gathering, and once only timed
+  nodes are left and none is up, it crafts what already has its materials, handing back to
+  gathering a set number of minutes before the next window (2 by default). Afterwards it crafts
+  everything left.
+- Materials used up by crafting in between still count as gathered, and GatherBuddy Reborn's
+  targets are lowered to match, so nothing is gathered twice.
+- Knock-outs: the run accepts a raise or returns to the home point and carries on (up to three
+  times). Duties pause gathering or crafting until they end.
+- Plan shows when each timed node is up or opens next; settings for crafting while waiting and
+  the hand-back time.
+
 ## 0.3.0
 
 Crafting.

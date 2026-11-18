@@ -339,7 +339,7 @@ internal sealed class PlanPage : Page
         // Detail chip: how it is obtained when that needs saying.
         (string Text, Vector4 Color)? chip = line.Supply switch
         {
-            Supply.GatherTimed => ("timed node", Palette.SupplyColor(Supply.GatherTimed)),
+            Supply.GatherTimed => (TimedChip(catalog.TimedMask(line.ItemId)), Palette.SupplyColor(Supply.GatherTimed)),
             Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each", Palette.SupplyColor(Supply.Vendor)),
             Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}" + CraftTime(line.Recipe), Palette.JobColor(line.Recipe.Job)),
             _ => null,
@@ -382,6 +382,16 @@ internal sealed class PlanPage : Page
 
         ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
         ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    /// <summary>"timed node, up now" / "timed node, opens in 12 min", from the node's Eorzea hours.</summary>
+    private static string TimedChip(uint mask)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (mask == 0) return "timed node";
+        if (Core.Timing.Eorzea.IsUp(mask, now))
+            return "timed node, up for " + Estimator.Describe(Core.Timing.Eorzea.UpFor(mask, now)).Replace("about ", "");
+        return Core.Timing.Eorzea.UntilOpen(mask, now) is { } wait ? "timed node, opens in " + Estimator.Describe(wait).Replace("about ", "") : "timed node";
     }
 
     private static void DrawCrystals(Plan plan, GameCatalog catalog)

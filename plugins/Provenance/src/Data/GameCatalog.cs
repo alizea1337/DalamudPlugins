@@ -142,7 +142,9 @@ internal sealed class GameCatalog : IGameCatalog
             if (point.GatheringPointBase.ValueNullable is not { } pointBase) continue;
             // Types 0–3 are mining, quarrying, logging and harvesting; spearfishing rows point elsewhere.
             if (pointBase.GatheringType.RowId > 3) continue;
-            var timed = IsTimed(transient.GetRowOrDefault(point.RowId));
+            var timedRow = transient.GetRowOrDefault(point.RowId);
+            var timed = IsTimed(timedRow);
+            var mask = timed ? UptimeMask(timedRow!.Value) : 0u;
             var tome = timed ? TomeOf(point.GatheringSubCategory.ValueNullable) : 0;
             var job = pointBase.GatheringType.RowId <= 1 ? 16u : 17u;
             foreach (var reference in pointBase.Item)
@@ -151,6 +153,7 @@ internal sealed class GameCatalog : IGameCatalog
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                if (timed) timedMasks[itemId] = timedMasks.GetValueOrDefault(itemId) | mask;
                 NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
                 if (timed) NoteTome(itemId, tome);
             }
@@ -158,6 +161,25 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     /// <summary>Unspoiled/legendary nodes have a rare-pop table; ephemeral ones a start and end time (HHMM).</summary>
+    /// <summary>Eorzea hours a timed node is up, from its rare-pop table or ephemeral times.</summary>
+    private static uint UptimeMask(GatheringPointTransient t)
+    {
+        if (t.GatheringRarePopTimeTable.ValueNullable is { } table)
+        {
+            uint mask = 0;
+            for (var i = 0; i < table.StartTime.Count && i < table.Duration.Count; i++)
+                if (table.StartTime[i] != 65535 && table.Duration[i] != 0)
+                    mask |= Core.Timing.Eorzea.Window(table.StartTime[i], table.Duration[i]);
+            return mask;
+        }
+        return Core.Timing.Eorzea.Between(t.EphemeralStartTime, t.EphemeralEndTime);
+    }
+
+    private readonly Dictionary<uint, uint> timedMasks = new();
+
+    /// <summary>Eorzea hours an item's timed nodes are up (24-bit mask); 0 when it has none.</summary>
+    public uint TimedMask(uint itemId) => timedMasks.GetValueOrDefault(itemId);
+
     private static bool IsTimed(GatheringPointTransient? row)
     {
         if (row is not { } t) return false;

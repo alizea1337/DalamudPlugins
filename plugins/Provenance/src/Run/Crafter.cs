@@ -30,7 +30,7 @@ internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq);
 /// </summary>
 internal sealed unsafe class Crafter
 {
-    private enum Step { Idle, NextRecipe, LeaveStance, SwitchJob, Repair, Consumables, Solve, OpenRecipe, Ingredients, Synthesize, Acting, WaitResult, Paused, Finished, Failed }
+    private enum Step { Idle, NextRecipe, LeaveStance, SwitchJob, Repair, Consumables, Solve, OpenRecipe, Ingredients, Synthesize, Acting, WaitResult, Paused, WaitingForMaterials, Finished, Failed }
 
     private const uint BasicSynthesis = 100001;
     private const uint RepairAction = 6;
@@ -41,7 +41,8 @@ internal sealed unsafe class Crafter
     private DateTime lastCraftEnded;
     private int actionsUsed;
     private readonly Action<string, bool> log;
-    private readonly Queue<CraftJob> queue = new();
+    /// <summary>Recipes still to craft, in order (ingredients before the items that use them).</summary>
+    private readonly List<CraftJob> pending = new();
     private readonly HashSet<string> warnedOnce = new();
     private readonly Dictionary<uint, DateTime> lastUse = new();
 
@@ -58,6 +59,16 @@ internal sealed unsafe class Crafter
     private bool fallback;
     private int doneThisJob;
     private bool pauseRequested;
+    private bool leaveStanceOnPause;
+
+    /// <summary>
+    /// While timed nodes are still to be gathered: craft only recipes whose materials are in the bags and
+    /// keep the rest for later instead of skipping them.
+    /// </summary>
+    public bool DeferMissing { get; set; }
+
+    /// <summary>Raised after every finished craft, so the run can account for the materials it used.</summary>
+    public event Action<RecipeInfo>? Crafted;
 
     public Crafter(Plugin plugin, Action<string, bool> log)
     {
@@ -74,22 +85,30 @@ internal sealed unsafe class Crafter
     public string CurrentAction { get; private set; } = "";
     public int ActionNumber => Math.Min(actionIndex, macro.Count);
     public int ActionCount => macro.Count;
-    public IReadOnlyList<CraftJob> Upcoming => queue.ToList();
+    public IReadOnlyList<CraftJob> Upcoming => pending.ToList();
     public List<(CraftJob Job, int Done, string? Skipped)> History { get; } = new();
 
     public bool Finished => step is Step.Finished or Step.Failed;
     public bool IsPaused => step == Step.Paused;
+    /// <summary>Nothing left that can be crafted with what's in the bags right now (only while deferring).</summary>
+    public bool WaitingForMaterials => step == Step.WaitingForMaterials;
+    public bool Started => step != Step.Idle;
+
+    /// <summary>Whether any recipe still to craft has its materials in the bags.</summary>
+    public bool HasReadyWork()
+        => (Current != null && doneThisJob < Current.Crafts && MissingIngredient(Current.Recipe) == null)
+           || pending.Any(j => MissingIngredient(j.Recipe) == null);
     /// <summary>A synthesis is under way; stopping now would lose materials.</summary>
     public bool MidCraft => step is Step.Synthesize or Step.Acting or Step.WaitResult;
 
     public void Begin(IEnumerable<CraftJob> jobs)
     {
-        queue.Clear();
+        pending.Clear();
         History.Clear();
         warnedOnce.Clear();
         lastUse.Clear();
-        foreach (var j in jobs.Where(j => j.Crafts > 0)) queue.Enqueue(j);
-        CraftsTotal = queue.Sum(j => j.Crafts);
+        pending.AddRange(jobs.Where(j => j.Crafts > 0));
+        CraftsTotal = pending.Sum(j => j.Crafts);
         CraftsDone = 0;
         Current = null;
         Failure = null;
@@ -100,15 +119,40 @@ internal sealed unsafe class Crafter
     /// <summary>Pause after the craft that's under way (or right away between crafts).</summary>
     public void RequestPause() => pauseRequested = true;
 
+    /// <summary>Pause after the current craft and close the crafting log, so gathering can take over.</summary>
+    public void RequestYield()
+    {
+        pauseRequested = true;
+        leaveStanceOnPause = true;
+        if (step == Step.WaitingForMaterials) Pause();
+    }
+
     public void Resume()
     {
         pauseRequested = false;
-        if (step == Step.Paused) Go(Current != null && doneThisJob < Current.Crafts ? Step.Repair : Step.NextRecipe);
+        leaveStanceOnPause = false;
+        if (step is Step.Paused or Step.WaitingForMaterials)
+            Go(Current != null && doneThisJob < Current.Crafts ? Step.Repair : Step.NextRecipe);
+    }
+
+    /// <summary>Gathering is done: craft everything left, skipping recipes whose materials are missing.</summary>
+    public void FinalPass()
+    {
+        DeferMissing = false;
+        Resume();
     }
 
     public void Tick()
     {
         if (Finished || step is Step.Idle or Step.Paused || DateTime.UtcNow < waitUntil) return;
+        if (step == Step.WaitingForMaterials)
+        {
+            // Something gathered or bought in the meantime may have made a recipe craftable.
+            if (pauseRequested) Pause();
+            else if (HasReadyWork()) Go(Step.NextRecipe);
+            else Wait(1);
+            return;
+        }
         try
         {
             switch (step)
@@ -146,13 +190,23 @@ internal sealed unsafe class Crafter
         }
         if (Current == null)
         {
-            if (!queue.TryDequeue(out var next))
+            if (pending.Count == 0)
             {
                 Status = "All crafts done";
                 if (GameState.InCraftingStance) { afterLeave = Step.Finished; Go(Step.LeaveStance); }
                 else Go(Step.Finished);
                 return;
             }
+            // While deferring, take the first recipe that can be crafted now; otherwise strictly in order.
+            var next = DeferMissing ? pending.FirstOrDefault(j => MissingIngredient(j.Recipe) == null) : pending[0];
+            if (next == null)
+            {
+                Status = "Waiting for materials";
+                CurrentAction = "";
+                Go(Step.WaitingForMaterials);
+                return;
+            }
+            pending.Remove(next);
             Current = next;
             doneThisJob = 0;
             macro.Clear();
@@ -185,6 +239,7 @@ internal sealed unsafe class Crafter
     {
         if (!GameState.InCraftingStance)
         {
+            if (afterLeave == Step.Paused) { Status = "Paused"; CurrentAction = ""; }
             Go(afterLeave);
             return;
         }
@@ -325,6 +380,15 @@ internal sealed unsafe class Crafter
         if (MissingIngredient(Current.Recipe) is { } missing)
         {
             var catalog = plugin.Plans.Catalog!;
+            if (DeferMissing)
+            {
+                // More is still being gathered: come back to the rest of this recipe later.
+                pending.Insert(0, Current with { Crafts = Current.Crafts - doneThisJob });
+                if (doneThisJob > 0) History.Add((Current with { Crafts = doneThisJob }, doneThisJob, null));
+                Current = null;
+                Go(Step.NextRecipe);
+                return;
+            }
             var reason = $"ran out of {catalog.ItemName(missing.ItemId)}";
             log($"Stopped crafting {catalog.ItemName(Current.Recipe.ItemId)} after {doneThisJob}: {reason}.", true);
             History.Add((Current, doneThisJob, reason));
@@ -457,6 +521,7 @@ internal sealed unsafe class Crafter
         }
         var name = plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId);
         log($"Crafted {name} ({doneThisJob} of {Current.Crafts}).", false);
+        Crafted?.Invoke(Current.Recipe);
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
         Go(doneThisJob < Current.Crafts ? Step.Ingredients : Step.NextRecipe, keepWait: true);
@@ -466,6 +531,13 @@ internal sealed unsafe class Crafter
 
     private void Pause()
     {
+        if (leaveStanceOnPause && GameState.InCraftingStance)
+        {
+            Status = "Closing the crafting log";
+            afterLeave = Step.Paused;
+            Go(Step.LeaveStance);
+            return;
+        }
         Status = "Paused";
         CurrentAction = "";
         Go(Step.Paused);

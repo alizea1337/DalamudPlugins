@@ -20,6 +20,7 @@ public sealed class Configuration : IPluginConfiguration
     public WindowSettings Window { get; set; } = new();
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
+    public RunSettings Run { get; set; } = new();
     /// <summary>Timing figures for estimates, adjusted by every run.</summary>
     public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
@@ -41,6 +42,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
+        c.Run ??= new();
         c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
         c.Consumables.CraftMedicine ??= new();
@@ -85,6 +87,15 @@ public sealed class BrowseSettings
     public int JobMask { get; set; } = 0;
     public int MinLevel { get; set; } = 1;
     public int MaxLevel { get; set; } = 100;
+}
+
+[Serializable]
+public sealed class RunSettings
+{
+    /// <summary>Craft what already can be crafted while only closed timed nodes are left.</summary>
+    public bool CraftWhileWaiting { get; set; } = true;
+    /// <summary>Real minutes before a timed node opens to hand back to gathering.</summary>
+    public int TimedLeadMinutes { get; set; } = 2;
 }
 
 [Serializable]

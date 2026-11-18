@@ -77,7 +77,7 @@ internal sealed class RunPage : Page
     private void DrawRun()
     {
         var s = Ui.S;
-        var crafting = Runs.Stage == RunStage.Craft;
+        var crafting = Runs.Crafting;
         var (color, icon) = Runs.Phase switch
         {
             RunPhase.Running => (Palette.Accent, crafting ? FontAwesomeIcon.Hammer : FontAwesomeIcon.Leaf),
@@ -95,14 +95,14 @@ internal sealed class RunPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         var barW = MathF.Min(Ui.CardInnerWidth, 420 * s);
         var targets = Runs.Targets;
-        var gathered = targets.Count(t => RunEngine.Left(t) == 0);
+        var gathered = targets.Count(t => Runs.Left(t) == 0);
         if (targets.Count > 0)
         {
             Ui.Bar("##gatherprogress", gathered / (float)targets.Count, Palette.SupplyColor(Supply.Gather), barW, 8);
             Ui.Muted($"{gathered} of {targets.Count} materials gathered");
         }
         var c = Runs.Crafter;
-        if (crafting && c.CraftsTotal > 0)
+        if (Runs.Stage != RunStage.Learn && c.CraftsTotal > 0)
         {
             Ui.Bar("##craftprogress", c.CraftsDone / (float)c.CraftsTotal, Palette.Accent, barW, 8);
             Ui.Muted($"{c.CraftsDone} of {c.CraftsTotal} crafts done");
@@ -111,8 +111,12 @@ internal sealed class RunPage : Page
         Ui.Muted(Elapsed().TrimStart(',', ' ') + (left is { } l && l > TimeSpan.Zero ? ", " + Core.Estimating.Estimator.Describe(l) + " left" : ""));
         Ui.EndCard();
 
-        if (crafting) DrawCrafting();
-        else DrawGathering();
+        if (Runs.Stage == RunStage.Gather)
+        {
+            DrawGathering();
+            if (c.Current != null || c.Upcoming.Count > 0 || c.History.Count > 0) DrawCrafting();
+        }
+        else if (Runs.Stage == RunStage.Craft) DrawCrafting();
         DrawLog();
     }
 
@@ -129,9 +133,9 @@ internal sealed class RunPage : Page
         ImGui.SameLine(0, 10 * s);
         Ui.Muted("with GatherBuddy Reborn");
         ImGui.Dummy(new Vector2(0, 2 * s));
-        foreach (var t in targets.OrderBy(t => RunEngine.Left(t) == 0))
+        foreach (var t in targets.OrderBy(t => Runs.Left(t) == 0))
         {
-            var remaining = RunEngine.Left(t);
+            var remaining = Runs.Left(t);
             var start = ImGui.GetCursorScreenPos();
             var width = Ui.CardInnerWidth;
             var h = 34 * s;

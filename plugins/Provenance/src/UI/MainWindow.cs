@@ -301,7 +301,7 @@ internal sealed class MainWindow : Window
             Run.RunPhase.Finished => Palette.Accent,
             _ => Palette.Danger,
         };
-        if (runs.Stage == Run.RunStage.Craft && runs.Crafter.CraftsTotal > 0)
+        if (runs.Crafting && runs.Crafter.CraftsTotal > 0)
         {
             var c = runs.Crafter;
             var detail = c.Current is { } cur && catalog != null
@@ -312,7 +312,7 @@ internal sealed class MainWindow : Window
         var targets = runs.Targets;
         if (targets.Count > 0)
         {
-            var got = targets.Count(t => Run.RunEngine.Left(t) == 0);
+            var got = targets.Count(t => runs.Left(t) == 0);
             return (dot, runs.Headline, runs.Detail, got / (float)targets.Count, $"{got} of {targets.Count} gathered" + TimeLeftText());
         }
         return (dot, runs.Headline, runs.Detail, null, "");

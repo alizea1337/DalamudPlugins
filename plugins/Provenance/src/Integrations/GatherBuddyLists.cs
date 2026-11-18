@@ -74,6 +74,27 @@ internal sealed class GatherBuddyLists
         return unknown;
     }
 
+    /// <summary>
+    /// Lowers (or raises) quantities on the Provenance list, for example after crafting used up some
+    /// gathered materials, so GatherBuddy Reborn doesn't gather them all over again.
+    /// </summary>
+    public void UpdateTargets(IEnumerable<(uint ItemId, uint Quantity)> targets)
+    {
+        if (manager == null || ourList == null) return;
+        try
+        {
+            var set = listType!.GetMethod("SetQuantity", All) ?? throw new MissingMethodException("AutoGatherList.SetQuantity");
+            foreach (var (id, qty) in targets)
+                if (Lookup(id) is { } item) set.Invoke(ourList, new[] { item, (object)Math.Max(1u, qty) });
+            Call(manager, "SetActiveItems", false);
+            Call(manager, "Save");
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't update GatherBuddy Reborn quantities");
+        }
+    }
+
     /// <summary>Removes the Provenance list and switches the user's lists back on.</summary>
     public void Uninstall()
     {
