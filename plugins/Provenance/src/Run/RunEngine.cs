@@ -33,7 +33,7 @@ internal enum RunPhase
 /// Learn books, take items out of retainers, buy from vendors, gather (crafting while timed nodes are
 /// closed), then craft the rest.
 /// </summary>
-internal enum RunStage { Retainers, Learn, Vendors, Gather, Craft }
+internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn }
 
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
@@ -100,6 +100,7 @@ internal sealed class RunEngine : IDisposable
         Shopper = new Shopper(plugin, Add);
         Retainers = new RetainerRun(plugin, Add);
         Books = new BookBuyer(plugin, Add);
+        TurnIn = new Appraiser(plugin, Add);
         cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
@@ -126,12 +127,25 @@ internal sealed class RunEngine : IDisposable
 
     private RunSettings Settings => plugin.Config.Run;
 
+    /// <summary>Earning scrips with collectables before the order itself.</summary>
+    private bool scripPhase;
+    private int scripRounds;
+    public bool EarningScrips => Active && scripPhase;
+    public Appraiser TurnIn { get; private set; } = null!;
+
+    /// <summary>The plan the stages work on: the collectables for scrips first, then the order.</summary>
+    private Plan ActivePlan => scripPhase ? plugin.Plans.ScripPlan : plugin.Plans.Plan;
+
     /// <summary>Recipes to craft; ordered items marked HQ get a quality rotation, everything else the fastest.</summary>
     private List<CraftJob> CraftJobs()
     {
         var hqItems = plugin.Config.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
-        return plugin.Plans.Plan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
-            .Select(l => new CraftJob(l.Recipe!, l.Crafts, l.IsTarget && l.Recipe!.CanHq && hqItems.Contains(l.ItemId))).ToList();
+        var catalog = plugin.Plans.Catalog!;
+        return ActivePlan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
+            .Select(l => scripPhase && l.IsTarget && catalog.Collectable(l.ItemId) is { } c
+                // Collectables: quality for the top collectability (collectability is quality / 10).
+                ? new CraftJob(l.Recipe!, l.Crafts, false, c.HighCollectability * 10)
+                : new CraftJob(l.Recipe!, l.Crafts, !scripPhase && l.IsTarget && l.Recipe!.CanHq && hqItems.Contains(l.ItemId))).ToList();
     }
 
     /// <summary>Why a run can't start now, or null when it can.</summary>
@@ -143,6 +157,7 @@ internal sealed class RunEngine : IDisposable
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";
         if (!plugin.Plans.Ready) return "Your character can't do everything in this order yet; the plan lists what's in the way.";
+        if (!plugin.Plans.ScripPlan.CanStart && plugin.Plans.ScripTasks.Count > 0) return "The collectables for scrips need items you have to get yourself; they are listed in the plan.";
         if (!Services.ClientState.IsLoggedIn) return "Log in first.";
         if (Stock.FreeSlots() <= MinFreeSlots) return $"Your inventory has {MinFreeSlots} or fewer free slots.";
         var gather = GatherTargets.Build(plan, BagNq).Count > 0;
@@ -192,6 +207,11 @@ internal sealed class RunEngine : IDisposable
         cleanup.Cancel();
         nextTripCheck = default;
         Crafter.Begin(Array.Empty<CraftJob>());
+        scripRounds = 0;
+        scripPhase = plugin.Plans.ScripTasks.Count > 0;
+        if (scripPhase)
+            Add("Earning scrips for books first: " + string.Join(", ", plugin.Plans.ScripTasks.Select(t =>
+                $"{t.Count}× {plugin.Plans.Catalog!.ItemName(t.Option.ItemId)} for about {t.Expected:N0} {plugin.Plans.Catalog!.ItemName(t.Option.Currency)}")) + ".", false);
 
         // Retainers first (a book may be with a retainer), then books, vendors, gathering, crafting.
         StartRetainers();
@@ -203,7 +223,7 @@ internal sealed class RunEngine : IDisposable
     {
         plugin.Plans.Invalidate();
         // Books not in the bags that an exchange sells: buy them first, then read everything.
-        var buy = plugin.Plans.Plan.Learn.Where(l => l.WillBuy)
+        var buy = ActivePlan.Learn.Where(l => l.WillBuy)
             .Select(l => plugin.Plans.BookOffer(l.ItemId) is { } offer ? new BookOrder(l.ItemId, offer) : null)
             .OfType<BookOrder>().ToList();
         if (buy.Count > 0)
@@ -223,7 +243,7 @@ internal sealed class RunEngine : IDisposable
     {
         buyingBooks = false;
         toLearn.Clear();
-        foreach (var l in plugin.Plans.Plan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
+        foreach (var l in ActivePlan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
         if (toLearn.Count == 0) { StartVendors(); return; }
         Stage = RunStage.Learn;
         Headline = "Learning";
@@ -258,7 +278,7 @@ internal sealed class RunEngine : IDisposable
     private void StartGatherOrCraft()
     {
         plugin.Plans.Invalidate();
-        var targets = GatherTargets.Build(plugin.Plans.Plan, BagNq);
+        var targets = GatherTargets.Build(ActivePlan, BagNq);
         if (targets.Count > 0) StartGathering(targets);
         else StartCrafting();
     }
@@ -272,7 +292,7 @@ internal sealed class RunEngine : IDisposable
         var result = new Dictionary<ulong, (string Name, List<(uint, int)> Items)>();
         if (!Services.PlayerState.IsLoaded || RetainerCache.For(plugin.Config, Services.PlayerState.ContentId) is not { } retainers) return new();
         var onHand = Stock.OnHand(plugin.Config);
-        foreach (var line in plugin.Plans.Plan.Lines)
+        foreach (var line in ActivePlan.Lines)
         {
             var need = Math.Min(line.Needed, line.FromStock) - onHand.GetValueOrDefault(line.ItemId);
             foreach (var (id, stock) in retainers.OrderByDescending(r => r.Value.Items.GetValueOrDefault(line.ItemId)))
@@ -300,7 +320,7 @@ internal sealed class RunEngine : IDisposable
         var cap = plugin.Config.Buying.VendorMaxPrice;
         var areas = new Dictionary<uint, bool>();
         reachResult = null;
-        foreach (var line in plugin.Plans.Plan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
+        foreach (var line in ActivePlan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
         {
             var ok = plugin.Plans.Catalog!.Vendors.For(line.ItemId).Where(o => cap == 0 || o.Price <= cap)
                 .Any(o => areas.TryGetValue(o.TerritoryId, out var r) ? r : areas[o.TerritoryId] = Teleporter.CanReach(o.TerritoryId));
@@ -333,7 +353,7 @@ internal sealed class RunEngine : IDisposable
 
         var chosen = new List<Purchase>();
         var reachable = new Dictionary<uint, bool>();
-        foreach (var line in plugin.Plans.Plan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
+        foreach (var line in ActivePlan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
         {
             var offers = catalog.Vendors.For(line.ItemId)
                 .Where(o => cap == 0 || o.Price <= cap)
@@ -472,12 +492,14 @@ internal sealed class RunEngine : IDisposable
         Shopper.Cancel();
         Retainers.Cancel();
         Books.Cancel();
+        TurnIn.Cancel();
         buyingBooks = false;
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
 
     private void Finish()
     {
+        if (scripPhase) { StartTurnIn(); return; }
         CancelNodeTrip();
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
@@ -486,6 +508,48 @@ internal sealed class RunEngine : IDisposable
             ? "Everything for this order is gathered and crafted."
             : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ".";
         End(RunPhase.Finished, skipped.Count > 0 ? "Order not finished" : "Order done", detail, skipped.Count > 0);
+    }
+
+    /// <summary>Collectables made: take them to an appraiser.</summary>
+    private void StartTurnIn()
+    {
+        CancelNodeTrip();
+        GatherBuddyIpc.SetEnabled(false);
+        lists.Uninstall();
+        Stage = RunStage.TurnIn;
+        Headline = "Turning in collectables";
+        TurnIn.Begin(plugin.Plans.ScripTasks.Select(t => t.Option.ItemId));
+        Add("Collectables done; turning them in for scrips.", false);
+    }
+
+    /// <summary>Scrips earned: plan again; earn more if still short (up to three rounds), else on to the order.</summary>
+    private void AfterTurnIn()
+    {
+        scripPhase = false;
+        plugin.Plans.Rebuild();
+        ResetForNextPlan();
+        if (plugin.Plans.ScripTasks.Count > 0)
+        {
+            if (++scripRounds >= 3) { Stop("Still short of scrips after three rounds of collectables; the plan says how many are missing.", true, now: true); return; }
+            scripPhase = true;
+            Add("Still short of scrips; another round of collectables.", true);
+        }
+        else Add("Scrips earned; on to the order.", false);
+        StartRetainers();
+    }
+
+    /// <summary>Clears what one plan's stages left behind before the next plan starts.</summary>
+    private void ResetForNextPlan()
+    {
+        consumed.Clear();
+        craftingBetween = false;
+        yielding = false;
+        NextWindow = null;
+        Targets = Array.Empty<GatherTarget>();
+        craftQueueBuilt = false;
+        tripSpot = null;
+        cleaning = false;
+        Crafter.Begin(Array.Empty<CraftJob>());
     }
 
     private void End(RunPhase phase, string headline, string detail, bool problem)
@@ -511,6 +575,7 @@ internal sealed class RunEngine : IDisposable
         if (working && Crafting) Crafter.Tick();
         if (working && Stage == RunStage.Vendors) Shopper.Tick();
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
+        if (working && Stage == RunStage.TurnIn) TurnIn.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
@@ -528,6 +593,7 @@ internal sealed class RunEngine : IDisposable
             case RunStage.Retainers: TickErrand(Retainers.Finished, Retainers.Failure, Retainers.IsPaused, Retainers.Status, StartLearning); break;
             case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartGatherOrCraft); break;
             case RunStage.Gather: TickGathering(); break;
+            case RunStage.TurnIn: TickErrand(TurnIn.Finished, TurnIn.Failure, false, TurnIn.Status, AfterTurnIn); break;
             default: TickCrafting(); break;
         }
     }

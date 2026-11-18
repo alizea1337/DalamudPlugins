@@ -75,6 +75,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexVendors();
         c.IndexBells();
         c.IndexDrops();
+        c.IndexCollectables();
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
@@ -296,6 +297,93 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     /// <summary>Hunting-venture items are monster drops. M6 replaces this with real spawn data.</summary>
+    /// <summary>Collectables the appraiser pays scrips for, one per job tab row.</summary>
+    public IReadOnlyList<Core.Scrips.CollectableOption> Collectables { get; private set; } = Array.Empty<Core.Scrips.CollectableOption>();
+    private readonly Dictionary<uint, Core.Scrips.CollectableOption> collectableByItem = new();
+    public Core.Scrips.CollectableOption? Collectable(uint itemId) => collectableByItem.GetValueOrDefault(itemId);
+    /// <summary>Appraiser shop rows (CollectablesShop) that pay scrips, with each row's tab order.</summary>
+    public uint AppraiserShop { get; private set; }
+
+    private void IndexCollectables()
+    {
+        var items = Services.Data.GetExcelSheet<Item>();
+        var groups = Services.Data.GetSubrowExcelSheet<CollectablesShopItem>();
+        var list = new List<Core.Scrips.CollectableOption>();
+        foreach (var shop in Services.Data.GetExcelSheet<CollectablesShop>())
+        {
+            if (shop.RewardType != 1) continue; // 1 = scrips; 2 = items
+            var any = false;
+            for (var tab = 0; tab < shop.ShopItems.Count; tab++)
+            {
+                var groupId = shop.ShopItems[tab].RowId;
+                if (groupId == 0 || !groups.HasRow(groupId)) continue;
+                foreach (var row in groups.GetRow(groupId))
+                {
+                    var itemId = row.Item.RowId;
+                    if (itemId == 0 || items.GetRowOrDefault(itemId) is not { IsCollectable: true }) continue;
+                    if (row.RequiredQuest.RowId != 0) continue; // quest-locked rows are left out
+                    if (row.CollectablesShopRewardScrip.ValueNullable is not { Currency: > 0 } reward) continue;
+                    if (row.CollectablesShopRefine.ValueNullable is not { } refine) continue;
+                    uint job;
+                    int level;
+                    var crafted = RecipesFor(itemId).Count > 0;
+                    if (crafted)
+                    {
+                        var recipe = RecipesFor(itemId)[0];
+                        job = recipe.Job.ClassJobId();
+                        level = Math.Max(row.LevelMin, recipe.Level);
+                    }
+                    else if (gatherBrowse.Where(kv => kv.Key.Item1 == itemId).OrderBy(kv => kv.Value.Level).FirstOrDefault() is { Key.Item1: > 0 } g)
+                    {
+                        job = g.Key.Item2;
+                        level = Math.Max(row.LevelMin, g.Value.Level);
+                    }
+                    else continue;
+                    var option = new Core.Scrips.CollectableOption(itemId, job, level, ExchangeIndex.ScripItem(reward.Currency),
+                        reward.LowReward, reward.MidReward, reward.HighReward,
+                        refine.LowCollectability, refine.MidCollectability, refine.HighCollectability, tab, crafted);
+                    if (collectableByItem.TryAdd(itemId, option)) list.Add(option);
+                    any = true;
+                }
+            }
+            if (any && AppraiserShop == 0) AppraiserShop = shop.RowId;
+        }
+        Collectables = list;
+        if (AppraiserShop != 0) IndexAppraisers();
+    }
+
+    /// <summary>Collectable appraisers with a known position (cities and open zones).</summary>
+    public IReadOnlyList<(uint NpcId, string Name, uint TerritoryId, System.Numerics.Vector2 Position)> Appraisers { get; private set; }
+        = Array.Empty<(uint, string, uint, System.Numerics.Vector2)>();
+
+    private void IndexAppraisers()
+    {
+        var pre = Services.Data.GetExcelSheet<PreHandler>();
+        var topics = Services.Data.GetExcelSheet<TopicSelect>();
+        var talk = Services.Data.GetExcelSheet<CustomTalk>();
+        var npcs = Services.Data.GetExcelSheet<ENpcBase>();
+        var names = Services.Data.GetExcelSheet<ENpcResident>();
+        var territories = Services.Data.GetExcelSheet<TerritoryType>();
+        bool Leads(uint id, int depth)
+        {
+            if (id == AppraiserShop) return true;
+            if (id == 0 || depth > 3) return false;
+            if (pre.GetRowOrDefault(id) is { } p) return Leads(p.Target.RowId, depth + 1);
+            if (topics.GetRowOrDefault(id) is { } t) return t.Shop.Any(s => Leads(s.RowId, depth + 1));
+            if (talk.GetRowOrDefault(id) is { } c)
+                return c.Script.Any(s => s.ScriptArg == AppraiserShop) || c.SpecialLinks.RowId == AppraiserShop;
+            return false;
+        }
+        var found = new List<(uint, string, uint, System.Numerics.Vector2)>();
+        foreach (var (npcId, (territory, position)) in VendorIndex.LoadPositions())
+        {
+            if (territories.GetRowOrDefault(territory) is not { } t || t.TerritoryIntendedUse.RowId is not (0 or 1)) continue;
+            if (npcs.GetRowOrDefault(npcId) is not { } npc || !npc.ENpcData.Any(d => Leads(d.RowId, 0))) continue;
+            found.Add((npcId, names.GetRowOrDefault(npcId)?.Singular.ExtractText() ?? "collectable appraiser", territory, position));
+        }
+        Appraisers = found;
+    }
+
     private void IndexDrops()
     {
         foreach (var task in Services.Data.GetExcelSheet<RetainerTaskNormal>())

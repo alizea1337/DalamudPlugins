@@ -21,6 +21,11 @@
   currency: the run travels to a scrip exchange it can reach, picks the page and subpage, buys the
   book and reads it before anything else. The plan says what it costs and how much you have; a
   book you can't afford still has to be got first. Exchange NPC positions are now in vendors.json.
+- Earning scrips ("Earn scrips for books" in Settings, on by default): when the books cost more
+  scrips than you have, the run first makes or gathers the quickest collectables your jobs can
+  handle (fewest items for the scrips missing, counted at the middle reward), crafts them for the
+  top collectability, turns them in at a collectable appraiser (job tab, row, submit; stops at the
+  scrip cap), buys the books and then runs the order. Short after a round: up to three rounds.
 
 ## 0.5.0
 

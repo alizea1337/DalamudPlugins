@@ -95,6 +95,7 @@ internal sealed class PlanPage : Page
         currentEstimate = Plans.Estimate;
         DrawOrderHeader();
         DrawLearnFirst(plan, catalog);
+        DrawScripsFirst(catalog);
         DrawMissing(plan, catalog);
         DrawReadiness(catalog);
         DrawTargets(plan, catalog);
@@ -204,6 +205,45 @@ internal sealed class PlanPage : Page
             using (Ui.F.Small.Push()) Ui.Muted(forText);
             ImGui.EndGroup();
         }
+        Ui.EndCard();
+    }
+
+    /// <summary>Collectables the run makes or gathers for scrips before the order, with what that takes.</summary>
+    private void DrawScripsFirst(GameCatalog catalog)
+    {
+        var tasks = Plans.ScripTasks;
+        if (tasks.Count == 0) return;
+        var s = Ui.S;
+        var scripPlan = Plans.ScripPlan;
+        Ui.BeginCard(Palette.WithAlpha(Palette.Accent, 0.07f));
+        Ui.Icon(FontAwesomeIcon.Coins, Palette.Accent);
+        ImGui.SameLine(0, 10 * s);
+        using (Ui.F.Strong.Push()) Ui.Text("Earn scrips first", Palette.Accent);
+        Ui.Wrapped("The books cost more scrips than you have. Before the order, the run makes or gathers these collectables, turns them in at a collectable appraiser and buys the books.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var t in tasks)
+        {
+            Ui.ItemIcon(catalog.ItemIcon(t.Option.ItemId), 28);
+            ImGui.SameLine(0, 10 * s);
+            ImGui.BeginGroup();
+            Ui.Text($"{t.Count}× {catalog.ItemName(t.Option.ItemId)}");
+            ImGui.SameLine(0, 8 * s);
+            Ui.Chip(Core.Character.ClassJobs.Abbreviation(t.Option.ClassJobId), Palette.ClassJobColor(t.Option.ClassJobId));
+            using (Ui.F.Small.Push())
+                Ui.Muted($"About {t.Expected:N0} {catalog.ItemName(t.Option.Currency)} at collectability {t.Option.MidCollectability}+ " +
+                         $"({t.Option.HighReward * t.Count:N0} at {t.Option.HighCollectability}+).");
+            ImGui.EndGroup();
+        }
+        var gather = scripPlan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed && l.Remaining > 0).Sum(l => l.Remaining);
+        var buy = scripPlan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0).Sum(l => l.Remaining);
+        var crafts = scripPlan.CraftSteps.Sum(l => l.Crafts);
+        var parts = new List<string>();
+        if (gather > 0) parts.Add($"{gather:N0} materials to gather");
+        if (buy > 0) parts.Add($"{buy:N0} to buy");
+        if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
+        if (parts.Count > 0) using (Ui.F.Small.Push()) Ui.Muted("That takes " + string.Join(", ", parts) + ".");
+        foreach (var line in scripPlan.Missing)
+            using (Ui.F.Small.Push()) Ui.Wrapped($"Get yourself: {line.Remaining}× {catalog.ItemName(line.ItemId)} ({line.ManualReason}).", Palette.Danger);
         Ui.EndCard();
     }
 

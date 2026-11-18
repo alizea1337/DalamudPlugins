@@ -22,7 +22,9 @@ if (args.Length < 3)
 var game = new GameData(args[0], new LuminaOptions { DefaultExcelLanguage = Lumina.Data.Language.English });
 var gilShops = game.GetSubrowExcelSheet<GilShopItem>()!.Where(r => r.Count > 0).Select(r => r.RowId).ToHashSet();
 var exchanges = game.GetExcelSheet<SpecialShop>()!.Select(r => r.RowId)
-    .Concat(game.GetExcelSheet<InclusionShop>()!.Select(r => r.RowId)).ToHashSet();
+    .Concat(game.GetExcelSheet<InclusionShop>()!.Select(r => r.RowId))
+    .Concat(game.GetExcelSheet<CollectablesShop>()!.Select(r => r.RowId)).ToHashSet();
+var customTalk = game.GetExcelSheet<CustomTalk>()!;
 var topics = game.GetExcelSheet<TopicSelect>()!;
 var pre = game.GetExcelSheet<PreHandler>()!;
 var maps = game.GetExcelSheet<Map>()!;
@@ -33,6 +35,9 @@ bool SellsForGil(uint data, int depth)
     if (depth > 2) return false;
     if (topics.GetRowOrDefault(data) is { } t) return t.Shop.Any(s => s.RowId != 0 && SellsForGil(s.RowId, depth + 1));
     if (pre.GetRowOrDefault(data) is { } p) return SellsForGil(p.Target.RowId, depth + 1);
+    // Collectable appraisers hang off a custom talk script.
+    if (customTalk.GetRowOrDefault(data) is { } c)
+        return c.Script.Any(a => a.ScriptArg != 0 && exchanges.Contains(a.ScriptArg)) || exchanges.Contains(c.SpecialLinks.RowId);
     return false;
 }
 
@@ -53,6 +58,11 @@ foreach (var npc in doc.RootElement.EnumerateObject())
     var y = pos.GetProperty("y").GetSingle();
     table[id] = new[] { map.TerritoryType.RowId, World(x, map.SizeFactor, map.OffsetX), World(y, map.SizeFactor, map.OffsetY) };
 }
+
+// Teamcraft's map positions for these two appraisers are off; positions from GatherBuddy Reborn's
+// vendor location overrides (Apache-2.0).
+table[1003076] = new[] { 133f, 143f, -107f };
+table[1003632] = new[] { 129f, -257f, 38f };
 
 // Map coordinates (1..42 at scale 100) back to world units.
 static float World(float mapCoord, ushort sizeFactor, short offset)

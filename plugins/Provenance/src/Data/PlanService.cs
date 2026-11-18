@@ -41,6 +41,12 @@ internal sealed class PlanService : IDisposable
     public GameCatalog? Catalog => loading.IsCompletedSuccessfully ? loading.Result : null;
     public string? LoadError => loading.IsFaulted ? loading.Exception?.GetBaseException().Message : null;
     public Plan Plan { get; private set; } = Plan.Empty;
+    /// <summary>Collectables to make or gather for scrips before the order (empty when none are needed).</summary>
+    public Plan ScripPlan { get; private set; } = Plan.Empty;
+    /// <summary>What the scrip plan earns, per scrip.</summary>
+    public IReadOnlyList<Core.Scrips.ScripTask> ScripTasks { get; private set; } = Array.Empty<Core.Scrips.ScripTask>();
+    /// <summary>Scrips the scrip plan is expected to bring in, by scrip item.</summary>
+    private readonly Dictionary<uint, Core.Scrips.ScripTask> earning = new();
     /// <summary>How long the order takes, refreshed every second.</summary>
     public OrderEstimate Estimate { get; private set; } = OrderEstimate.Empty;
     public IReadOnlyDictionary<uint, int> Owned => owned;
@@ -80,11 +86,71 @@ internal sealed class PlanService : IDisposable
             Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem);
         }
         if (!dirty) return;
+        Rebuild();
+    }
+
+    /// <summary>Plans the order now (framework thread), and the scrips to earn first when books need more than you have.</summary>
+    public void Rebuild()
+    {
+        var catalog = Catalog;
+        if (catalog == null) return;
         dirty = false;
         nextRebuild = DateTime.UtcNow.AddSeconds(10);
         var c = config();
         reachable.Clear();
-        Plan = Planner.Build(c.Order, catalog, owned, new PlannerOptions
+        earning.Clear();
+        Plan = BuildPlan(c.Order, catalog);
+        ScripTasks = Array.Empty<Core.Scrips.ScripTask>();
+        ScripPlan = Plan.Empty;
+        if (!c.Run.EarnScrips || !Services.ClientState.IsLoggedIn) return;
+
+        // Scrips the books still need, per scrip, beyond what you have.
+        var cost = new Dictionary<uint, int>();
+        foreach (var line in Plan.Learn.Where(l => l.Remaining > 0 && !l.WillBuy))
+            if (BookOffer(line.ItemId) is { } offer)
+                cost[offer.CurrencyItemId] = cost.GetValueOrDefault(offer.CurrencyItemId) + offer.Cost;
+        var tasks = new List<Core.Scrips.ScripTask>();
+        foreach (var (currency, total) in cost)
+        {
+            var missing = total - GameState.CurrencyCount(currency);
+            if (Core.Scrips.ScripPlanner.Plan(currency, missing, catalog.Collectables, JobLevel, o => CanEarnWith(o, catalog)) is { } task)
+            {
+                tasks.Add(task);
+                earning[currency] = task;
+            }
+        }
+        if (tasks.Count == 0) return;
+        ScripTasks = tasks;
+        var scripOrder = new Core.Orders.Order { Name = "Scrips" };
+        foreach (var t in tasks) scripOrder.Lines.Add(new Core.Orders.OrderLine(t.Option.ItemId, t.Count, 0, false));
+        ScripPlan = BuildPlan(scripOrder, catalog);
+        Plan = BuildPlan(c.Order, catalog); // books now count the scrips the collectables bring in
+    }
+
+    /// <summary>A collectable the character can make or gather now: level, book, stats and folklore all fine; no fishing.</summary>
+    private bool CanEarnWith(Core.Scrips.CollectableOption o, GameCatalog catalog)
+    {
+        if (o.ClassJobId == 18) return false;
+        if (o.Crafted)
+        {
+            var recipe = catalog.RecipesFor(o.ItemId).FirstOrDefault();
+            if (recipe == null || recipe.Expert || RecipeBlocker(recipe) != null || MissingBook(recipe, catalog) != 0) return false;
+            var needs = catalog.NeedsFor(recipe);
+            var job = Profile?.Job(recipe.Job.ClassJobId());
+            if (job == null || job.Source == StatSource.None) return needs == default;
+            return needs.Craftsmanship <= job.Stats[0] && needs.Control <= job.Stats[1] && (!needs.Specialist || job.Specialist);
+        }
+        var src = catalog.Sources(o.ItemId);
+        if (src.Tome != 0 && !HasTome(src.Tome)) return false;
+        if (catalog.GatherNeedsFor(o.ItemId, JobLevel) is { Perception: > 0 } g && Profile?.Job(g.ClassJobId) is { Source: not StatSource.None } gj)
+            return gj.Stats[1] >= g.Perception;
+        return true;
+    }
+
+    private Plan BuildPlan(Core.Orders.Order order, GameCatalog catalog)
+    {
+        var c = config();
+        return Planner.Build(order, catalog, owned, new PlannerOptions
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
             PreferVendor = c.Buying.PreferVendor,
@@ -131,8 +197,11 @@ internal sealed class PlanService : IDisposable
             return new BookPurchase(false, $"Sold for {any.Cost:N0} {any.CurrencyName} by {any.Who} in {any.PlaceName}, which you can't teleport to yet");
         }
         var have = GameState.CurrencyCount(offer.CurrencyItemId);
+        if (have < offer.Cost && earning.TryGetValue(offer.CurrencyItemId, out var task) && have + task.Expected >= offer.Cost)
+            return new BookPurchase(true, $"Costs {offer.Cost:N0} {offer.CurrencyName} (you have {have:N0}); the run earns the rest first with {task.Count}× {catalog.ItemName(task.Option.ItemId)}, then buys it from {offer.Who} in {offer.PlaceName}");
         if (have < offer.Cost)
-            return new BookPurchase(false, $"Costs {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName}; you have {have:N0}");
+            return new BookPurchase(false, $"Costs {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName}; you have {have:N0}" +
+                (config().Run.EarnScrips ? "" : ". Turn on \"Earn scrips for books\" in Settings to have the run earn them"));
         return new BookPurchase(true, $"The run buys it for {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName} (you have {have:N0})");
     }
 

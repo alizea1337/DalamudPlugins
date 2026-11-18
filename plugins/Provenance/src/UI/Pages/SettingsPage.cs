@@ -141,6 +141,15 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
         Ui.EndCard();
 
+        // Books and scrips
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Books and scrips");
+        Ui.Wrapped("Master books and folklore tomes the order needs are bought at a scrip exchange. When they cost more scrips than you have, the run can earn them first.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        v = rs.EarnScrips;
+        if (Ui.Checkbox("Earn scrips for books", ref v, "Makes or gathers the quickest collectables your jobs can handle (fewest items for the scrips missing), turns them in at a collectable appraiser, buys the book, then runs the order.")) { rs.EarnScrips = v; Config.Save(); Plans.Invalidate(); }
+        Ui.EndCard();
+
         // Summoning bell
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Summoning bell");

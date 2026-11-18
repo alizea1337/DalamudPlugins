@@ -45,6 +45,9 @@ internal sealed class ExchangeIndex
 
     private readonly Dictionary<uint, List<ExchangeOffer>> offers = new();
 
+    /// <summary>Scrip item for a currency index as special shops and the collectable appraiser list it (2 = Purple Crafters' Scrip, …).</summary>
+    public static uint ScripItem(uint index) => CurrencyTypeMap.GetValueOrDefault(index, index);
+
     public IReadOnlyList<ExchangeOffer> For(uint itemId) => offers.TryGetValue(itemId, out var l) ? l : Array.Empty<ExchangeOffer>();
 
     public static ExchangeIndex Build(IReadOnlySet<uint> wanted, IReadOnlyDictionary<uint, (uint Territory, Vector2 Position)> positions)
