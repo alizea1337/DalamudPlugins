@@ -43,11 +43,15 @@ internal sealed class PlanPage : Page
     {
         get
         {
-            var plan = Plans.Plan;
-            var why = Config.Order.IsEmpty ? "Add items to the order first"
-                : !plan.CanStart ? "Get the missing items first; they are listed at the top of the plan"
-                : "Running an order arrives with the next milestones (gathering, crafting and the scheduler)";
-            yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => { }, Enabled: false, Tooltip: why);
+            var runs = Plugin.Runs;
+            if (runs.Active)
+            {
+                yield return new FooterAction("Show the run", Ui.Kind.Primary, FontAwesomeIcon.Running, Go<RunPage>);
+                yield break;
+            }
+            var why = runs.StartBlocker();
+            yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => { runs.Start(); Go<RunPage>(); },
+                Enabled: why == null, Tooltip: why ?? "Gathers everything this order needs with GatherBuddy Reborn. Buying, monster drops and crafting follow in the next milestones.");
         }
     }
 

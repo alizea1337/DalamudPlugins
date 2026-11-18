@@ -1,0 +1,61 @@
+using System.Collections.Generic;
+using System.Linq;
+using Provenance.Core.Orders;
+using Provenance.Core.Planning;
+using Provenance.Core.Run;
+using Xunit;
+using static Provenance.Tests.FakeCatalog;
+
+namespace Provenance.Tests;
+
+public class GatherTargetTests
+{
+    private static Plan PlanFor(uint item, int qty, Dictionary<uint, int>? owned = null)
+    {
+        var o = new Order();
+        o.Add(item, qty);
+        return Planner.Build(o, new FakeCatalog(), owned ?? new Dictionary<uint, int>(), new PlannerOptions());
+    }
+
+    [Fact]
+    public void Targets_are_bag_count_plus_what_is_still_needed()
+    {
+        // 2 bows: 12 logs, of which 5 are owned (say 3 in the bags, 2 in the saddlebag) -> 7 still to gather.
+        var plan = PlanFor(Bow, 2, new Dictionary<uint, int> { [Log] = 5 });
+        var targets = GatherTargets.Build(plan, id => id == Log ? 3 : 0);
+        var log = targets.Single(t => t.ItemId == Log);
+        Assert.Equal(7, log.Remaining);
+        Assert.Equal(10u, log.Target);
+    }
+
+    [Fact]
+    public void Only_gathering_and_fishing_lines_with_something_left_are_included()
+    {
+        var plan = PlanFor(Bow, 1, new Dictionary<uint, int> { [Ore] = 99 });
+        var ids = GatherTargets.Build(plan, _ => 0).Select(t => t.ItemId).ToList();
+        Assert.Contains(Log, ids);
+        Assert.DoesNotContain(Ore, ids);       // owned
+        Assert.DoesNotContain(Lumber, ids);    // crafted
+    }
+
+    [Fact]
+    public void Timed_items_come_last()
+    {
+        var o = new Order();
+        o.Add(RareLumber, 1);
+        o.Add(Lumber, 1);
+        var plan = Planner.Build(o, new FakeCatalog(), new Dictionary<uint, int>(), new PlannerOptions());
+        var targets = GatherTargets.Build(plan, _ => 0);
+        Assert.Equal(Supply.GatherTimed, targets.Last().Supply);
+    }
+
+    [Fact]
+    public void Done_once_the_plan_needs_none_of_the_targets()
+    {
+        var before = PlanFor(Lumber, 1);
+        var targets = GatherTargets.Build(before, _ => 0);
+        Assert.False(GatherTargets.AllDone(targets, before));
+        var after = PlanFor(Lumber, 1, new Dictionary<uint, int> { [Log] = 3, [WindShard] = 1 });
+        Assert.True(GatherTargets.AllDone(targets, after));
+    }
+}

@@ -34,11 +34,23 @@ Open it with `/provenance` (or `/prov`).
   *get it yourself*, with the reason. Food and medicine for crafting and for gathering are picked here
   too; every stat shows what they add in brackets, for example `5,844 (+92)`.
 
+- **Run (gathering)**: *Start* hands the order's gathering list to GatherBuddy Reborn as a list
+  named "Provenance" (your own lists are paused for the run and switched back on afterwards),
+  turns auto-gather on and stops once the plan needs nothing more to gather. *Pause* finishes the
+  current node first. The run stops on its own when you are knocked out, when only 2 inventory
+  slots are left, or when GatherBuddy Reborn or vnavmesh is unloaded; a duty pauses it until the
+  duty ends. Every stop shows a notification and a chat line.
+- **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
+  plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
+
+Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov tp <name>`,
+`/prov flag`, and `/prov plan | browse | import | character | settings` to open a tab.
+
 ## Planned
 
 | Milestone | Scope |
 |---|---|
-| M2 | Gathering through GatherBuddy Reborn, movement with vnavmesh, own teleport |
+| M2 | Gathering through GatherBuddy Reborn, movement with vnavmesh, own teleport (done) |
 | M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver |
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules |
 | M5 | Retainer withdrawal at a summoning bell, vendor buying |

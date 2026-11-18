@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+Gathering runs.
+
+- *Start* on the plan runs the gathering step: Provenance gives GatherBuddy Reborn a list named
+  "Provenance" with exactly what the order still needs (your own lists are paused and restored
+  afterwards), switches auto-gather on, and stops when everything is in your bags.
+- Pause finishes the current node first; Resume carries on; Stop ends the run.
+- Stops on its own when knocked out, at 2 free inventory slots, or when GatherBuddy Reborn or
+  vnavmesh is unloaded. A duty pauses gathering until it ends. Each stop notifies you.
+- Run page shows what the run is doing, per-item progress and a log of what happened.
+- Provenance's own teleport (`/prov tp <aetheryte>`) and vnavmesh movement to the map flag
+  (`/prov flag`).
+
 ## 0.1.0
 
 First testing build: plan an order, but don't run it yet.

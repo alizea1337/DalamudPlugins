@@ -4,6 +4,8 @@ using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Provenance.Data;
+using Provenance.Integrations;
+using Provenance.Run;
 using Provenance.UI;
 using Provenance.UI.Pages;
 using Provenance.UI.Theme;
@@ -20,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
 
     internal Configuration Config { get; }
     internal PlanService Plans { get; }
+    internal RunEngine Runs { get; }
     internal MainWindow Main { get; }
 
     private readonly WindowSystem windows = new("Provenance");
@@ -33,6 +36,7 @@ public sealed class Plugin : IDalamudPlugin
         Ui.Init(fonts);
 
         Plans = new PlanService(() => Config);
+        Runs = new RunEngine(this);
         Main = new MainWindow(this, new Page[]
         {
             new ImportPage(this),
@@ -44,7 +48,7 @@ public sealed class Plugin : IDalamudPlugin
         });
         windows.AddWindow(Main);
 
-        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings" };
+        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings | start | pause | stop | tp <aetheryte> | flag" };
         Services.Commands.AddHandler(Command, help);
         Services.Commands.AddHandler(Alias, new CommandInfo(OnCommand) { ShowInHelp = false });
         pluginInterface.UiBuilder.Draw += windows.Draw;
@@ -64,7 +68,19 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        switch (args.Trim().ToLowerInvariant())
+        var trimmed = args.Trim();
+        var space = trimmed.IndexOf(' ');
+        var verb = (space < 0 ? trimmed : trimmed[..space]).ToLowerInvariant();
+        var rest = space < 0 ? "" : trimmed[(space + 1)..].Trim();
+        switch (verb)
+        {
+            case "start": Runs.Start(); Main.IsOpen = true; Main.Select<RunPage>(); return;
+            case "pause": if (Runs.Phase == RunPhase.Paused) Runs.Resume(); else Runs.Pause(); return;
+            case "stop": Runs.Stop(); return;
+            case "tp": TeleportCommand(rest); return;
+            case "flag": FlagCommand(); return;
+        }
+        switch (trimmed.ToLowerInvariant())
         {
             case "plan": Main.IsOpen = true; Main.Select<PlanPage>(); break;
             case "browse": Main.IsOpen = true; Main.Select<BrowsePage>(); break;
@@ -75,11 +91,34 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    /// <summary>/prov tp &lt;name&gt;: teleports to an unlocked aetheryte with Provenance's own teleport.</summary>
+    private static void TeleportCommand(string name)
+    {
+        if (name.Length == 0) { Services.Chat.Print("[Provenance] Usage: /prov tp <aetheryte name>"); return; }
+        var d = Teleporter.Find(name);
+        if (d == null) { Services.Chat.PrintError($"[Provenance] No unlocked aetheryte matches \"{name}\"."); return; }
+        var why = Teleporter.Teleport(d);
+        if (why == null) Services.Chat.Print($"[Provenance] Teleporting to {d.Name} ({d.GilCost:N0} gil).");
+        else Services.Chat.PrintError($"[Provenance] Can't teleport to {d.Name}: {why}.");
+    }
+
+    /// <summary>/prov flag: walks (or flies, when airborne) to the map flag with vnavmesh.</summary>
+    private static void FlagCommand()
+    {
+        if (!Vnav.Available) { Services.Chat.PrintError("[Provenance] vnavmesh isn't loaded."); return; }
+        if (!Vnav.Ready) { Services.Chat.PrintError("[Provenance] vnavmesh is still building the map for this zone."); return; }
+        if (Vnav.FlagPoint is not { } point) { Services.Chat.PrintError("[Provenance] Place a map flag first."); return; }
+        var fly = Services.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.InFlight];
+        if (Vnav.MoveTo(point, fly)) Services.Chat.Print($"[Provenance] Moving to the flag{(fly ? " by air" : "")}.");
+        else Services.Chat.PrintError("[Provenance] vnavmesh is already busy with another path.");
+    }
+
     private void OnUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
         try
         {
             Plans.Tick();
+            Runs.Tick();
         }
         catch (Exception e)
         {
@@ -104,6 +143,7 @@ public sealed class Plugin : IDalamudPlugin
         Services.Commands.RemoveHandler(Alias);
         Config.Save();
         windows.RemoveAllWindows();
+        Runs.Dispose();
         Plans.Dispose();
         fonts.Dispose();
     }
