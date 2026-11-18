@@ -50,6 +50,10 @@
   or food (a rotation planned on the previous job's numbers fell short). If one still falls short,
   the next craft gets a fresh rotation.
 - Compact view: the progress text no longer runs into the bar.
+- Aethernet inside cities: when an attuned shard is much closer to where the run is going than
+  walking, it walks to the nearest crystal, takes the aethernet and walks the rest. Aetheryte and
+  shard positions now come from the zone map's markers (the game data has no other position for
+  them), which also picks the right aetheryte to teleport to in a zone with several.
 
 ## 0.5.0
 

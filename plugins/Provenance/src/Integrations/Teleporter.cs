@@ -74,6 +74,37 @@ internal static unsafe class Teleporter
         return null;
     }
 
+    /// <summary>
+    /// Within a city: the attuned aethernet crystal nearest to the player and the one nearest to the
+    /// target, when walking to the first and from the second saves a good part of the walk (a hop
+    /// costs about half a minute of talking and loading). Null when walking is as quick.
+    /// </summary>
+    public static (uint From, uint To)? AethernetHop(uint territoryId, Vector3 me, Vector2 target)
+    {
+        var ui = UIState.Instance();
+        if (ui == null) return null;
+        var here = new Vector2(me.X, me.Z);
+        var nodes = Services.Data.GetExcelSheet<Aetheryte>()
+            .Where(a => a.Territory.RowId == territoryId && a.AethernetGroup != 0 && (a.IsAetheryte || a.AethernetName.RowId != 0))
+            .Where(a => ui->IsAetheryteUnlocked(a.RowId))
+            .Select(a => (a.RowId, a.AethernetGroup, At: Position(a.RowId)))
+            .Where(n => n.At != null)
+            .Select(n => (n.RowId, n.AethernetGroup, At: new Vector2(n.At!.Value.X, n.At.Value.Z)))
+            .ToList();
+        var walk = Vector2.Distance(here, target);
+        (uint, uint)? best = null;
+        var bestCost = walk * 0.7f;
+        foreach (var group in nodes.GroupBy(n => n.AethernetGroup))
+        {
+            var entry = group.OrderBy(n => Vector2.Distance(here, n.At)).First();
+            var exit = group.OrderBy(n => Vector2.Distance(n.At, target)).First();
+            if (entry.RowId == exit.RowId) continue;
+            var cost = Vector2.Distance(here, entry.At) + Vector2.Distance(exit.At, target) + 60f;
+            if (cost < bestCost) { best = (entry.RowId, exit.RowId); bestCost = cost; }
+        }
+        return best;
+    }
+
     /// <summary>Whether the run can get to an area: already there, an aetheryte in it, or an aethernet shard.</summary>
     public static bool CanReach(uint territoryId)
         => Services.ClientState.TerritoryType == territoryId
@@ -96,12 +127,40 @@ internal static unsafe class Teleporter
         return false;
     }
 
-    /// <summary>World position of an aetheryte crystal, when the game data has one.</summary>
+    private static readonly Dictionary<uint, Vector3?> positions = new();
+
+    /// <summary>
+    /// World position of an aetheryte crystal or aethernet shard: from its Level row when it has one,
+    /// otherwise from the zone map's marker for it (height unknown, 0). Cached.
+    /// </summary>
     public static Vector3? Position(uint aetheryteId)
     {
+        if (positions.TryGetValue(aetheryteId, out var known)) return known;
         var row = Services.Data.GetExcelSheet<Aetheryte>().GetRowOrDefault(aetheryteId);
-        if (row is not { } a || a.Level.Count == 0 || a.Level[0].ValueNullable is not { } level) return null;
-        return new Vector3(level.X, level.Y, level.Z);
+        Vector3? result = null;
+        if (row is { } a)
+        {
+            if (a.Level.Count > 0 && a.Level[0].ValueNullable is { } level) result = new Vector3(level.X, level.Y, level.Z);
+            else result = FromMapMarker(a);
+        }
+        positions[aetheryteId] = result;
+        return result;
+    }
+
+    /// <summary>Map markers: type 3 is an aetheryte (keyed by its id), type 4 an aethernet shard (keyed by its name).</summary>
+    private static Vector3? FromMapMarker(Aetheryte a)
+    {
+        if (a.Territory.ValueNullable?.Map.ValueNullable is not { } map) return null;
+        var markers = Services.Data.GetSubrowExcelSheet<MapMarker>();
+        if (!markers.HasRow(map.MapMarkerRange)) return null;
+        foreach (var m in markers.GetRow(map.MapMarkerRange))
+        {
+            var match = (m.DataType == 3 && m.DataKey.RowId == a.RowId) || (m.DataType == 4 && a.AethernetName.RowId != 0 && m.DataKey.RowId == a.AethernetName.RowId);
+            if (!match) continue;
+            var c = map.SizeFactor / 100f;
+            return new Vector3((m.X - 1024f) / c - map.OffsetX, 0, (m.Y - 1024f) / c - map.OffsetY);
+        }
+        return null;
     }
 
     /// <summary>Why a teleport can't start right now, or null when it can.</summary>

@@ -7,7 +7,8 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 namespace Provenance.Integrations;
 
 /// <summary>
-/// Gets the character to a spot: teleport to the zone when needed, wait for vnavmesh's map, walk.
+/// Gets the character to a spot: teleport to the zone when needed, wait for vnavmesh's map, take the
+/// city's aethernet when a shard is much closer to the target than walking, then walk.
 /// Watches for getting stuck: no progress for a few seconds means retry, then teleport to the zone's
 /// nearest aetheryte and retry, then give up with a clear message. Ticked on the framework thread.
 /// </summary>
@@ -36,7 +37,13 @@ internal sealed unsafe class Travel
     private readonly Queue<(DateTime At, Vector3 Pos)> trail = new();
     /// <summary>Areas without an aetheryte: teleport to the city's crystal, then take the aethernet.</summary>
     private Travel? crystalTrip;
-    private (Teleporter.Destination Main, uint Shard)? route;
+    /// <summary>Aethernet hop under way: the crystal to use and the shard to go to.</summary>
+    private uint hopFrom;
+    private uint hopTo;
+    /// <summary>Already hopped (or the area is only reached through the aethernet): walk the rest.</summary>
+    private bool hopped;
+    /// <summary>The area has no aetheryte of its own; a teleport can't restart the trip.</summary>
+    private bool aethernetOnly;
     private int tries;
     private DateTime mountUntil;
     private bool flying;
@@ -60,16 +67,28 @@ internal sealed unsafe class Travel
         mountUntil = default;
         trail.Clear();
         walkDeadline = DateTime.UtcNow.AddMinutes(5);
-        route = null;
+        hopFrom = hopTo = 0;
+        hopped = false;
+        aethernetOnly = false;
         crystalTrip = null;
         if (Services.ClientState.TerritoryType == territory) { Enter(State.WaitingForMap); return; }
         if (Teleporter.NearestTo(territory, null) != null) { Enter(State.Teleporting); return; }
-        route = Teleporter.AethernetRoute(territory);
-        if (route is not { } r) { Fail($"No unlocked aetheryte or aethernet shard leads to {Place(territory)}."); return; }
-        var crystal = Teleporter.Position(r.Main.AetheryteId) ?? Vector3.Zero;
-        crystalTrip = new Travel();
-        crystalTrip.GoTo("the aetheryte", r.Main.TerritoryId, new Vector2(crystal.X, crystal.Z), 7f,
-            () => Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == r.Main.AetheryteId)?.Position);
+        if (Teleporter.AethernetRoute(territory) is not { } r) { Fail($"No unlocked aetheryte or aethernet shard leads to {Place(territory)}."); return; }
+        aethernetOnly = true;
+        hopped = true;
+        StartHop(r.Main.TerritoryId, r.Main.AetheryteId, r.Shard);
+    }
+
+    /// <summary>Walk (or teleport) to a crystal, then take the aethernet to a shard.</summary>
+    private void StartHop(uint crystalTerritory, uint from, uint to)
+    {
+        hopFrom = from;
+        hopTo = to;
+        var crystal = Teleporter.Position(from) ?? Vector3.Zero;
+        crystalTrip = new Travel { hopped = true };
+        crystalTrip.GoTo("the aethernet", crystalTerritory, new Vector2(crystal.X, crystal.Z), 6f,
+            () => Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == from)?.Position);
+        crystalTrip.hopped = true; // the walk to the crystal itself never hops
         Enter(State.ToCrystal, 120);
     }
 
@@ -119,7 +138,7 @@ internal sealed unsafe class Travel
                 if (DateTime.UtcNow < nextTry) return;
                 if (Interact.Ready("TelepotTown") != null)
                 {
-                    if (Teleporter.TakeAethernet(route!.Value.Shard)) { sawLoading = false; Enter(State.Arriving, 40); }
+                    if (Teleporter.TakeAethernet(hopTo)) { sawLoading = false; Enter(State.Arriving, 40); }
                     else nextTry = DateTime.UtcNow.AddSeconds(0.5);
                     return;
                 }
@@ -130,7 +149,7 @@ internal sealed unsafe class Travel
                     return;
                 }
                 if (DateTime.UtcNow > deadline || ++tries > 6) { Fail("The aethernet didn't open."); return; }
-                if (Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == route!.Value.Main.AetheryteId) is { } crystalObj)
+                if (Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == hopFrom) is { } crystalObj)
                     Interact.With(crystalObj);
                 nextTry = DateTime.UtcNow.AddSeconds(1.5);
                 return;
@@ -141,7 +160,7 @@ internal sealed unsafe class Travel
                 if (!sawLoading && !Services.Condition[ConditionFlag.Casting] && DateTime.UtcNow > deadline - TimeSpan.FromSeconds(30))
                 {
                     // Nothing happened (cast interrupted, window closed); try again.
-                    if (route != null) { tries = 0; Enter(State.Aethernet, 20); }
+                    if (hopTo != 0) { tries = 0; Enter(State.Aethernet, 20); }
                     else Enter(State.Teleporting, 20);
                     return;
                 }
@@ -150,7 +169,18 @@ internal sealed unsafe class Travel
 
             case State.WaitingForMap:
                 Status = "Waiting for vnavmesh's map of this area";
-                if (Vnav.Ready) { Enter(State.Walking); return; }
+                if (Vnav.Ready)
+                {
+                    // A shard much closer to the target than walking: take the aethernet first.
+                    if (!hopped && player != null && Teleporter.AethernetHop(territory, player.Position, approx) is { } hop)
+                    {
+                        hopped = true;
+                        StartHop(territory, hop.From, hop.To);
+                        return;
+                    }
+                    Enter(State.Walking);
+                    return;
+                }
                 if (DateTime.UtcNow > deadline) Fail("vnavmesh didn't finish its map of this area.");
                 return;
 
@@ -212,7 +242,7 @@ internal sealed unsafe class Travel
         Vnav.Stop();
         walkingTo = null;
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
-        if (stuckCount == 2 && route == null && Teleporter.NearestTo(territory, null) != null)
+        if (stuckCount == 2 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
             // Second time: start over from the zone's aetheryte.
             Enter(State.Teleporting, 20);
