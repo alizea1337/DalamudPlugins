@@ -24,6 +24,7 @@ public sealed class Plugin : IDalamudPlugin
     internal PlanService Plans { get; }
     internal Raphael Raphael { get; } = new();
     internal RunEngine Runs { get; }
+    private readonly Run.Guard guard;
     internal MainWindow Main { get; }
 
     private readonly WindowSystem windows = new("Provenance");
@@ -39,6 +40,7 @@ public sealed class Plugin : IDalamudPlugin
 
         Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);
+        guard = new Run.Guard(this);
         Main = new MainWindow(this, new Page[]
         {
             new ImportPage(this),
@@ -47,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
             new RunPage(this),
             new CharacterPage(this),
             new SettingsPage(this),
+            new SecurityPage(this),
         });
         windows.AddWindow(Main);
 
@@ -132,6 +135,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             Plans.Tick();
             Runs.Tick();
+            guard.Tick();
         }
         catch (Exception e)
         {

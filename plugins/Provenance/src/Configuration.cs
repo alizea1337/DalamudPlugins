@@ -23,6 +23,7 @@ public sealed class Configuration : IPluginConfiguration
     public RunSettings Run { get; set; } = new();
     public CombatSettings Combat { get; set; } = new();
     public AfterOrderSettings AfterOrder { get; set; } = new();
+    public SecuritySettings Security { get; set; } = new();
     /// <summary>Timing figures for estimates, adjusted by every run.</summary>
     public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
@@ -49,6 +50,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Run ??= new();
         c.Combat ??= new();
         c.AfterOrder ??= new();
+        c.Security ??= new();
         c.Retainers ??= new();
         c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
@@ -111,6 +113,28 @@ public sealed class RunSettings
     public bool EarnScrips { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
+}
+
+/// <summary>The Security tab: getting unstuck, trades, and limits for a run.</summary>
+[Serializable]
+public sealed class SecuritySettings
+{
+    /// <summary>Jump, back off and side-step before teleporting when a walk gets stuck.</summary>
+    public bool AdvancedUnstuck { get; set; } = true;
+    /// <summary>Seconds without real progress that count as stuck.</summary>
+    public int StuckSeconds { get; set; } = 6;
+    /// <summary>Cancel trade windows other players open.</summary>
+    public bool DeclineTrades { get; set; } = true;
+    /// <summary>Only while a run is going (otherwise always).</summary>
+    public bool TradesOnlyDuringRuns { get; set; } = true;
+    /// <summary>Most gil a run may spend at vendors. 0: no limit (besides the price cap per item).</summary>
+    public int MaxGilPerRun { get; set; }
+    /// <summary>Stop a run after this many minutes (after the craft under way). 0: no limit.</summary>
+    public int MaxRunMinutes { get; set; }
+    /// <summary>Knock-outs a run gets back up from before it stops.</summary>
+    public int MaxKnockOuts { get; set; } = 3;
+    /// <summary>A run stops when only this many inventory slots are free.</summary>
+    public int MinFreeSlots { get; set; } = 2;
 }
 
 public enum AfterOrderPlace { Stay, WhereStarted, Inn, Home }

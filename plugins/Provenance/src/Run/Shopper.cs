@@ -183,12 +183,19 @@ internal sealed unsafe class Shopper
 
         var left = next.Amount - Bought(next.ItemId);
         var amount = Math.Min(99, left);
-        var gil = GameState.BagCount(1);
+        long gil = GameState.BagCount(1);
+        if (plugin.Runs.GilLeft is { } budget) gil = Math.Min(gil, budget);
         var cost = (long)items[index].CostAmount * amount;
         if (cost > gil)
         {
             amount = (int)Math.Min(amount, gil / Math.Max(1, items[index].CostAmount));
-            if (amount <= 0) { Fail($"Not enough gil for {plugin.Plans.Catalog!.ItemName(next.ItemId)}."); return; }
+            if (amount <= 0)
+            {
+                Fail(plugin.Runs.GilLeft is { } budgetLeft && budgetLeft < GameState.BagCount(1)
+                    ? $"The run reached its gil limit (Security tab) before buying {plugin.Plans.Catalog!.ItemName(next.ItemId)}."
+                    : $"Not enough gil for {plugin.Plans.Catalog!.ItemName(next.ItemId)}.");
+                return;
+            }
         }
         Status = $"Buying {amount}× {plugin.Plans.Catalog!.ItemName(next.ItemId)}";
         var before = GameState.BagCount(next.ItemId);

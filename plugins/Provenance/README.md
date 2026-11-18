@@ -54,6 +54,8 @@ Open it with `/provenance` (or `/prov`).
   come from Teamcraft's crowd-sourced data, so not every drop is covered.
 - **After the order**: stay, go back to where the run started, take an inn room in a city you pick,
   or teleport to your house or apartment (Settings).
+- **Security**: advanced unstuck, refusing trade requests, and limits for a run (gil, time,
+  knock-outs, free inventory slots).
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 

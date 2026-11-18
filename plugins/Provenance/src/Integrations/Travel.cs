@@ -18,7 +18,10 @@ internal sealed unsafe class Travel
 
     private static readonly string[] AethernetEntry = { "Aethernet", "Ätheryten", "éthernet", "エーテライト" };
 
-    private static readonly TimeSpan StuckAfter = TimeSpan.FromSeconds(6);
+    /// <summary>From the Security tab: escalating unstuck steps, and how long without progress counts as stuck.</summary>
+    public static bool AdvancedUnstuck { get; set; } = true;
+    public static TimeSpan StuckAfter { get; set; } = TimeSpan.FromSeconds(6);
+    private const uint Jump = 2;
     /// <summary>Further than this, mount up first (where the zone allows mounts).</summary>
     private const float RideFrom = 40f;
     private const uint MountRoulette = 9;
@@ -47,6 +50,9 @@ internal sealed unsafe class Travel
     private int tries;
     private DateTime mountUntil;
     private bool flying;
+    /// <summary>An unstuck move (backing off, side-stepping) is playing out until then.</summary>
+    private DateTime unstuckUntil;
+    private static readonly Random Rng = new();
 
     public State Current { get; private set; } = State.Idle;
     public string Status { get; private set; } = "";
@@ -205,6 +211,16 @@ internal sealed unsafe class Travel
         }
         if (DateTime.UtcNow > walkDeadline) { Vnav.Stop(); Fail($"Took too long to reach {what}."); return; }
 
+        // Backing off or side-stepping to get unstuck: let it play out, then path again.
+        if (unstuckUntil != default)
+        {
+            if (DateTime.UtcNow < unstuckUntil && Vnav.Busy) return;
+            unstuckUntil = default;
+            Vnav.Stop();
+            walkingTo = null;
+            trail.Clear();
+        }
+
         // A long way in an open zone: mount up first.
         if (mountUntil != default)
         {
@@ -242,6 +258,7 @@ internal sealed unsafe class Travel
         Vnav.Stop();
         walkingTo = null;
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
+        if (AdvancedUnstuck && Unstuck(me, target)) return;
         if (stuckCount == 2 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
             // Second time: start over from the zone's aetheryte.
@@ -249,6 +266,55 @@ internal sealed unsafe class Travel
             return;
         }
         if (stuckCount >= 3) Fail($"Got stuck on the way to {what}. vnavmesh can't find a way there from here; move a bit and start again.");
+    }
+
+    /// <summary>
+    /// Escalating steps before the teleport: 1 path again, 2 jump and back off a few yalms, 3 side-step
+    /// to a random walkable spot nearby. Later steps fall through to the teleport and then giving up.
+    /// </summary>
+    private bool Unstuck(Vector3 me, Vector3 target)
+    {
+        switch (stuckCount)
+        {
+            case 1:
+                Status = "Stuck; finding another way";
+                return true; // the next tick paths again
+            case 2:
+            {
+                Status = "Stuck; jumping and backing off";
+                var am = ActionManager.Instance();
+                if (am != null && !Services.Condition[ConditionFlag.Mounted]) am->UseAction(ActionType.GeneralAction, Jump);
+                var away = Vector3.Normalize(new Vector3(me.X - target.X, 0, me.Z - target.Z));
+                if (float.IsNaN(away.X)) away = Vector3.UnitX;
+                var back = Vnav.NearestPoint(me + away * 6f, 4, 10) ?? me + away * 6f;
+                Vnav.MoveTo(back, flying);
+                unstuckUntil = DateTime.UtcNow.AddSeconds(3);
+                stuckCount = 2;
+                return true;
+            }
+            case 3:
+            {
+                Status = "Stuck; side-stepping";
+                var angle = Rng.NextDouble() * Math.PI * 2;
+                var side = me + new Vector3((float)Math.Cos(angle), 0, (float)Math.Sin(angle)) * 12f;
+                if (Vnav.NearestPoint(side, 6, 10) is { } spot) Vnav.MoveTo(spot, flying);
+                unstuckUntil = DateTime.UtcNow.AddSeconds(4);
+                return true;
+            }
+            default:
+                // 4: teleport to the zone's aetheryte (when there is one), 5 and later: give up.
+                if (stuckCount == 4 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
+                {
+                    Enter(State.Teleporting, 20);
+                    return true;
+                }
+                if (stuckCount >= 4)
+                {
+                    Fail($"Got stuck on the way to {what}, even after jumping, backing off, side-stepping and teleporting. Move a bit and start again.");
+                    return true;
+                }
+                return false;
+        }
     }
 
     /// <summary>The walkable point near the known X/Z (height from the mesh, near where the player is).</summary>

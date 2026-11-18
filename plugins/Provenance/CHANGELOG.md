@@ -58,6 +58,10 @@
   started (into the same inn if it started in an inn room), take a room at an inn you pick (the
   innkeepers of the eight cities with inn rooms), or teleport to a house or apartment from your
   teleport list. A stopped run stays where it is.
+- Security tab: advanced unstuck for Provenance's own walking (path again, jump and back off,
+  side-step, teleport, give up) with an adjustable stuck time; refuse trade requests (during runs or
+  always); limits for a run: gil spent at vendors, run time, knock-outs to get back up from, free
+  inventory slots to stop at.
 
 ## 0.5.0
 

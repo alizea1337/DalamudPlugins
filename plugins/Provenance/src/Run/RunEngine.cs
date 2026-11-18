@@ -46,8 +46,17 @@ internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 /// </summary>
 internal sealed class RunEngine : IDisposable
 {
-    private const int MinFreeSlots = 2;
-    private const int MaxKnockOuts = 3;
+    private int MinFreeSlots => plugin.Config.Security.MinFreeSlots;
+    private int MaxKnockOuts => plugin.Config.Security.MaxKnockOuts;
+    /// <summary>Gil in the bags when the run started, for the Security tab's spending limit.</summary>
+    private long startGil;
+
+    /// <summary>Gil a vendor stop may still spend under the Security tab's limit; null when there's no limit.</summary>
+    public long? GilLeft => plugin.Config.Security.MaxGilPerRun <= 0 ? null
+        : Math.Max(0, plugin.Config.Security.MaxGilPerRun - (startGil - Integrations.GameState.BagCount(1)));
+
+    /// <summary>A line in the run log from outside the run (the security checks).</summary>
+    public void Note(string text) => Add(text, true);
     private static readonly TimeSpan CheckEvery = TimeSpan.FromMilliseconds(500);
 
     private readonly Plugin plugin;
@@ -220,6 +229,9 @@ internal sealed class RunEngine : IDisposable
         extrasCrafted = false;
         pendingEnd = null;
         startedAt = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
+        startGil = Integrations.GameState.BagCount(1);
+        Integrations.Travel.AdvancedUnstuck = plugin.Config.Security.AdvancedUnstuck;
+        Integrations.Travel.StuckAfter = TimeSpan.FromSeconds(Math.Clamp(plugin.Config.Security.StuckSeconds, 3, 30));
         scripPhase = plugin.Plans.ScripTasks.Count > 0;
         if (scripPhase)
             Add("Earning scrips for books first: " + string.Join(", ", plugin.Plans.ScripTasks.Select(t =>
@@ -719,6 +731,12 @@ internal sealed class RunEngine : IDisposable
         if (HandleKnockOut(player.IsDead)) return;
         if (Stock.FreeSlots() <= MinFreeSlots && Phase != RunPhase.Stopping) { Stop($"Only {MinFreeSlots} inventory slots left.", true); return; }
         if (HandleDuty()) return;
+        var maxMinutes = plugin.Config.Security.MaxRunMinutes;
+        if (maxMinutes > 0 && StartedAt is { } began && DateTime.Now - began > TimeSpan.FromMinutes(maxMinutes) && Phase == RunPhase.Running)
+        {
+            Stop($"The run reached its time limit of {maxMinutes} minutes (Security tab).", true);
+            return;
+        }
 
         switch (Stage)
         {
