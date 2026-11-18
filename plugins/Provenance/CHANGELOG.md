@@ -16,3 +16,5 @@ First testing build: plan an order, but don't run it yet.
   its stats, specialist and Manipulation, master books and folklore tomes. Recipes above your
   level or behind an unlearned master book, and legendary nodes behind an unread tome, show up
   in the plan as items to get yourself, with the reason.
+- Food and medicine for crafting and for gathering, picked on the Character page (with HQ and
+  how many you own). Each job's stats show what they add in brackets.

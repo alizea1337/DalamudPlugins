@@ -18,6 +18,7 @@ public sealed class Configuration : IPluginConfiguration
     public ImportSettings Import { get; set; } = new();
     public BrowseSettings Browse { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
+    public ConsumableSettings Consumables { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
     public Dictionary<ulong, CharacterProfile> Characters { get; set; } = new();
 
@@ -35,6 +36,11 @@ public sealed class Configuration : IPluginConfiguration
         c.Browse ??= new();
         c.Window ??= new();
         c.Characters ??= new();
+        c.Consumables ??= new();
+        c.Consumables.CraftFood ??= new();
+        c.Consumables.CraftMedicine ??= new();
+        c.Consumables.GatherFood ??= new();
+        c.Consumables.GatherMedicine ??= new();
         return c;
     }
 }
@@ -74,6 +80,19 @@ public sealed class BrowseSettings
     public int JobMask { get; set; } = 0;
     public int MinLevel { get; set; } = 1;
     public int MaxLevel { get; set; } = 100;
+}
+
+/// <summary>Food and medicine to use while crafting and while gathering. None picked: no consumables.</summary>
+[Serializable]
+public sealed class ConsumableSettings
+{
+    public ConsumableChoice CraftFood { get; set; } = new();
+    public ConsumableChoice CraftMedicine { get; set; } = new();
+    public ConsumableChoice GatherFood { get; set; } = new();
+    public ConsumableChoice GatherMedicine { get; set; } = new();
+
+    public (ConsumableChoice Food, ConsumableChoice Medicine) For(Discipline d)
+        => d == Discipline.Hand ? (CraftFood, CraftMedicine) : (GatherFood, GatherMedicine);
 }
 
 [Serializable]

@@ -94,8 +94,10 @@ internal sealed class CharacterPage : Page
         ImGui.Dummy(new Vector2(0, 4 * s));
 
         SectionTitle("Crafters");
+        ConsumableRow(Discipline.Hand);
         Grid(ClassJobs.Crafters, 4, p);
         SectionTitle("Gatherers");
+        ConsumableRow(Discipline.Land);
         Grid(ClassJobs.Gatherers, 3, p);
 
         if (catalog == null) return;
@@ -122,7 +124,7 @@ internal sealed class CharacterPage : Page
         using (Ui.F.Strong.Push()) Ui.Text(text);
     }
 
-    private static void Grid(uint[] jobs, int columns, CharacterProfile p)
+    private void Grid(uint[] jobs, int columns, CharacterProfile p)
     {
         var s = Ui.S;
         var gap = 12 * s;
@@ -133,14 +135,15 @@ internal sealed class CharacterPage : Page
         for (var i = 0; i < jobs.Length; i++)
         {
             var pos = origin + new Vector2((i % columns) * (w + gap), (i / columns) * (h + gap));
-            Tile(jobs[i], p.Job(jobs[i]), pos, w, h);
+            var js = p.Job(jobs[i]);
+            Tile(jobs[i], js, pos, w, h, js == null ? null : ConsumableBonus(ClassJobs.Of(jobs[i]), js.Stats));
         }
         var rows = (jobs.Length + columns - 1) / columns;
         ImGui.SetCursorScreenPos(origin);
         ImGui.Dummy(new Vector2(avail, rows * h + (rows - 1) * gap + 10 * s));
     }
 
-    private static void Tile(uint job, JobStats? js, Vector2 pos, float w, float h)
+    private static void Tile(uint job, JobStats? js, Vector2 pos, float w, float h, int[]? bonus)
     {
         var s = Ui.S;
         var dl = ImGui.GetWindowDrawList();
@@ -186,10 +189,15 @@ internal sealed class CharacterPage : Page
             var name = ClassJobs.StatName(d, i);
             var value = js.Stats.Length > i ? js.Stats[i].ToString("N0") : "–";
             dl.AddText(new Vector2(x, y), Palette.U32(Palette.TextMuted), name);
+            // What the chosen food and medicine add, in brackets after the value.
+            var extra = bonus != null && bonus[i] > 0 ? $" (+{bonus[i]:N0})" : "";
+            var ew = extra.Length > 0 ? ImGui.CalcTextSize(extra).X : 0;
+            if (extra.Length > 0)
+                dl.AddText(new Vector2(pos.X + w - pad - ew, y), Palette.U32(Palette.Accent), extra);
             using (Ui.F.Strong.Push())
             {
                 var vw = ImGui.CalcTextSize(value).X;
-                dl.AddText(new Vector2(pos.X + w - pad - vw, y), Palette.U32(Palette.Text), value);
+                dl.AddText(new Vector2(pos.X + w - pad - ew - vw, y), Palette.U32(Palette.Text), value);
             }
             y += 20 * s;
         }
@@ -255,6 +263,165 @@ internal sealed class CharacterPage : Page
             Ui.Wrapped(string.Join(", ", missing), Palette.TextMuted, width - 80 * s);
             ImGui.Dummy(new Vector2(0, 2 * s));
         }
+    }
+
+    // ------------------------------------------------------------------ food and medicine
+
+    private int[]? ConsumableBonus(Discipline d, int[] stats)
+    {
+        var catalog = Plans.Catalog;
+        if (catalog == null || stats.Length < 3) return null;
+        var (food, medicine) = Config.Consumables.For(d);
+        var total = new int[3];
+        foreach (var choice in new[] { food, medicine })
+        {
+            if (catalog.Consumable(choice.ItemId) is not { } c) continue;
+            var b = c.Bonus(stats, choice.Hq);
+            for (var i = 0; i < 3; i++) total[i] += b[i];
+        }
+        return total.Any(v => v > 0) ? total : null;
+    }
+
+    private void ConsumableRow(Discipline d)
+    {
+        var s = Ui.S;
+        var (food, medicine) = Config.Consumables.For(d);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 2 * s);
+        Picker("##food" + d, "Food", ConsumableKind.Food, d, food);
+        ImGui.SameLine(0, 16 * s);
+        Picker("##med" + d, "Medicine", ConsumableKind.Medicine, d, medicine);
+        ImGui.Dummy(new Vector2(0, 2 * s));
+    }
+
+    private string pickerFilter = "";
+
+    /// <summary>A pill showing the current choice; clicking opens a searchable list of matching consumables.</summary>
+    private void Picker(string id, string label, ConsumableKind kind, Discipline d, ConsumableChoice choice)
+    {
+        var s = Ui.S;
+        var catalog = Plans.Catalog;
+        if (catalog == null) return;
+        var current = catalog.Consumable(choice.ItemId);
+
+        var start = ImGui.GetCursorScreenPos();
+        var h = 34 * s;
+        var text = current?.Name ?? "None";
+        float tw;
+        using (Ui.F.Strong.Push()) tw = ImGui.CalcTextSize(text).X;
+        float lw = ImGui.CalcTextSize(label).X;
+        var w = 14 * s + lw + 10 * s + (current != null ? 24 * s : 0) + tw + 30 * s;
+        if (ImGui.InvisibleButton(id, new Vector2(w, h)))
+        {
+            pickerFilter = "";
+            ImGui.OpenPopup(id + "popup");
+        }
+        var hovered = ImGui.IsItemHovered();
+        Ui.Tooltip(current == null
+            ? $"No {label.ToLowerInvariant()} is used. Pick one to see what it adds to each job's stats."
+            : Describe(current, choice.Hq, d));
+        var dl = ImGui.GetWindowDrawList();
+        dl.AddRectFilled(start, start + new Vector2(w, h), Palette.U32(hovered ? Palette.RaisedHover : Palette.Raised), h / 2);
+        var x = start.X + 14 * s;
+        var ty = start.Y + (h - ImGui.GetTextLineHeight()) / 2;
+        dl.AddText(new Vector2(x, ty), Palette.U32(Palette.TextMuted), label);
+        x += lw + 10 * s;
+        if (current != null)
+        {
+            Ui.DrawItemIcon(dl, current.Icon, new Vector2(x, start.Y + (h - 20 * s) / 2), 20 * s, choice.Hq);
+            x += 24 * s;
+        }
+        using (Ui.F.Strong.Push())
+            dl.AddText(new Vector2(x, ty), Palette.U32(current != null ? Palette.Text : Palette.TextFaint), text);
+        using (Ui.F.IconSmall.Push())
+        {
+            var chevron = FontAwesomeIcon.ChevronDown.ToIconString();
+            var cs = ImGui.CalcTextSize(chevron);
+            dl.AddText(new Vector2(start.X + w - 14 * s - cs.X, start.Y + (h - cs.Y) / 2), Palette.U32(Palette.TextMuted), chevron);
+        }
+
+        if (current is { CanBeHq: true })
+        {
+            ImGui.SameLine(0, 8 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2 * s);
+            if (Ui.ToggleChip(id + "hq", "HQ", Palette.Accent, choice.Hq)) { choice.Hq = !choice.Hq; Config.Save(); }
+            Ui.Tooltip("Use the high-quality version, which adds more.");
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(460 * s, 0));
+        if (!ImGui.BeginPopup(id + "popup")) return;
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+        ImGui.InputTextWithHint("##filter", "Search " + label.ToLowerInvariant(), ref pickerFilter, 64);
+        var options = catalog.Consumables
+            .Where(c => c.Kind == kind && c.Discipline == d
+                        && (pickerFilter.Length == 0 || c.Name.Contains(pickerFilter, StringComparison.CurrentCultureIgnoreCase)))
+            .ToList();
+
+        if (ImGui.BeginChild("##options", new Vector2(0, MathF.Min(360 * s, (options.Count + 1) * 42 * s)), false))
+        {
+            if (Option("None", null, 0, choice.ItemId == 0, "No " + label.ToLowerInvariant()))
+            {
+                choice.ItemId = 0;
+                Config.Save();
+                ImGui.CloseCurrentPopup();
+            }
+            foreach (var c in options)
+            {
+                var owned = Plans.Owned.GetValueOrDefault(c.ItemId);
+                if (Option(c.Name, c, owned, c.ItemId == choice.ItemId, Describe(c, choice.Hq, d)))
+                {
+                    choice.ItemId = c.ItemId;
+                    Config.Save();
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+        }
+        ImGui.EndChild();
+        ImGui.EndPopup();
+    }
+
+    private static bool Option(string name, ConsumableInfo? c, int owned, bool selected, string detail)
+    {
+        var s = Ui.S;
+        var width = ImGui.GetContentRegionAvail().X;
+        var h = 40 * s;
+        var start = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton("##opt" + (c?.ItemId ?? 0), new Vector2(width, h));
+        var hovered = ImGui.IsItemHovered();
+        var dl = ImGui.GetWindowDrawList();
+        if (hovered || selected)
+            dl.AddRectFilled(start, start + new Vector2(width, h), Palette.U32(selected ? Palette.WithAlpha(Palette.Accent, 0.14f) : Palette.Raised), Ui.InputRadius * s);
+        var x = start.X + 8 * s;
+        if (c != null)
+        {
+            Ui.DrawItemIcon(dl, c.Icon, new Vector2(x, start.Y + (h - 26 * s) / 2), 26 * s);
+            x += 34 * s;
+        }
+        dl.AddText(new Vector2(x, start.Y + 4 * s), Palette.U32(Palette.Text), name);
+        using (Ui.F.Small.Push())
+        {
+            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted), detail);
+            if (owned > 0)
+            {
+                var label = $"{owned} in your bags";
+                var lw = ImGui.CalcTextSize(label).X;
+                dl.AddText(new Vector2(start.X + width - lw - 8 * s, start.Y + 4 * s), Palette.U32(Palette.Accent), label);
+            }
+        }
+        return clicked;
+    }
+
+    private static string Describe(ConsumableInfo c, bool hq, Discipline d)
+    {
+        var useHq = hq && c.CanBeHq;
+        var parts = c.Params.Select(p =>
+        {
+            var value = useHq ? p.ValueHq : p.Value;
+            var max = useHq ? p.MaxHq : p.Max;
+            var stat = ClassJobs.StatName(d, p.StatIndex);
+            return p.Relative ? $"{stat} +{value}% (max {max})" : $"{stat} +{value}";
+        });
+        return string.Join(", ", parts) + (useHq ? ", HQ" : "");
     }
 
     private static string Ago(DateTime utc)

@@ -15,7 +15,7 @@ internal static class GearStats
     /// <summary>BaseParam ids for [primary, secondary, points].</summary>
     public static uint[] Params(Discipline d) => d == Discipline.Hand ? new uint[] { 70, 71, 11 } : new uint[] { 72, 73, 10 };
 
-    public readonly record struct Piece(uint ItemId, bool Hq, ushort[] Materia, byte[] Grades);
+    public sealed record Piece(uint ItemId, bool Hq, ushort[] Materia, byte[] Grades);
 
     public static int[] Sum(Discipline discipline, ReadOnlySpan<Piece> pieces)
     {

@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using Lumina.Excel.Sheets;
 using Provenance.Core.Catalog;
+using Provenance.Core.Character;
 
 namespace Provenance.Data;
 
@@ -36,6 +37,8 @@ internal sealed class GameCatalog : IGameCatalog
     public IReadOnlyList<BrowseEntry> Browse { get; private set; } = Array.Empty<BrowseEntry>();
     public IReadOnlyList<MasterBook> MasterBooks { get; private set; } = Array.Empty<MasterBook>();
     public IReadOnlyList<FolkloreTome> FolkloreTomes { get; private set; } = Array.Empty<FolkloreTome>();
+    /// <summary>Foods and medicines that raise crafting or gathering stats, highest item level first.</summary>
+    public IReadOnlyList<ConsumableInfo> Consumables { get; private set; } = Array.Empty<ConsumableInfo>();
 
     /// <summary>Folklore tome needed per item for timed nodes / fishing holes; 0 = at least one needs none.</summary>
     private readonly Dictionary<uint, uint> tomeByItem = new();
@@ -52,6 +55,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexDrops();
         c.IndexNames();
         c.IndexBooks();
+        c.IndexConsumables();
         c.ApplyTomes();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items in {Ms} ms", c.recipesById.Count, c.sources.Count, sw.ElapsedMilliseconds);
         return c;
@@ -260,6 +264,48 @@ internal sealed class GameCatalog : IGameCatalog
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
     public Dictionary<uint, uint> ManipulationQuest { get; } = new();
+
+    private const uint WellFedStatus = 48;
+    private const uint MedicatedStatus = 49;
+
+    /// <summary>Items whose action applies Well Fed or Medicated with crafting or gathering stats.</summary>
+    private void IndexConsumables()
+    {
+        var foods = Services.Data.GetExcelSheet<ItemFood>();
+        var result = new List<ConsumableInfo>();
+        foreach (var item in Services.Data.GetExcelSheet<Item>())
+        {
+            if (item.ItemAction.RowId == 0 || item.ItemAction.ValueNullable is not { } action || action.Data.Count < 2) continue;
+            var status = action.Data[0];
+            if (status != WellFedStatus && status != MedicatedStatus) continue;
+            if (foods.GetRowOrDefault(action.Data[1]) is not { } food) continue;
+
+            Discipline? discipline = null;
+            var parameters = new List<ConsumableParam>();
+            foreach (var p in food.Params)
+            {
+                var id = p.BaseParam.RowId;
+                var (d, index) = id switch
+                {
+                    70 => (Discipline.Hand, 0), 71 => (Discipline.Hand, 1), 11 => (Discipline.Hand, 2),
+                    72 => (Discipline.Land, 0), 73 => (Discipline.Land, 1), 10 => (Discipline.Land, 2),
+                    _ => ((Discipline?)null, -1),
+                };
+                if (d == null) continue;
+                discipline ??= d;
+                if (d != discipline) continue;
+                parameters.Add(new ConsumableParam(index, p.IsRelative, p.Value, p.Max, p.ValueHQ, p.MaxHQ));
+            }
+            if (discipline == null || parameters.Count == 0) continue;
+            var name = item.Name.ExtractText();
+            if (name.Length == 0) continue;
+            result.Add(new ConsumableInfo(item.RowId, name, item.Icon, status == WellFedStatus ? ConsumableKind.Food : ConsumableKind.Medicine,
+                discipline.Value, (int)item.LevelItem.RowId, item.CanBeHq, parameters));
+        }
+        Consumables = result.OrderByDescending(c => c.ItemLevel).ThenBy(c => c.Name).ToList();
+    }
+
+    public ConsumableInfo? Consumable(uint itemId) => itemId == 0 ? null : Consumables.FirstOrDefault(c => c.ItemId == itemId);
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 

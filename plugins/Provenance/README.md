@@ -31,7 +31,8 @@ Open it with `/provenance` (or `/prov`).
   are on is measured live; other jobs are worked out from their gearset's items and materia plus
   the base stats measured on a job of the same kind. The plan uses levels, master books and
   folklore tomes live: a recipe you can't craft yet or a legendary node you can't see becomes
-  *get it yourself*, with the reason.
+  *get it yourself*, with the reason. Food and medicine for crafting and for gathering are picked here
+  too; every stat shows what they add in brackets, for example `5,844 (+92)`.
 
 ## Planned
 
