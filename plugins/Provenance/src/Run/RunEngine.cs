@@ -135,6 +135,8 @@ internal sealed class RunEngine : IDisposable
         if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
         if ((plan.Count(Supply.Vendor) > 0 || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
             return "vnavmesh isn't loaded; it walks to vendors and summoning bells.";
+        if (UnreachableVendorItem() is { } unreachable)
+            return $"No vendor you can reach sells {plugin.Plans.Catalog!.ItemName(unreachable)} under your price cap; get it yourself, or attune to more aetherytes and aethernet shards.";
         if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
         return null;
     }
@@ -244,6 +246,26 @@ internal sealed class RunEngine : IDisposable
         return result.Select(kv => (kv.Key, kv.Value.Name, kv.Value.Items)).ToList();
     }
 
+    private DateTime reachCheckedAt;
+    private uint? reachResult;
+
+    /// <summary>A vendor item none of whose vendors can be reached (checked every few seconds; teleport data is slow).</summary>
+    private uint? UnreachableVendorItem()
+    {
+        if (DateTime.UtcNow - reachCheckedAt < TimeSpan.FromSeconds(3)) return reachResult;
+        reachCheckedAt = DateTime.UtcNow;
+        var cap = plugin.Config.Buying.VendorMaxPrice;
+        var areas = new Dictionary<uint, bool>();
+        reachResult = null;
+        foreach (var line in plugin.Plans.Plan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
+        {
+            var ok = plugin.Plans.Catalog!.Vendors.For(line.ItemId).Where(o => cap == 0 || o.Price <= cap)
+                .Any(o => areas.TryGetValue(o.TerritoryId, out var r) ? r : areas[o.TerritoryId] = Teleporter.CanReach(o.TerritoryId));
+            if (!ok) { reachResult = line.ItemId; break; }
+        }
+        return reachResult;
+    }
+
     /// <summary>
     /// Vendor purchases: for each item, a vendor under the price cap in a zone the character can
     /// teleport to, closest to an aetheryte; a vendor already on the route is reused when it sells it.
@@ -262,15 +284,17 @@ internal sealed class RunEngine : IDisposable
             foreach (var d in unlocked.Where(d => d.TerritoryId == o.TerritoryId))
                 if (Teleporter.Position(d.AetheryteId) is { } a)
                     best = Math.Min(best, System.Numerics.Vector2.Distance(new System.Numerics.Vector2(a.X, a.Z), o.Position));
-            return best;
+            // Areas reached through the aethernet: a bit further than a direct teleport.
+            return best == float.MaxValue ? 5000 : best;
         }
 
         var chosen = new List<Purchase>();
+        var reachable = new Dictionary<uint, bool>();
         foreach (var line in plugin.Plans.Plan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
         {
             var offers = catalog.Vendors.For(line.ItemId)
                 .Where(o => cap == 0 || o.Price <= cap)
-                .Where(o => o.TerritoryId == here || unlocked.Any(d => d.TerritoryId == o.TerritoryId))
+                .Where(o => reachable.TryGetValue(o.TerritoryId, out var r) ? r : reachable[o.TerritoryId] = Teleporter.CanReach(o.TerritoryId))
                 .ToList();
             if (offers.Count == 0)
             {
@@ -412,7 +436,7 @@ internal sealed class RunEngine : IDisposable
         var detail = skipped.Count == 0
             ? "Everything for this order is gathered and crafted."
             : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ".";
-        End(RunPhase.Finished, "Order done", detail, skipped.Count > 0);
+        End(RunPhase.Finished, skipped.Count > 0 ? "Order not finished" : "Order done", detail, skipped.Count > 0);
     }
 
     private void End(RunPhase phase, string headline, string detail, bool problem)

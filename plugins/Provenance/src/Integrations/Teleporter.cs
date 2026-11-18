@@ -54,6 +54,48 @@ internal static unsafe class Teleporter
         return candidates.OrderBy(d => Position(d.AetheryteId) is { } a ? Vector3.DistanceSquared(a, p) : float.MaxValue).First();
     }
 
+    /// <summary>
+    /// For an area without its own aetheryte (Limsa Lominsa Upper Decks, Old Gridania, …): the city's main
+    /// aetheryte to teleport to and the attuned aethernet shard in that area to take from there.
+    /// </summary>
+    public static (Destination Main, uint Shard)? AethernetRoute(uint territoryId)
+    {
+        var sheet = Services.Data.GetExcelSheet<Aetheryte>();
+        var unlocked = Unlocked();
+        var ui = UIState.Instance();
+        foreach (var shard in sheet.Where(a => !a.IsAetheryte && a.Territory.RowId == territoryId && a.AethernetName.RowId != 0))
+        {
+            if (ui == null || !ui->IsAetheryteUnlocked(shard.RowId)) continue;
+            var main = sheet.FirstOrDefault(a => a.IsAetheryte && a.AethernetGroup == shard.AethernetGroup && a.AethernetGroup != 0);
+            if (main.RowId == 0) continue;
+            var dest = unlocked.FirstOrDefault(d => d.AetheryteId == main.RowId);
+            if (dest != null) return (dest, shard.RowId);
+        }
+        return null;
+    }
+
+    /// <summary>Whether the run can get to an area: already there, an aetheryte in it, or an aethernet shard.</summary>
+    public static bool CanReach(uint territoryId)
+        => Services.ClientState.TerritoryType == territoryId
+           || Unlocked().Any(d => d.TerritoryId == territoryId)
+           || AethernetRoute(territoryId) != null;
+
+    /// <summary>Picks an aethernet destination in the open aethernet window. False until the window has its list.</summary>
+    public static bool TakeAethernet(uint shardId)
+    {
+        var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentTelepotTown.Instance();
+        if (agent == null || agent->Data == null) return false;
+        var data = agent->Data;
+        for (byte i = 0; i < data->AetheryteCount && i < 64; i++)
+        {
+            if (data->Entries[i].AetheryteId != shardId) continue;
+            if (data->Entries[i].IsLocked) return false;
+            agent->TeleportToAetheryte(i);
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>World position of an aetheryte crystal, when the game data has one.</summary>
     public static Vector3? Position(uint aetheryteId)
     {
