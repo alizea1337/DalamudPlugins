@@ -22,6 +22,7 @@ internal sealed class BrowsePage : Page
     private List<BrowseEntry> results = new();
     private (string Query, int Mask, int Lo, int Hi, int Count) filterKey;
     private readonly Dictionary<string, int> quantities = new();
+    private readonly Dictionary<string, bool> hqChoice = new();
 
     public BrowsePage(Plugin plugin) : base(plugin) { }
 
@@ -153,6 +154,7 @@ internal sealed class BrowsePage : Page
         var inOrder = Config.Order.Lines.Where(l => l.ItemId == e.ItemId).Sum(l => l.Quantity);
         var addW = Ui.ButtonWidth("Add", FontAwesomeIcon.Plus);
         var qtyW = 96 * s;
+        var hqW = e.CanHq ? 62 * s : 0;
         var right = pos.X + width - 8 * s;
         var y = pos.Y + (h - 4 * s - 34 * s) / 2;
         if (inOrder > 0)
@@ -161,8 +163,15 @@ internal sealed class BrowsePage : Page
             using (Ui.F.Small.Push())
             {
                 var lw = ImGui.CalcTextSize(label).X;
-                dl.AddText(new Vector2(right - addW - qtyW - 20 * s - lw, pos.Y + (h - 4 * s - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.Accent), label);
+                dl.AddText(new Vector2(right - addW - qtyW - hqW - 20 * s - lw, pos.Y + (h - 4 * s - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.Accent), label);
             }
+        }
+        var hq = e.CanHq && hqChoice.GetValueOrDefault(e.Key, Config.Crafting.AimForHq);
+        if (e.CanHq)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s - hqW, y + 2 * s));
+            if (Ui.ToggleChip("##hq" + e.Key, "HQ", Palette.Accent, hq)) hqChoice[e.Key] = !hq;
+            Ui.Tooltip(hq ? "Crafted aiming for high quality." : "Crafted with the fastest rotation, normal quality.");
         }
         ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s, y + 1 * s));
         var qty = quantities.GetValueOrDefault(e.Key, 1);
@@ -171,7 +180,7 @@ internal sealed class BrowsePage : Page
         ImGui.SetCursorScreenPos(new Vector2(right - addW, y));
         if (Ui.Button("Add", Ui.Kind.Secondary, FontAwesomeIcon.Plus, id: "##add" + e.Key))
         {
-            Config.Order.Add(e.ItemId, quantities.GetValueOrDefault(e.Key, 1), e.RecipeId);
+            Config.Order.Add(e.ItemId, quantities.GetValueOrDefault(e.Key, 1), e.RecipeId, hq);
             Changed();
         }
 

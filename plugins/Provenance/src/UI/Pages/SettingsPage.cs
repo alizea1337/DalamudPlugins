@@ -67,7 +67,7 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         var cr = Config.Crafting;
         v = cr.AimForHq;
-        if (Ui.Checkbox("Aim for high quality on ordered items", ref v, "Intermediate materials always get the fastest rotation, since their quality doesn't matter.")) { cr.AimForHq = v; Config.Save(); }
+        if (Ui.Checkbox("High quality by default", ref v, "New items in the order start with HQ on; switch it per item in Browse or on the plan. Intermediate materials always get the fastest rotation.")) { cr.AimForHq = v; Config.Save(); }
         v = cr.UseSpecialistActions;
         if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
         Ui.Text("Repair gear below");

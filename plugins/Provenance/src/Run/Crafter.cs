@@ -18,7 +18,8 @@ using Provenance.Integrations;
 namespace Provenance.Run;
 
 /// <summary>One recipe to craft a number of times.</summary>
-internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool FinalItem);
+/// <param name="Hq">Aim for high quality (ordered items the user wants HQ); otherwise the fastest rotation.</param>
+internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq);
 
 /// <summary>
 /// Crafts a queue of recipes, one synthesis at a time: right job and gearset, repair, food and
@@ -281,7 +282,7 @@ internal sealed unsafe class Crafter
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped(),
-                Current.FinalItem && c.AimForHq ? null : 0);
+                Current.Hq ? null : 0);
             Status = "Working out the rotation";
             solving = raphael.Solve(request);
             Wait(0.1);

@@ -89,7 +89,7 @@ public sealed class CraftingSettings
 {
     /// <summary>Self-repair when any equipped piece drops below this percentage. 0 turns repairing off.</summary>
     public int RepairBelow { get; set; } = 20;
-    /// <summary>Ask Raphael for the best quality on ordered items; intermediates always get the fastest rotation.</summary>
+    /// <summary>Default HQ wish for items added to the order (per item it can be changed); intermediates always get the fastest rotation.</summary>
     public bool AimForHq { get; set; } = true;
     /// <summary>Let rotations use Heart and Soul and Quick Innovation when a specialist soul is equipped.</summary>
     public bool UseSpecialistActions { get; set; } = true;

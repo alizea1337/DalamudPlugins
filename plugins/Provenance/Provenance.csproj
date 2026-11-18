@@ -21,11 +21,11 @@
       <Visible>false</Visible>
     </Content>
     <!-- Built from raphael-rs by the release workflow; absent in local builds (GatherBuddy Reborn's copy is used then). -->
-    <Content Include="Resourcesaphael-cli.exe" Link="raphael-cli.exe" Condition="Exists('Resourcesaphael-cli.exe')">
+    <Content Include="Resources/raphael-cli.exe" Link="raphael-cli.exe" Condition="Exists('Resources/raphael-cli.exe')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>
-    <Content Include="Resources\LICENSE-raphael.txt" Condition="Exists('Resources\LICENSE-raphael.txt')">
+    <Content Include="Resources/LICENSE-raphael.txt" Condition="Exists('Resources/LICENSE-raphael.txt')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>

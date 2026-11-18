@@ -176,6 +176,7 @@ internal sealed class ImportPage : Page
             Config.Order = new Order { Name = last.ListName.Length > 0 ? last.ListName : "Teamcraft list" };
         else if (Config.Order.IsEmpty && last.ListName.Length > 0)
             Config.Order.Name = last.ListName;
+        foreach (var line in last.Lines) line.Hq = Config.Crafting.AimForHq;
         Config.Order.Merge(last.Lines);
         Changed();
         Services.Notifications.AddNotification(new Notification

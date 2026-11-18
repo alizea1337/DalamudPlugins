@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Provenance.Core.Crafting;
@@ -28,10 +29,20 @@ internal sealed class Raphael
         if (File.Exists(own)) return own;
         try
         {
-            var gbr = PluginLookup.Instance(GatherBuddyIpc.InternalName);
-            var dir = gbr == null ? null : Path.GetDirectoryName(gbr.GetType().Assembly.Location);
-            var theirs = dir == null ? null : Path.Combine(dir, ExeName);
-            if (theirs != null && File.Exists(theirs)) return theirs;
+            // Dalamud keeps installed plugins in XIVLauncher\installedPlugins\<name>\<version>\
+            // (plugin assemblies are loaded from memory, so their own Location is empty).
+            var launcher = new DirectoryInfo(Services.PluginInterface.ConfigDirectory.FullName).Parent?.Parent;
+            var gbrDir = launcher == null ? null : new DirectoryInfo(Path.Combine(launcher.FullName, "installedPlugins", GatherBuddyIpc.InternalName));
+            if (gbrDir is { Exists: true })
+            {
+                var loaded = Services.PluginInterface.InstalledPlugins.FirstOrDefault(p => p.InternalName == GatherBuddyIpc.InternalName)?.Version?.ToString();
+                var candidates = gbrDir.GetDirectories()
+                    .OrderByDescending(d => d.Name == loaded)
+                    .ThenByDescending(d => d.LastWriteTimeUtc)
+                    .Select(d => Path.Combine(d.FullName, ExeName));
+                var theirs = candidates.FirstOrDefault(File.Exists);
+                if (theirs != null) return theirs;
+            }
         }
         catch (Exception e)
         {

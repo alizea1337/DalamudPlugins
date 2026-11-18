@@ -21,7 +21,7 @@ internal enum BrowseKind { Recipe, Gather, Fish }
 /// <param name="Level">Recipe level, or the lowest node / fishing hole level.</param>
 /// <param name="TimedOnly">Gatherables found only on timed nodes.</param>
 internal sealed record BrowseEntry(BrowseKind Kind, uint RecipeId, uint ItemId, string Name, uint ClassJobId, int Level, int Stars, uint Icon,
-    int Yield, bool Expert, uint MasterBook, bool TimedOnly)
+    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false)
 {
     public readonly string NameLower = Name.ToLowerInvariant();
     public string Key => Kind == BrowseKind.Recipe ? "r" + RecipeId : $"g{ClassJobId}_{ItemId}";
@@ -116,7 +116,7 @@ internal sealed class GameCatalog : IGameCatalog
             var info = new RecipeInfo(
                 r.RowId, result, (Job)r.CraftType.RowId,
                 level?.ClassJobLevel ?? 0, level?.Stars ?? 0,
-                Math.Max(1, (int)r.AmountResult), r.IsExpert, ingredients, r.SecretRecipeBook.RowId);
+                Math.Max(1, (int)r.AmountResult), r.IsExpert, ingredients, r.SecretRecipeBook.RowId, r.CanHq);
             recipesById[r.RowId] = info;
             if (!recipesByItem.TryGetValue(result, out var list)) recipesByItem[result] = list = new List<RecipeInfo>(1);
             list.Add(info);
@@ -125,7 +125,7 @@ internal sealed class GameCatalog : IGameCatalog
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
-                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false));
+                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false, r.CanHq));
             }
         }
         browse.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));

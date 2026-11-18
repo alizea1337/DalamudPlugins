@@ -66,9 +66,13 @@ internal sealed class RunEngine : IDisposable
 
     public bool Active => Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Paused or RunPhase.Stopping;
 
+    /// <summary>Recipes to craft; ordered items marked HQ get a quality rotation, everything else the fastest.</summary>
     private List<CraftJob> CraftJobs()
-        => plugin.Plans.Plan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
-            .Select(l => new CraftJob(l.Recipe!, l.Crafts, l.IsTarget)).ToList();
+    {
+        var hqItems = plugin.Config.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
+        return plugin.Plans.Plan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
+            .Select(l => new CraftJob(l.Recipe!, l.Crafts, l.IsTarget && l.Recipe!.CanHq && hqItems.Contains(l.ItemId))).ToList();
+    }
 
     /// <summary>Why a run can't start now, or null when it can.</summary>
     public string? StartBlocker()

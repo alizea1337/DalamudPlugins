@@ -53,7 +53,9 @@ public sealed record RecipeInfo(
     bool Expert,
     IReadOnlyList<Ingredient> Ingredients,
     /// <summary>SecretRecipeBook row the recipe needs, 0 when it needs none.</summary>
-    uint MasterBook = 0);
+    uint MasterBook = 0,
+    /// <summary>The result can come out high quality.</summary>
+    bool CanHq = true);
 
 /// <summary>Ways to get an item without crafting it. An item can have several.</summary>
 [Flags]

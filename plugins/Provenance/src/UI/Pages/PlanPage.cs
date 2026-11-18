@@ -187,6 +187,12 @@ internal sealed class PlanPage : Page
             }
 
             var qtyW = 104 * s;
+            if (line?.Recipe is { CanHq: true })
+            {
+                ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s - 70 * s, start.Y + (h - 30 * s) / 2));
+                if (Ui.ToggleChip("##hq" + orderLine.ItemId + "_" + orderLine.RecipeId, "HQ", Palette.Accent, orderLine.Hq)) { orderLine.Hq = !orderLine.Hq; Changed(); }
+                Ui.Tooltip(orderLine.Hq ? "Crafted aiming for high quality." : "Crafted with the fastest rotation, normal quality.");
+            }
             ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s, start.Y + (h - 30 * s) / 2));
             var qty = orderLine.Quantity;
             ImGui.SetNextItemWidth(qtyW);
