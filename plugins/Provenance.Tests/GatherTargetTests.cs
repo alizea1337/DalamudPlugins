@@ -60,13 +60,14 @@ public class GatherTargetTests
     }
 
     [Fact]
-    public void Gathered_order_items_count_what_is_owned()
+    public void Gathered_order_items_come_on_top_of_what_is_owned()
     {
-        // Ordering 2 logs with 5 owned: nothing to do. Crafted order items still ignore stock by default.
-        var plan = PlanFor(Log, 2, new Dictionary<uint, int> { [Log] = 5 });
-        Assert.Equal(0, plan[Log]!.Remaining);
-        Assert.Empty(GatherTargets.Build(plan, _ => 5));
-        var crafted = PlanFor(Lumber, 1, new Dictionary<uint, int> { [Lumber] = 1 });
-        Assert.Equal(1, crafted[Lumber]!.Crafts);
+        // 1000 owned, 2000 ordered: gather 2000 more, so GatherBuddy Reborn's target is 3000.
+        var plan = PlanFor(Log, 2000, new Dictionary<uint, int> { [Log] = 1000 });
+        Assert.Equal(2000, plan[Log]!.Remaining);
+        var target = GatherTargets.Build(plan, _ => 1000).Single();
+        Assert.Equal(3000u, target.Target);
+        Assert.Equal(2000, GatherTargets.Left(target, _ => 1000));
+        Assert.Equal(0, GatherTargets.Left(target, _ => 3000));
     }
 }

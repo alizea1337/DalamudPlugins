@@ -42,7 +42,7 @@ internal sealed class SettingsPage : Page
         v = st.Retainers;
         if (Ui.Checkbox("Retainers", ref v, "Takes items out at a summoning bell during a run. Arrives together with retainer withdrawal.", enabled: false)) { }
         v = st.CountFinishedItems;
-        if (Ui.Checkbox("Count finished items I already have", ref v, "Off: the order always makes its full amount, even if some are already in your bags.")) { st.CountFinishedItems = v; Changed(); }
+        if (Ui.Checkbox("Count ordered items I already have", ref v, "Off: ordered items are crafted or gathered in full, on top of what's already in your bags. Materials always use what you have.")) { st.CountFinishedItems = v; Changed(); }
         Ui.EndCard();
 
         // Vendors

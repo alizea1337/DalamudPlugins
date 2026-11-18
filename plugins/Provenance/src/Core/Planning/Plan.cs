@@ -20,8 +20,8 @@ public enum Supply
 public sealed class PlannerOptions
 {
     /// <summary>
-    /// Count crafted order items already in the bags against the order. Off: the order always crafts its
-    /// full amount. Order items that aren't crafted always count what's owned.
+    /// Count order items already in the bags against the order. Off: the order always crafts or gathers
+    /// its full amount on top of what is owned. Materials always count what's owned.
     /// </summary>
     public bool CountOwnedTargets { get; init; }
 
