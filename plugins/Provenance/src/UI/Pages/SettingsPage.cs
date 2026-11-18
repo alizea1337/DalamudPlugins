@@ -47,6 +47,57 @@ internal sealed class SettingsPage : Page
     }
 
     private static readonly string[] Stances = { "Free", "Defender", "Attacker", "Healer" };
+    private string jobSearch = "";
+
+    /// <summary>A button with the picked job; it opens a searchable list of combat jobs with a saved gearset.</summary>
+    private void CombatJobPicker()
+    {
+        var s = Ui.S;
+        var c = Config.Combat;
+        var label = c.ClassJob == 0
+            ? "Pick a combat job"
+            : $"{JobName(c.ClassJob)} (level {Data.PlanService.JobLevel(c.ClassJob)})";
+        if (Ui.Button(label, c.ClassJob == 0 ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.ChevronDown, id: "##combatjob"))
+        {
+            jobSearch = "";
+            ImGui.OpenPopup("##combatjobs");
+        }
+        ImGui.SetNextWindowSize(new Vector2(300 * s, 0));
+        if (!ImGui.BeginPopup("##combatjobs")) return;
+        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+        ImGui.SetNextItemWidth(-1);
+        ImGui.InputTextWithHint("##jobsearch", "Search jobs", ref jobSearch, 32);
+        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
+            .Where(j => jobSearch.Length == 0 || JobName(j).Contains(jobSearch, StringComparison.CurrentCultureIgnoreCase)
+                        || Core.Character.ClassJobs.Abbreviation(j).Contains(jobSearch, StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(JobName).ToList();
+        if (ImGui.BeginChild("##joblist", new Vector2(0, Math.Min(320 * s, (jobs.Count + 1) * ImGui.GetTextLineHeightWithSpacing() + 8 * s))))
+        {
+            if (jobs.Count == 0) Ui.Muted(jobSearch.Length > 0 ? "No job matches." : "Save a gearset for a combat job first.");
+            foreach (var job in jobs)
+            {
+                var pos = ImGui.GetCursorScreenPos();
+                var h = ImGui.GetTextLineHeight();
+                ImGui.GetWindowDrawList().AddCircleFilled(pos + new Vector2(5 * s, h / 2 + 2 * s), 3.5f * s, ImGui.GetColorU32(Palette.ClassJobColor(job)));
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 16 * s);
+                if (ImGui.Selectable($"{JobName(job)}  ({Core.Character.ClassJobs.Abbreviation(job)} {Data.PlanService.JobLevel(job)})##job{job}", c.ClassJob == job))
+                {
+                    c.ClassJob = job;
+                    Config.Save();
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+        }
+        ImGui.EndChild();
+        ImGui.EndPopup();
+    }
+
+    private static string JobName(uint classJob)
+    {
+        var name = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(classJob)?.Name.ExtractText() ?? "";
+        return name.Length == 0 ? Core.Character.ClassJobs.Abbreviation(classJob)
+            : string.Join(' ', name.Split(' ').Select(w => w.Length == 0 ? w : char.ToUpperInvariant(w[0]) + w[1..]));
+    }
 
     /// <summary>Combat job for monster drops (jobs with a saved gearset), the chocobo, and when to heal.</summary>
     private void DrawCombat(float w)
@@ -57,21 +108,7 @@ internal sealed class SettingsPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Monster drops");
         Ui.Wrapped("Items only monsters drop are farmed with a basic combo on this job, in its highest item level gearset. One monster at a time; whatever attacks you is fought first.");
         ImGui.Dummy(new Vector2(0, 2 * s));
-        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
-            .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(j => Core.Character.ClassJobs.Abbreviation(j)).ToList();
-        if (jobs.Count == 0) Ui.Wrapped("Save a gearset for a combat job to pick it here.", Palette.TextMuted);
-        foreach (var job in jobs)
-        {
-            var level = Data.PlanService.JobLevel(job);
-            if (Ui.ToggleChip("##combat" + job, $"{Core.Character.ClassJobs.Abbreviation(job)} {level}", Palette.ClassJobColor(job), c.ClassJob == job))
-            {
-                c.ClassJob = c.ClassJob == job ? 0 : job;
-                Config.Save();
-            }
-            ImGui.SameLine(0, 6 * s);
-            if (ImGui.GetContentRegionAvail().X < 80 * s) ImGui.NewLine();
-        }
-        ImGui.NewLine();
+        CombatJobPicker();
         ImGui.Dummy(new Vector2(0, 2 * s));
         var v = c.Chocobo;
         var greens = Integrations.GameState.BagCount(Combat.Chocobo.GysahlGreens);
