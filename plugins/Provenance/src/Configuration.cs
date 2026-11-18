@@ -101,6 +101,8 @@ public sealed class RunSettings
     public int TimedLeadMinutes { get; set; } = 2;
     /// <summary>While waiting for a timed node, travel to where it spawns (and craft or wait there).</summary>
     public bool TravelAhead { get; set; } = true;
+    /// <summary>After gathering, throw away what came in over the order's amount (normal quality, main bags).</summary>
+    public bool DiscardExtras { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
 }

@@ -9,6 +9,14 @@
   doesn't go home while waiting.
 - Trips to vendors and nodes mount up for longer distances and fly where the zone allows it.
 - Time left while waiting for a timed node includes the wait.
+- A node is gathered to the end even after the order's amount is in (GatherBuddy Reborn's "abandon
+  nodes" is off during a run). Afterwards the extras are thrown away, so 93 of 91 leaves 91;
+  normal quality only, never what you had before. "Throw away extra gathered items" in Settings.
+- Readiness check on the Plan page: job levels, the Craftsmanship/Control a recipe asks for,
+  specialist-only recipes, whether Raphael finds a rotation that finishes each craft, and the
+  Perception gathered items ask for, all against your best gearsets plus the picked food and
+  medicine. Anything the character can't do keeps the run from starting.
+- Run page counts gathered items ("6 of 10 gathered") instead of finished kinds.
 
 ## 0.5.0
 

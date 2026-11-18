@@ -44,6 +44,9 @@ internal sealed class PlanService : IDisposable
     /// <summary>How long the order takes, refreshed every second.</summary>
     public OrderEstimate Estimate { get; private set; } = OrderEstimate.Empty;
     public IReadOnlyDictionary<uint, int> Owned => owned;
+    /// <summary>What the character can't do for this order yet, refreshed every second.</summary>
+    public IReadOnlyList<ReadinessIssue> Readiness { get; private set; } = Array.Empty<ReadinessIssue>();
+    public bool Ready => !Readiness.Any(i => i.Blocking);
 
     /// <summary>Call after changing the order or any setting that affects planning.</summary>
     public void Invalidate() => dirty = true;
@@ -74,6 +77,7 @@ internal sealed class PlanService : IDisposable
             var cfg = config();
             var hqItems = cfg.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
             Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains);
+            Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem);
         }
         if (!dirty) return;
         dirty = false;
@@ -96,6 +100,14 @@ internal sealed class PlanService : IDisposable
     /// background the first time; null until it has answered (or when the character isn't checked).
     /// </summary>
     private int? Steps(RecipeInfo recipe, bool hq) => Request(recipe, hq) is { } r ? raphael.Solve(r) is { IsCompletedSuccessfully: true } t ? t.Result.Count : null : null;
+
+    /// <summary>Raphael's "no rotation" answer for a recipe at the checked stats; null when fine or not answered yet.</summary>
+    private string? RotationProblem(RecipeInfo recipe, bool hq)
+    {
+        if (Request(recipe, hq) is not { } r) return null;
+        var task = raphael.Solve(r);
+        return task.IsFaulted && task.Exception?.GetBaseException() is InvalidOperationException e ? e.Message.TrimEnd('.') + "." : null;
+    }
 
     private RaphaelRequest? Request(RecipeInfo recipe, bool hq)
     {

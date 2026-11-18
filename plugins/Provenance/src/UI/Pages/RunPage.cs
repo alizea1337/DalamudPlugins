@@ -95,11 +95,14 @@ internal sealed class RunPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         var barW = MathF.Min(Ui.CardInnerWidth, 420 * s);
         var targets = Runs.Targets;
-        var gathered = targets.Count(t => Runs.Left(t) == 0);
         if (targets.Count > 0)
         {
-            Ui.Bar("##gatherprogress", gathered / (float)targets.Count, Palette.SupplyColor(Supply.Gather), barW, 8);
-            Ui.Muted($"{gathered} of {targets.Count} materials gathered");
+            // Counted in items, not kinds: "6 of 10 gathered", plus how many kinds are complete when there are several.
+            var total = targets.Sum(t => t.Remaining);
+            var got = targets.Sum(t => Math.Max(0, t.Remaining - Runs.Left(t)));
+            var kindsDone = targets.Count(t => Runs.Left(t) == 0);
+            Ui.Bar("##gatherprogress", total > 0 ? got / (float)total : 1f, Palette.SupplyColor(Supply.Gather), barW, 8);
+            Ui.Muted($"{got:N0} of {total:N0} gathered" + (targets.Count > 1 ? $", {kindsDone} of {targets.Count} materials complete" : ""));
         }
         var c = Runs.Crafter;
         if (Runs.Stage != RunStage.Learn && c.CraftsTotal > 0)

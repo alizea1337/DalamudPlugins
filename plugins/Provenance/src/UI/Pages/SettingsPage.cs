@@ -122,7 +122,7 @@ internal sealed class SettingsPage : Page
 
         // Run
         Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Timed nodes");
+        using (Ui.F.Strong.Push()) Ui.Text("Gathering");
         Ui.Wrapped("When only timed nodes are left and none is up, the run goes to where the next one spawns, crafts what it already has materials for, and hands back to gathering shortly before the window opens.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         var rs = Config.Run;
@@ -136,6 +136,9 @@ internal sealed class SettingsPage : Page
         ImGui.SetNextItemWidth(160 * s);
         if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
         Ui.Wrapped("Real minutes before a window opens; enough for the craft under way and the trip to the node.", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        v = rs.DiscardExtras;
+        if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
         Ui.EndCard();
 
         // Summoning bell

@@ -14,6 +14,12 @@ internal sealed record MasterBook(uint Id, string Name, Job? Job, uint ItemId);
 internal sealed record FolkloreTome(uint ItemId, string Name, uint ClassJobId);
 
 /// <summary>Where a timed node shows up: its zone, the centre of its spawn area (world X/Z) and that area's radius.</summary>
+/// <summary>Stats the game asks for before it lets a craft start (0 = no minimum).</summary>
+internal readonly record struct RecipeNeeds(int Craftsmanship, int Control, bool Specialist);
+
+/// <summary>What gathering or fishing an item takes: the job, the lowest node level, and the Perception the item asks for.</summary>
+internal readonly record struct GatherNeeds(uint ClassJobId, int Level, int Perception);
+
 internal sealed record TimedSpot(uint TerritoryId, System.Numerics.Vector2 Position, float Radius, uint Mask);
 
 /// <summary>One row of the recipe browser.</summary>
@@ -115,6 +121,8 @@ internal sealed class GameCatalog : IGameCatalog
                 if (id != 0 && amount != 0) ingredients.Add(new Ingredient(id, amount));
             }
             if (ingredients.Count == 0) continue;
+            if (r.RequiredCraftsmanship > 0 || r.RequiredControl > 0 || r.IsSpecializationRequired)
+                recipeNeeds[r.RowId] = new RecipeNeeds(r.RequiredCraftsmanship, r.RequiredControl, r.IsSpecializationRequired);
 
             var level = r.RecipeLevelTable.ValueNullable;
             var info = new RecipeInfo(
@@ -158,6 +166,8 @@ internal sealed class GameCatalog : IGameCatalog
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                if (gi.PerceptionReq > 0)
+                    perception[itemId] = perception.TryGetValue(itemId, out var p) ? Math.Min(p, gi.PerceptionReq) : gi.PerceptionReq;
                 if (timed) timedMasks[itemId] = timedMasks.GetValueOrDefault(itemId) | mask;
                 NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
                 if (timed) NoteTome(itemId, tome);
@@ -187,6 +197,30 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     private readonly Dictionary<uint, uint> timedMasks = new();
+    private readonly Dictionary<uint, RecipeNeeds> recipeNeeds = new();
+    private readonly Dictionary<uint, int> perception = new();
+
+    /// <summary>Minimum Craftsmanship / Control / specialist the game asks for before the craft starts.</summary>
+    public RecipeNeeds NeedsFor(RecipeInfo recipe) => recipeNeeds.GetValueOrDefault(recipe.RecipeId);
+
+    /// <summary>
+    /// The way to gather or fish an item: a job the character is high enough for when there is one,
+    /// else the one with the lowest node level; with the Perception the item asks for.
+    /// </summary>
+    public GatherNeeds? GatherNeedsFor(uint itemId, Func<uint, int> jobLevel)
+    {
+        GatherNeeds? best = null;
+        foreach (var job in Core.Character.ClassJobs.Gatherers)
+        {
+            if (!gatherBrowse.TryGetValue((itemId, job), out var e)) continue;
+            var needs = new GatherNeeds(job, e.Level, job == 18 ? 0 : perception.GetValueOrDefault(itemId));
+            if (best is not { } b) { best = needs; continue; }
+            var canNew = jobLevel(job) >= needs.Level;
+            var canOld = jobLevel(b.ClassJobId) >= b.Level;
+            if ((canNew && !canOld) || (canNew == canOld && needs.Level < b.Level)) best = needs;
+        }
+        return best;
+    }
     private readonly Dictionary<uint, List<TimedSpot>> timedSpots = new();
 
     /// <summary>The timed nodes an item comes from, with where they spawn.</summary>

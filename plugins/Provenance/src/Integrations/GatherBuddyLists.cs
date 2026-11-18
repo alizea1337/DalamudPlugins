@@ -26,7 +26,14 @@ internal sealed class GatherBuddyLists
     private object? ourList;
     private readonly List<object> disabledLists = new();
     private object? autoConfig;
-    private bool? teleportBefore;
+    /// <summary>GatherBuddy Reborn settings changed for the run, with the user's own values.</summary>
+    private readonly Dictionary<string, bool> before = new();
+
+    /// <summary>
+    /// For the run: wait in a timed node's zone instead of going home (which would undo Provenance's
+    /// trip there), and finish a node even after the order's amount is reached.
+    /// </summary>
+    private static readonly (string Name, bool Value)[] RunSettings = { ("TeleportToNextNode", true), ("AbandonNodes", false) };
 
     public string? Error { get; private set; }
     public bool Installed => ourList != null;
@@ -63,7 +70,7 @@ internal sealed class GatherBuddyLists
             }
             Set(list2, "Enabled", true);
 
-            WaitNearTimedNodes(true);
+            ApplyRunSettings(true);
             Call(manager!, "AddList", list2, null);
             Call(manager!, "SetActiveItems", false);
             Call(manager!, "Save");
@@ -105,7 +112,7 @@ internal sealed class GatherBuddyLists
         try
         {
             RemoveOurLists();
-            WaitNearTimedNodes(false);
+            ApplyRunSettings(false);
             foreach (var list in disabledLists) Set(list, "Enabled", true);
             disabledLists.Clear();
             Call(manager, "SetActiveItems", false);
@@ -118,12 +125,7 @@ internal sealed class GatherBuddyLists
         ourList = null;
     }
 
-    /// <summary>
-    /// GatherBuddy Reborn's "teleport to next node" setting, on for the run: while it waits for a timed
-    /// node it then stays in that node's zone instead of going home (which would undo Provenance's trip
-    /// to the node). The user's own value comes back when the run ends.
-    /// </summary>
-    private void WaitNearTimedNodes(bool on)
+    private void ApplyRunSettings(bool on)
     {
         try
         {
@@ -133,18 +135,22 @@ internal sealed class GatherBuddyLists
                 var config = asm?.GetType("GatherBuddy.GatherBuddy")?.GetProperty("Config", All)?.GetValue(null);
                 autoConfig = config == null ? null : Get<object>(config, "AutoGatherConfig");
                 if (autoConfig == null) return;
-                teleportBefore ??= Get<bool>(autoConfig, "TeleportToNextNode");
-                Set(autoConfig, "TeleportToNextNode", true);
+                foreach (var (name, value) in RunSettings)
+                {
+                    if (autoConfig.GetType().GetProperty(name, All) == null) continue;
+                    if (!before.ContainsKey(name)) before[name] = Get<bool>(autoConfig, name);
+                    Set(autoConfig, name, value);
+                }
             }
-            else if (autoConfig != null && teleportBefore is { } before)
+            else if (autoConfig != null)
             {
-                Set(autoConfig, "TeleportToNextNode", before);
-                teleportBefore = null;
+                foreach (var (name, value) in before) Set(autoConfig, name, value);
+                before.Clear();
             }
         }
         catch (Exception e)
         {
-            Services.Log.Warning(e, "Couldn't change GatherBuddy Reborn's teleport-to-next-node setting");
+            Services.Log.Warning(e, "Couldn't change GatherBuddy Reborn's auto-gather settings for the run");
         }
     }
 

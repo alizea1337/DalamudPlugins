@@ -31,7 +31,14 @@ internal sealed class PlanPage : Page
 
     public override string Title => "Plan";
 
-    public override (int Count, Vector4 Color)? Badge => Plans.Plan.Missing.Count > 0 ? (Plans.Plan.Missing.Count, Palette.Danger) : null;
+    public override (int Count, Vector4 Color)? Badge
+    {
+        get
+        {
+            var n = Plans.Plan.Missing.Count + Plans.Readiness.Count(i => i.Blocking);
+            return n > 0 ? (n, Palette.Danger) : null;
+        }
+    }
 
     public override (string Text, Vector4 Color)? Status
     {
@@ -40,6 +47,8 @@ internal sealed class PlanPage : Page
             var plan = Plans.Plan;
             if (Config.Order.IsEmpty) return ("The order is empty", Palette.TextFaint);
             if (plan.Missing.Count > 0) return (plan.Missing.Count == 1 ? "1 item to get yourself before starting" : $"{plan.Missing.Count} items to get yourself before starting", Palette.Danger);
+            var blocking = Plans.Readiness.Count(i => i.Blocking);
+            if (blocking > 0) return (blocking == 1 ? "1 thing your character can't do yet" : $"{blocking} things your character can't do yet", Palette.Danger);
             var crafts = plan.CraftSteps.Sum(l => l.Crafts);
             var total = Plans.Estimate.Total;
             var parts = new List<string>();
@@ -87,6 +96,7 @@ internal sealed class PlanPage : Page
         DrawOrderHeader();
         DrawLearnFirst(plan, catalog);
         DrawMissing(plan, catalog);
+        DrawReadiness(catalog);
         DrawTargets(plan, catalog);
 
         // Ordered items that aren't crafted (gathered, fished, bought) also show up with their progress.
@@ -213,6 +223,52 @@ internal sealed class PlanPage : Page
             ImGui.BeginGroup();
             Ui.Text(catalog.ItemName(line.ItemId));
             using (Ui.F.Small.Push()) Ui.Muted($"Need {line.Remaining} more. {line.ManualReason}.");
+            ImGui.EndGroup();
+        }
+        Ui.EndCard();
+    }
+
+    /// <summary>Crafts and gathering the character can't do with its levels and stats, or should double-check.</summary>
+    private void DrawReadiness(GameCatalog catalog)
+    {
+        var issues = Plans.Readiness;
+        if (issues.Count == 0) return;
+        var s = Ui.S;
+        var blocking = issues.Any(i => i.Blocking);
+        var color = blocking ? Palette.Danger : Palette.Warn;
+        Ui.BeginCard(Palette.WithAlpha(color, blocking ? 0.08f : 0.07f));
+        Ui.Icon(blocking ? FontAwesomeIcon.UserTimes : FontAwesomeIcon.UserCheck, color);
+        ImGui.SameLine(0, 10 * s);
+        using (Ui.F.Strong.Push()) Ui.Text(blocking ? "Your character can't do this yet" : "Worth a look", color);
+        var checkedAt = Plans.Profile?.CheckedAtUtc;
+        Ui.Wrapped(blocking
+            ? "Levels are live; stats come from your best gearset for each job at the last character check, with the food and medicine you picked. The run starts once these are sorted."
+            : "These won't stop the run, but the numbers might not be the whole story.");
+        if (checkedAt is { } at && at > DateTime.MinValue)
+        {
+            using (Ui.F.Small.Push()) Ui.Muted($"Stats checked {at.ToLocalTime():d MMM, HH:mm}.");
+            ImGui.SameLine(0, 10 * s);
+        }
+        if (Ui.Button("Check character", Ui.Kind.Ghost, FontAwesomeIcon.Sync, id: "##readycheck")) Plans.CheckCharacter();
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var issue in issues.OrderByDescending(i => i.Blocking))
+        {
+            if (issue.ItemId != 0)
+            {
+                Ui.ItemIcon(catalog.ItemIcon(issue.ItemId), 28);
+                ImGui.SameLine(0, 10 * s);
+            }
+            ImGui.BeginGroup();
+            if (issue.ItemId != 0)
+            {
+                Ui.Text(catalog.ItemName(issue.ItemId));
+                if (issue.ClassJobId != 0)
+                {
+                    ImGui.SameLine(0, 8 * s);
+                    Ui.Chip(Core.Character.ClassJobs.Abbreviation(issue.ClassJobId), Palette.ClassJobColor(issue.ClassJobId));
+                }
+            }
+            using (Ui.F.Small.Push()) Ui.Wrapped(issue.Text, issue.Blocking ? Palette.Text : Palette.TextMuted);
             ImGui.EndGroup();
         }
         Ui.EndCard();

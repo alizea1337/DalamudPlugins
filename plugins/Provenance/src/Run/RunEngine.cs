@@ -84,6 +84,9 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Closer to the window than this, GatherBuddy Reborn goes on its own.</summary>
     private static readonly TimeSpan TripCutoff = TimeSpan.FromSeconds(20);
 
+    private readonly ExtrasCleanup cleanup;
+    private bool cleaning;
+
     private int knockOuts;
     private bool knockedOut;
     private DateTime knockedOutAt;
@@ -96,6 +99,7 @@ internal sealed class RunEngine : IDisposable
         Crafter.Crafted += OnCrafted;
         Shopper = new Shopper(plugin, Add);
         Retainers = new RetainerRun(plugin, Add);
+        cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
     public RunPhase Phase { get; private set; } = RunPhase.Idle;
@@ -134,6 +138,7 @@ internal sealed class RunEngine : IDisposable
         if (plugin.Plans.Catalog == null) return "Still reading game data.";
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";
+        if (!plugin.Plans.Ready) return "Your character can't do everything in this order yet; the plan lists what's in the way.";
         if (!Services.ClientState.IsLoggedIn) return "Log in first.";
         if (Stock.FreeSlots() <= MinFreeSlots) return $"Your inventory has {MinFreeSlots} or fewer free slots.";
         var gather = GatherTargets.Build(plan, BagNq).Count > 0;
@@ -179,6 +184,8 @@ internal sealed class RunEngine : IDisposable
         craftQueueBuilt = false;
         tripSpot = null;
         tripFailed.Clear();
+        cleaning = false;
+        cleanup.Cancel();
         nextTripCheck = default;
         Crafter.Begin(Array.Empty<CraftJob>());
 
@@ -436,6 +443,8 @@ internal sealed class RunEngine : IDisposable
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
         CancelNodeTrip();
+        cleanup.Cancel();
+        cleaning = false;
         Shopper.Cancel();
         Retainers.Cancel();
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
@@ -615,14 +624,44 @@ internal sealed class RunEngine : IDisposable
         if (Phase == RunPhase.Running && !craftingBetween && !GatherBuddyIpc.Waiting) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
         lastGatherTick = now;
 
+        if (cleaning)
+        {
+            cleanup.Tick();
+            Headline = "Throwing away extras";
+            Detail = cleanup.Status;
+            if (!cleanup.Done) return;
+            cleaning = false;
+            StartCrafting();
+            return;
+        }
+
         if (GatherTargets.AllDone(Targets, CountedAsGathered))
         {
             if (craftingBetween && Crafter.MidCraft) return; // let the craft finish first
+            // The amount is in, but a node is gathered to the end; GatherBuddy Reborn takes the rest.
+            if (!craftingBetween && Services.Condition[ConditionFlag.Gathering])
+            {
+                Headline = "Finishing this node";
+                Detail = "The order's amount is in; gathering what's left on the node.";
+                return;
+            }
             GatherBuddyIpc.SetEnabled(false);
             lists.Uninstall();
+            CancelNodeTrip();
             LearnGatheringRate();
             NextWindow = null;
             Add("Gathering done.", false);
+            if (Settings.DiscardExtras)
+            {
+                cleanup.Begin(Targets.Where(t => !Items.IsCrystal(t.ItemId))
+                    .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))));
+                if (!cleanup.Done)
+                {
+                    cleaning = true;
+                    Headline = "Throwing away extras";
+                    return;
+                }
+            }
             StartCrafting();
             return;
         }
