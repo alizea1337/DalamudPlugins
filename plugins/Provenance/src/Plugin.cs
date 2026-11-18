@@ -76,7 +76,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             case "start": Runs.Start(); Main.IsOpen = true; Main.Select<RunPage>(); return;
             case "pause": if (Runs.Phase == RunPhase.Paused) Runs.Resume(); else Runs.Pause(); return;
-            case "stop": Runs.Stop(); return;
+            case "stop": StopCommand(); return;
             case "tp": TeleportCommand(rest); return;
             case "flag": FlagCommand(); return;
         }
@@ -102,6 +102,16 @@ public sealed class Plugin : IDalamudPlugin
         else Services.Chat.PrintError($"[Provenance] Can't teleport to {d.Name}: {why}.");
     }
 
+    /// <summary>/prov stop: ends the run, and any walk Provenance started (for example /prov flag).</summary>
+    private void StopCommand()
+    {
+        var walking = Vnav.Available && Vnav.Busy;
+        if (walking) Vnav.Stop();
+        if (Runs.Active) Runs.Stop();
+        else if (walking) Services.Chat.Print("[Provenance] Stopped moving.");
+        else Services.Chat.Print("[Provenance] Nothing to stop.");
+    }
+
     /// <summary>/prov flag: walks (or flies, when airborne) to the map flag with vnavmesh.</summary>
     private static void FlagCommand()
     {
@@ -109,7 +119,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!Vnav.Ready) { Services.Chat.PrintError("[Provenance] vnavmesh is still building the map for this zone."); return; }
         if (Vnav.FlagPoint is not { } point) { Services.Chat.PrintError("[Provenance] Place a map flag first."); return; }
         var fly = Services.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.InFlight];
-        if (Vnav.MoveTo(point, fly)) Services.Chat.Print($"[Provenance] Moving to the flag{(fly ? " by air" : "")}.");
+        if (Vnav.MoveTo(point, fly)) Services.Chat.Print($"[Provenance] Moving to the flag{(fly ? " by air" : "")}. Type /prov stop to stop.");
         else Services.Chat.PrintError("[Provenance] vnavmesh is already busy with another path.");
     }
 
