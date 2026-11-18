@@ -45,6 +45,12 @@ jobs:
           Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
           Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
 
+      - name: Test
+        shell: pwsh
+        run: |
+          $tests = "plugins/${{ steps.tag.outputs.plugin }}.Tests"
+          if (Test-Path $tests) { dotnet test $tests -c Release } else { Write-Host "No test project for this plugin" }
+
       - name: Build
         shell: pwsh
         run: |

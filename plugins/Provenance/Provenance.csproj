@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.1.0.0</Version>
+    <Author>alizea1337</Author>
+    <Name>Provenance</Name>
+    <Punchline>Turns a Teamcraft list into finished items: gathers, buys and crafts every material for you.</Punchline>
+    <Description>Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, and shows where each one comes from: gathering, timed nodes, fishing, vendors or monsters. Requires GatherBuddy Reborn and vnavmesh. Open /provenance to get started.</Description>
+    <RepoUrl>https://github.com/alizea1337/DalamudPlugins</RepoUrl>
+    <Tags>crafting;gathering;teamcraft;automation</Tags>
+
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RootNamespace>Provenance</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\Fonts\*.ttf;Resources\Fonts\LICENSE-*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="images\icon.png" Condition="Exists('images\icon.png')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+</Project>
