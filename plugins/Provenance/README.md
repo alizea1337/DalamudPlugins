@@ -17,7 +17,7 @@ Open it with `/provenance` (or `/prov`).
 
   By default only the amounts still left to make are imported; *Ignore Teamcraft progress*
   takes the full amounts.
-- **Browse** every recipe with a name search, crafter filter and crafting-level range, and add
+- **Browse** every recipe and gatherable (mining, botany, fishing) with a name search, job filter and job-level range, and add
   recipes to the order.
 - **Plan** lists what you're making, then every material once with its total for the whole
   order, grouped by how it is obtained: to gather (timed nodes marked), to fish, to buy, monster

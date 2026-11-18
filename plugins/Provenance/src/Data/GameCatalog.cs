@@ -14,9 +14,17 @@ internal sealed record MasterBook(uint Id, string Name, Job? Job);
 internal sealed record FolkloreTome(uint ItemId, string Name, uint ClassJobId);
 
 /// <summary>One row of the recipe browser.</summary>
-internal sealed record BrowseEntry(uint RecipeId, uint ItemId, string Name, Job Job, int Level, int Stars, uint Icon, int Yield, bool Expert, uint MasterBook)
+internal enum BrowseKind { Recipe, Gather, Fish }
+
+/// <summary>One row of the item browser: a recipe, or something a gatherer or fisher collects.</summary>
+/// <param name="ClassJobId">Crafter (8–15) or gatherer (16–18).</param>
+/// <param name="Level">Recipe level, or the lowest node / fishing hole level.</param>
+/// <param name="TimedOnly">Gatherables found only on timed nodes.</param>
+internal sealed record BrowseEntry(BrowseKind Kind, uint RecipeId, uint ItemId, string Name, uint ClassJobId, int Level, int Stars, uint Icon,
+    int Yield, bool Expert, uint MasterBook, bool TimedOnly)
 {
     public readonly string NameLower = Name.ToLowerInvariant();
+    public string Key => Kind == BrowseKind.Recipe ? "r" + RecipeId : $"g{ClassJobId}_{ItemId}";
 }
 
 /// <summary>
@@ -35,6 +43,10 @@ internal sealed class GameCatalog : IGameCatalog
     private readonly ConcurrentDictionary<uint, (string Name, uint Icon)> itemCache = new();
 
     public IReadOnlyList<BrowseEntry> Browse { get; private set; } = Array.Empty<BrowseEntry>();
+    private List<BrowseEntry> recipeBrowse = new();
+
+    /// <summary>Lowest level per (item, gatherer job), and whether any of its nodes is always up.</summary>
+    private readonly Dictionary<(uint Item, uint Job), (int Level, bool Normal, BrowseKind Kind)> gatherBrowse = new();
     public IReadOnlyList<MasterBook> MasterBooks { get; private set; } = Array.Empty<MasterBook>();
     public IReadOnlyList<FolkloreTome> FolkloreTomes { get; private set; } = Array.Empty<FolkloreTome>();
     /// <summary>Foods and medicines that raise crafting or gathering stats, highest item level first.</summary>
@@ -56,6 +68,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
+        c.BuildBrowse();
         c.ApplyTomes();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items in {Ms} ms", c.recipesById.Count, c.sources.Count, sw.ElapsedMilliseconds);
         return c;
@@ -112,11 +125,11 @@ internal sealed class GameCatalog : IGameCatalog
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
-                    browse.Add(new BrowseEntry(r.RowId, result, name, info.Job, info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId));
+                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false));
             }
         }
         browse.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-        Browse = browse;
+        recipeBrowse = browse;
     }
 
     private void IndexGathering()
@@ -131,12 +144,14 @@ internal sealed class GameCatalog : IGameCatalog
             if (pointBase.GatheringType.RowId > 3) continue;
             var timed = IsTimed(transient.GetRowOrDefault(point.RowId));
             var tome = timed ? TomeOf(point.GatheringSubCategory.ValueNullable) : 0;
+            var job = pointBase.GatheringType.RowId <= 1 ? 16u : 17u;
             foreach (var reference in pointBase.Item)
             {
                 if (reference.RowId == 0 || gatheringItems.GetRowOrDefault(reference.RowId) is not { } gi) continue;
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
                 if (timed) NoteTome(itemId, tome);
             }
         }
@@ -154,6 +169,21 @@ internal sealed class GameCatalog : IGameCatalog
 
     private void IndexFishing()
     {
+        foreach (var spot in Services.Data.GetExcelSheet<FishingSpot>())
+        {
+            if (spot.GatheringLevel == 0 || spot.TerritoryType.RowId == 0) continue;
+            foreach (var fish in spot.Item)
+                if (fish.RowId is > 0 and < 1_000_000) NoteBrowse(fish.RowId, 18, spot.GatheringLevel, true, BrowseKind.Fish);
+        }
+        var spearItems = Services.Data.GetExcelSheet<SpearfishingItem>();
+        foreach (var note in Services.Data.GetExcelSheet<SpearfishingNotebook>())
+        {
+            if (note.GatheringPointBase.ValueNullable is not { } spearBase) continue;
+            foreach (var reference in spearBase.Item)
+                if (spearItems.GetRowOrDefault(reference.RowId) is { } si && si.Item.RowId is > 0 and < 1_000_000)
+                    NoteBrowse(si.Item.RowId, 18, note.GatheringLevel, true, BrowseKind.Fish);
+        }
+
         foreach (var f in Services.Data.GetExcelSheet<FishParameter>())
             if (f.Item.RowId is > 0 and < 1_000_000 && f.FishingSpot.RowId != 0)
             {
@@ -308,6 +338,30 @@ internal sealed class GameCatalog : IGameCatalog
     public ConsumableInfo? Consumable(uint itemId) => itemId == 0 ? null : Consumables.FirstOrDefault(c => c.ItemId == itemId);
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
+
+    private void NoteBrowse(uint itemId, uint job, int level, bool normal, BrowseKind kind)
+    {
+        if (gatherBrowse.TryGetValue((itemId, job), out var e))
+            gatherBrowse[(itemId, job)] = (Math.Min(e.Level, level), e.Normal || normal, kind);
+        else
+            gatherBrowse[(itemId, job)] = (level, normal, kind);
+    }
+
+    /// <summary>Recipes plus everything gatherers and fishers collect, sorted by level then name.</summary>
+    private void BuildBrowse()
+    {
+        var items = Services.Data.GetExcelSheet<Item>();
+        var all = new List<BrowseEntry>(recipeBrowse);
+        foreach (var ((itemId, job), (level, normal, kind)) in gatherBrowse)
+        {
+            if (items.GetRowOrDefault(itemId) is not { } item) continue;
+            var name = item.Name.ExtractText();
+            if (name.Length == 0) continue;
+            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal));
+        }
+        all.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        Browse = all;
+    }
 
     private void Add(uint itemId, Obtain flag)
     {

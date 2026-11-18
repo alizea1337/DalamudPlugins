@@ -120,10 +120,13 @@ internal sealed class PlanService : IDisposable
             : recipes.OrderBy(r => r.Level).ThenBy(r => r.RecipeId).First();
     }
 
-    public static int JobLevel(Job job)
+    public static int JobLevel(Job job) => JobLevel(job.ClassJobId());
+
+    /// <summary>Level of any job by ClassJob row (0 when not unlocked or not logged in).</summary>
+    public static int JobLevel(uint classJobId)
     {
         if (!Services.PlayerState.IsLoaded) return 0;
-        var row = Services.Data.GetExcelSheet<ClassJob>().GetRowOrDefault(job.ClassJobId());
+        var row = Services.Data.GetExcelSheet<ClassJob>().GetRowOrDefault(classJobId);
         return row is { } cj ? Services.PlayerState.GetClassJobLevel(cj) : 0;
     }
 

@@ -74,7 +74,8 @@ internal sealed class PlanPage : Page
         DrawMissing(plan, catalog);
         DrawTargets(plan, catalog);
 
-        var materials = plan.Lines.Where(l => !l.IsTarget && !Items.IsCrystal(l.ItemId)).ToList();
+        // Ordered items that aren't crafted (gathered, fished, bought) also show up with their progress.
+        var materials = plan.Lines.Where(l => (!l.IsTarget || l.Supply != Supply.Craft) && !Items.IsCrystal(l.ItemId)).ToList();
         Section("To gather", FontAwesomeIcon.Leaf, Palette.SupplyColor(Supply.Gather),
             materials.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed), catalog, null);
         Section("To fish", FontAwesomeIcon.Fish, Palette.SupplyColor(Supply.Fish),
