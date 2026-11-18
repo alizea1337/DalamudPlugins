@@ -9,3 +9,6 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+# Built by the release workflow
+plugins/Provenance/Resources/raphael-cli.exe
+plugins/Provenance/Resources/LICENSE-raphael.txt

@@ -51,6 +51,18 @@ jobs:
           $tests = "plugins/${{ steps.tag.outputs.plugin }}.Tests"
           if (Test-Path $tests) { dotnet test $tests -c Release } else { Write-Host "No test project for this plugin" }
 
+      - name: Build raphael-cli (Provenance)
+        if: steps.tag.outputs.plugin == 'Provenance'
+        shell: pwsh
+        run: |
+          # Pinned so every release ships the same solver; bump deliberately.
+          git clone https://github.com/KonaeAkira/raphael-rs.git raphael-rs
+          git -C raphael-rs checkout 9311b0d262259bd8db727fbec2dfd08ff453b87b
+          cargo build --release --package raphael-cli --manifest-path raphael-rs/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "raphael-cli build failed" }
+          Copy-Item raphael-rs/target/release/raphael-cli.exe plugins/Provenance/Resources/raphael-cli.exe -Force
+          Copy-Item raphael-rs/LICENSE plugins/Provenance/Resources/LICENSE-raphael.txt -Force
+
       - name: Build
         shell: pwsh
         run: |

@@ -19,6 +19,7 @@ public sealed class Configuration : IPluginConfiguration
     public BrowseSettings Browse { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
     public ConsumableSettings Consumables { get; set; } = new();
+    public CraftingSettings Crafting { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
     public Dictionary<ulong, CharacterProfile> Characters { get; set; } = new();
 
@@ -37,6 +38,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Window ??= new();
         c.Characters ??= new();
         c.Consumables ??= new();
+        c.Crafting ??= new();
         c.Consumables.CraftFood ??= new();
         c.Consumables.CraftMedicine ??= new();
         c.Consumables.GatherFood ??= new();
@@ -80,6 +82,17 @@ public sealed class BrowseSettings
     public int JobMask { get; set; } = 0;
     public int MinLevel { get; set; } = 1;
     public int MaxLevel { get; set; } = 100;
+}
+
+[Serializable]
+public sealed class CraftingSettings
+{
+    /// <summary>Self-repair when any equipped piece drops below this percentage. 0 turns repairing off.</summary>
+    public int RepairBelow { get; set; } = 20;
+    /// <summary>Ask Raphael for the best quality on ordered items; intermediates always get the fastest rotation.</summary>
+    public bool AimForHq { get; set; } = true;
+    /// <summary>Let rotations use Heart and Soul and Quick Innovation when a specialist soul is equipped.</summary>
+    public bool UseSpecialistActions { get; set; } = true;
 }
 
 /// <summary>Food and medicine to use while crafting and while gathering. None picked: no consumables.</summary>

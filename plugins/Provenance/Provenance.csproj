@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.2.0.0</Version>
+    <Version>0.3.0.0</Version>
     <Author>alizea1337</Author>
     <Name>Provenance</Name>
     <Punchline>Turns a Teamcraft list into finished items: gathers, buys and crafts every material for you.</Punchline>
@@ -20,6 +20,15 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>
+    <!-- Built from raphael-rs by the release workflow; absent in local builds (GatherBuddy Reborn's copy is used then). -->
+    <Content Include="Resourcesaphael-cli.exe" Link="raphael-cli.exe" Condition="Exists('Resourcesaphael-cli.exe')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="Resources\LICENSE-raphael.txt" Condition="Exists('Resources\LICENSE-raphael.txt')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
     <Content Include="NOTICE.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
@@ -28,5 +37,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ECommons" Version="3.2.1.26" />
   </ItemGroup>
 </Project>

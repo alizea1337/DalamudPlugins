@@ -31,6 +31,7 @@ public sealed class Plugin : IDalamudPlugin
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
         pluginInterface.Create<Services>();
+        ECommons.ECommonsMain.Init(pluginInterface, this);
         Config = Configuration.Load();
         fonts = new Fonts();
         Ui.Init(fonts);
@@ -156,5 +157,6 @@ public sealed class Plugin : IDalamudPlugin
         Runs.Dispose();
         Plans.Dispose();
         fonts.Dispose();
+        ECommons.ECommonsMain.Dispose();
     }
 }

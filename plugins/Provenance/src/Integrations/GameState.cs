@@ -1,0 +1,106 @@
+using System;
+using System.Linq;
+using Dalamud.Game.ClientState.Conditions;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
+using Provenance.Core.Character;
+using GamePlayerState = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState;
+
+namespace Provenance.Integrations;
+
+/// <summary>Small reads and actions on the game the crafter and later stages share.</summary>
+internal static unsafe class GameState
+{
+    private const uint WellFed = 48;
+    private const uint Medicated = 49;
+
+    public static uint CurrentJob => Services.Objects.LocalPlayer?.ClassJob.RowId ?? 0;
+
+    /// <summary>In the crafting stance (recipe log open or crafting).</summary>
+    public static bool InCraftingStance
+        => Services.Condition[ConditionFlag.Crafting] || Services.Condition[ConditionFlag.PreparingToCraft] || Services.Condition[ConditionFlag.ExecutingCraftingAction];
+
+    /// <summary>Highest item level gearset saved for a job, or -1.</summary>
+    public static int BestGearset(uint classJob)
+    {
+        var module = RaptureGearsetModule.Instance();
+        if (module == null) return -1;
+        var best = -1;
+        for (var i = 0; i < 100; i++)
+        {
+            var e = module->Entries[i];
+            if ((e.Flags & RaptureGearsetModule.GearsetFlag.Exists) == 0 || e.ClassJob != classJob) continue;
+            if (best < 0 || e.ItemLevel > module->Entries[best].ItemLevel) best = i;
+        }
+        return best;
+    }
+
+    public static bool EquipGearset(int index)
+    {
+        var module = RaptureGearsetModule.Instance();
+        return module != null && module->EquipGearset(index, 0) >= 0;
+    }
+
+    /// <summary>[primary, secondary, points] as the game shows them now, food and medicine included.</summary>
+    public static int[] LiveStats(Discipline d)
+    {
+        var ps = GamePlayerState.Instance();
+        var ids = d == Discipline.Hand ? new[] { 70, 71, 11 } : new[] { 72, 73, 10 };
+        return ps == null ? new int[3] : ids.Select(i => ps->Attributes[i]).ToArray();
+    }
+
+    public static int JobLevel(uint classJob) => Data.PlanService.JobLevel(classJob);
+
+    /// <summary>The soul crystal slot holds a specialist soul.</summary>
+    public static bool SpecialistEquipped()
+    {
+        var c = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        if (c == null || c->Size <= 13) return false;
+        var slot = c->GetInventorySlot(13);
+        return slot != null && slot->GetBaseItemId() != 0;
+    }
+
+    /// <summary>Lowest condition of any equipped piece, in percent (0–100+).</summary>
+    public static float LowestGearCondition()
+    {
+        var c = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        if (c == null) return 100;
+        var lowest = float.MaxValue;
+        for (var i = 0; i < c->Size; i++)
+        {
+            var slot = c->GetInventorySlot(i);
+            if (slot == null || slot->GetBaseItemId() == 0 || i == 13) continue;
+            lowest = Math.Min(lowest, slot->Condition / 300f);
+        }
+        return lowest == float.MaxValue ? 100 : lowest;
+    }
+
+    /// <summary>Seconds left on Well Fed (food) or Medicated (medicine); 0 when not active.</summary>
+    public static float BuffSecondsLeft(bool medicine)
+    {
+        var id = medicine ? Medicated : WellFed;
+        var status = Services.Objects.LocalPlayer?.StatusList.FirstOrDefault(s => s.StatusId == id);
+        return status?.RemainingTime ?? 0;
+    }
+
+    /// <summary>NQ + HQ count in the main bags (including crystals).</summary>
+    public static int BagCount(uint itemId)
+    {
+        var inv = InventoryManager.Instance();
+        return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
+    }
+
+    public static int BagCount(uint itemId, bool hq)
+    {
+        var inv = InventoryManager.Instance();
+        return inv == null ? 0 : inv->GetInventoryItemCount(itemId, hq, false, false, 0);
+    }
+
+    /// <summary>Uses an item from the bags (food, medicine). HQ items are addressed as id + 1,000,000.</summary>
+    public static bool UseItem(uint itemId, bool hq)
+        => ActionManager.Instance()->UseAction(ActionType.Item, hq ? itemId + 1_000_000 : itemId, 0xE000_0000, 65535);
+
+    public static bool CanUse(ActionType type, uint id) => ActionManager.Instance()->GetActionStatus(type, id) == 0;
+
+    public static bool Use(ActionType type, uint id) => ActionManager.Instance()->UseAction(type, id);
+}

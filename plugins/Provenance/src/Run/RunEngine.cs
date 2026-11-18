@@ -4,7 +4,6 @@ using System.Linq;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Interface.ImGuiNotification;
-using FFXIVClientStructs.FFXIV.Client.Game;
 using Provenance.Core.Planning;
 using Provenance.Core.Run;
 using Provenance.Data;
@@ -15,22 +14,26 @@ namespace Provenance.Run;
 internal enum RunPhase
 {
     Idle,
-    Gathering,
-    /// <summary>Pause asked for; waits for the current node to finish.</summary>
+    Running,
+    /// <summary>Pause asked for; waits for the current node or craft to finish.</summary>
     Pausing,
     Paused,
+    /// <summary>Stop asked for during a craft; waits for it to finish so no materials are lost.</summary>
+    Stopping,
     Finished,
     Stopped,
 }
 
+internal enum RunStage { Gather, Craft }
+
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
 /// <summary>
-/// Runs an order. This release covers the gathering stage: Provenance's list goes into GatherBuddy
-/// Reborn, auto-gather runs until the plan needs nothing more to gather, and the run watches for
-/// the stop rules (death, a nearly full inventory, a plugin going away, duties).
+/// Runs an order: first the gathering step (GatherBuddy Reborn with Provenance's list), then the
+/// crafting step (Provenance's crafter with Raphael rotations), and watches the stop rules (death,
+/// a nearly full inventory, plugins going away, duties) throughout.
 /// </summary>
-internal sealed unsafe class RunEngine : IDisposable
+internal sealed class RunEngine : IDisposable
 {
     private const int MinFreeSlots = 2;
     private static readonly TimeSpan CheckEvery = TimeSpan.FromMilliseconds(500);
@@ -42,18 +45,30 @@ internal sealed unsafe class RunEngine : IDisposable
     private DateTime gbrOffSince = DateTime.MinValue;
     private int reEnables;
     private bool pausedForDuty;
+    private string? pendingStop;
+    private bool pendingStopProblem;
 
-    public RunEngine(Plugin plugin) => this.plugin = plugin;
+    public RunEngine(Plugin plugin)
+    {
+        this.plugin = plugin;
+        Crafter = new Crafter(plugin, Add);
+    }
 
     public RunPhase Phase { get; private set; } = RunPhase.Idle;
+    public RunStage Stage { get; private set; } = RunStage.Gather;
     public string Headline { get; private set; } = "Not running";
     public string Detail { get; private set; } = "";
     public DateTime? StartedAt { get; private set; }
     public DateTime? EndedAt { get; private set; }
     public IReadOnlyList<GatherTarget> Targets { get; private set; } = Array.Empty<GatherTarget>();
+    public Crafter Crafter { get; }
     public IReadOnlyList<RunLogEntry> Log => log;
 
-    public bool Active => Phase is RunPhase.Gathering or RunPhase.Pausing or RunPhase.Paused;
+    public bool Active => Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Paused or RunPhase.Stopping;
+
+    private List<CraftJob> CraftJobs()
+        => plugin.Plans.Plan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
+            .Select(l => new CraftJob(l.Recipe!, l.Crafts, l.IsTarget)).ToList();
 
     /// <summary>Why a run can't start now, or null when it can.</summary>
     public string? StartBlocker()
@@ -64,12 +79,14 @@ internal sealed unsafe class RunEngine : IDisposable
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";
         if (!Services.ClientState.IsLoggedIn) return "Log in first.";
-        if (!GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
-        if (!Vnav.Available) return "vnavmesh isn't loaded.";
-        if (plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
         if (Stock.FreeSlots() <= MinFreeSlots) return $"Your inventory has {MinFreeSlots} or fewer free slots.";
-        if (GatherTargets.Build(plan, BagCount).Count == 0)
-            return "Nothing to gather for this order. Buying, monster drops and crafting arrive in the next milestones.";
+        var gather = GatherTargets.Build(plan, GbrCount).Count > 0;
+        var craft = plan.CraftSteps.Any(l => l.Crafts > 0);
+        if (!gather && !craft) return "Nothing to gather or craft for this order.";
+        if (gather && !GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
+        if (gather && !Vnav.Available) return "vnavmesh isn't loaded.";
+        if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
+        if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
         return null;
     }
 
@@ -84,19 +101,26 @@ internal sealed unsafe class RunEngine : IDisposable
         log.Clear();
         reEnables = 0;
         pausedForDuty = false;
+        pendingStop = null;
         gbrOffSince = DateTime.MinValue;
         StartedAt = DateTime.Now;
         EndedAt = null;
+        Detail = "";
+        Phase = RunPhase.Running;
 
-        var targets = GatherTargets.Build(plugin.Plans.Plan, BagCount);
+        var targets = GatherTargets.Build(plugin.Plans.Plan, GbrCount);
+        if (targets.Count > 0) StartGathering(targets);
+        else StartCrafting();
+        if (Active) Notify("Run started for " + plugin.Config.Order.Name + ".", false);
+    }
+
+    private void StartGathering(List<GatherTarget> targets)
+    {
+        Stage = RunStage.Gather;
         var unknown = lists.Install(targets);
         if (lists.Error != null)
         {
-            Phase = RunPhase.Stopped;
-            Headline = "Couldn't start";
-            Detail = lists.Error;
-            Add(lists.Error, true);
-            Notify(lists.Error, true);
+            End(RunPhase.Stopped, "Couldn't start", lists.Error, true);
             return;
         }
         if (unknown.Count > 0)
@@ -106,71 +130,113 @@ internal sealed unsafe class RunEngine : IDisposable
             targets = targets.Where(t => !unknown.Contains(t.ItemId)).ToList();
         }
         Targets = targets;
-
         GatherBuddyIpc.SetEnabled(true);
-        Phase = RunPhase.Gathering;
         Headline = "Gathering";
-        Add($"Started gathering {targets.Count} {(targets.Count == 1 ? "item" : "items")} with GatherBuddy Reborn.", false);
-        Notify("Run started: gathering " + targets.Count + (targets.Count == 1 ? " item." : " items."), false);
+        Add($"Gathering {targets.Count} {(targets.Count == 1 ? "item" : "items")} with GatherBuddy Reborn.", false);
     }
 
-    /// <summary>Soft pause: finishes the node being gathered, then stops.</summary>
+    private void StartCrafting()
+    {
+        Stage = RunStage.Craft;
+        var jobs = CraftJobs();
+        if (jobs.Count == 0) { Finish(); return; }
+        Crafter.Begin(jobs);
+        Headline = "Crafting";
+        Add($"Crafting {jobs.Sum(j => j.Crafts)} items across {jobs.Count} {(jobs.Count == 1 ? "recipe" : "recipes")}.", false);
+    }
+
+    /// <summary>Soft pause: finishes the node being gathered or the item being crafted, then stops.</summary>
     public void Pause()
     {
-        if (Phase != RunPhase.Gathering) return;
+        if (Phase != RunPhase.Running) return;
         Phase = RunPhase.Pausing;
-        Headline = "Pausing after this node";
-        Add("Pause asked for; finishing the current node first.", false);
+        if (Stage == RunStage.Craft)
+        {
+            Crafter.RequestPause();
+            Headline = "Pausing after this craft";
+        }
+        else Headline = "Pausing after this node";
+        Add("Pause asked for; finishing what's under way first.", false);
     }
 
     public void Resume()
     {
         if (Phase is not (RunPhase.Paused or RunPhase.Pausing)) return;
-        if (Phase == RunPhase.Paused) GatherBuddyIpc.SetEnabled(true);
-        Phase = RunPhase.Gathering;
-        Headline = "Gathering";
+        if (Stage == RunStage.Craft) Crafter.Resume();
+        else if (Phase == RunPhase.Paused) GatherBuddyIpc.SetEnabled(true);
+        Phase = RunPhase.Running;
+        Headline = Stage == RunStage.Craft ? "Crafting" : "Gathering";
         gbrOffSince = DateTime.MinValue;
         Add("Resumed.", false);
     }
 
-    public void Stop(string reason = "Stopped.", bool problem = false)
+    /// <summary>
+    /// Ends the run. During a craft it waits for that craft to finish (materials are lost otherwise),
+    /// unless <paramref name="now"/> is set because the game or a plugin went away.
+    /// </summary>
+    public void Stop(string reason = "Stopped.", bool problem = false, bool now = false)
     {
         if (!Active) return;
+        if (!now && Stage == RunStage.Craft && Crafter.MidCraft)
+        {
+            pendingStop = reason;
+            pendingStopProblem = problem;
+            Crafter.RequestPause();
+            Phase = RunPhase.Stopping;
+            Headline = "Stopping after this craft";
+            Add("Stopping once the current craft is finished.", problem);
+            return;
+        }
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
-        Phase = RunPhase.Stopped;
-        EndedAt = DateTime.Now;
-        Headline = problem ? "Stopped" : "Stopped by you";
-        Detail = reason;
-        Add(reason, problem);
-        Notify(reason, problem);
+        End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
 
     private void Finish()
     {
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
-        Phase = RunPhase.Finished;
-        EndedAt = DateTime.Now;
-        Headline = "Gathering done";
-        Detail = "Everything to gather for this order is in your bags. Buying, monster drops and crafting arrive in the next milestones.";
-        Add("Gathering done.", false);
-        Notify("Gathering done for " + plugin.Config.Order.Name + ".", false);
+        var skipped = Crafter.History.Where(h => h.Skipped != null).ToList();
+        var detail = skipped.Count == 0
+            ? "Everything for this order is gathered and crafted."
+            : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ". Buying from vendors arrives in a later milestone.";
+        End(RunPhase.Finished, "Order done", detail, skipped.Count > 0);
     }
 
-    /// <summary>Framework thread.</summary>
+    private void End(RunPhase phase, string headline, string detail, bool problem)
+    {
+        Phase = phase;
+        EndedAt = DateTime.Now;
+        Headline = headline;
+        Detail = detail;
+        Add(detail, problem);
+        Notify(phase == RunPhase.Finished ? headline + " for " + plugin.Config.Order.Name + ". " + detail : detail, problem);
+    }
+
+    /// <summary>Framework thread, every frame.</summary>
     public void Tick()
     {
-        if (!Active || DateTime.UtcNow < nextCheck) return;
+        if (!Active) return;
+
+        // The crafter needs every frame; the checks below only twice a second.
+        if (Stage == RunStage.Craft && Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Stopping) Crafter.Tick();
+        if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
 
-        if (!Services.ClientState.IsLoggedIn) { Stop("You logged out.", true); return; }
-        if (!GatherBuddyIpc.Available) { Stop("GatherBuddy Reborn was unloaded.", true); return; }
-        if (!Vnav.Available) { Stop("vnavmesh was unloaded.", true); return; }
+        if (!Services.ClientState.IsLoggedIn) { Stop("You logged out.", true, now: true); return; }
         var player = Services.Objects.LocalPlayer;
         if (player == null) return; // zoning
-        if (player.IsDead) { Stop("You were knocked out. Retrying after a knock-out comes with the full run.", true); return; }
-        if (Stock.FreeSlots() <= MinFreeSlots) { Stop($"Only {MinFreeSlots} inventory slots left.", true); return; }
+        if (player.IsDead) { Stop("You were knocked out. Retrying after a knock-out comes with the full run.", true, now: true); return; }
+        if (Stock.FreeSlots() <= MinFreeSlots && Phase != RunPhase.Stopping) { Stop($"Only {MinFreeSlots} inventory slots left.", true); return; }
+
+        if (Stage == RunStage.Gather) TickGathering();
+        else TickCrafting();
+    }
+
+    private void TickGathering()
+    {
+        if (!GatherBuddyIpc.Available) { Stop("GatherBuddy Reborn was unloaded.", true, now: true); return; }
+        if (!Vnav.Available) { Stop("vnavmesh was unloaded.", true, now: true); return; }
 
         // A duty pop takes over: switch gathering off, carry on once the duty is over.
         var inDuty = Services.Condition[ConditionFlag.BoundByDuty] || Services.Condition[ConditionFlag.BoundByDuty56];
@@ -187,10 +253,26 @@ internal sealed unsafe class RunEngine : IDisposable
             if (inDuty) return;
             pausedForDuty = false;
             Add("Duty over; carrying on.", false);
-            if (Phase == RunPhase.Gathering) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
+            if (Phase == RunPhase.Running) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
         }
 
-        if (GatherTargets.AllDone(Targets, BagCount)) { Finish(); return; }
+        if (GatherTargets.AllDone(Targets, GbrCount))
+        {
+            GatherBuddyIpc.SetEnabled(false);
+            lists.Uninstall();
+            Add("Gathering done.", false);
+            if (Phase == RunPhase.Pausing)
+            {
+                Phase = RunPhase.Paused;
+                Stage = RunStage.Craft;
+                Headline = "Paused";
+                Crafter.Begin(CraftJobs());
+                Crafter.RequestPause();
+                return;
+            }
+            StartCrafting();
+            return;
+        }
 
         var busy = Services.Condition[ConditionFlag.Gathering] || Services.Condition[ConditionFlag.ExecutingGatheringAction] || Services.Condition[ConditionFlag.Fishing];
         switch (Phase)
@@ -203,11 +285,34 @@ internal sealed unsafe class RunEngine : IDisposable
                 Add("Paused.", false);
                 break;
 
-            case RunPhase.Gathering:
+            case RunPhase.Running:
                 Detail = GatherBuddyIpc.Status;
                 Headline = GatherBuddyIpc.Waiting ? "Waiting for a timed node" : "Gathering";
                 WatchGatherBuddy();
                 break;
+        }
+    }
+
+    private void TickCrafting()
+    {
+        Detail = Crafter.Status;
+        if (Crafter.Finished)
+        {
+            if (Crafter.Failure is { } failure) Stop(failure, true, now: true);
+            else if (pendingStop != null) Stop(pendingStop, pendingStopProblem, now: true);
+            else Finish();
+            return;
+        }
+        if (Crafter.IsPaused)
+        {
+            if (Phase == RunPhase.Stopping) { Stop(pendingStop ?? "Stopped.", pendingStopProblem, now: true); return; }
+            if (Phase == RunPhase.Pausing)
+            {
+                Phase = RunPhase.Paused;
+                Headline = "Paused";
+                Detail = "Resume to carry on crafting.";
+                Add("Paused.", false);
+            }
         }
     }
 
@@ -235,19 +340,15 @@ internal sealed unsafe class RunEngine : IDisposable
     }
 
     /// <summary>Still to gather for one target right now.</summary>
-    public static int Left(GatherTarget t) => GatherTargets.Left(t, BagCount);
+    public static int Left(GatherTarget t) => GatherTargets.Left(t, GbrCount);
 
     /// <summary>What GatherBuddy Reborn counts: normal-quality items in the main bags.</summary>
-    private static int BagCount(uint itemId)
-    {
-        var inv = InventoryManager.Instance();
-        return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0);
-    }
+    private static int GbrCount(uint itemId) => GameState.BagCount(itemId, false);
 
     private void Add(string text, bool problem)
     {
         log.Insert(0, new RunLogEntry(DateTime.Now, text, problem));
-        if (log.Count > 60) log.RemoveAt(log.Count - 1);
+        if (log.Count > 80) log.RemoveAt(log.Count - 1);
     }
 
     private static void Notify(string text, bool problem)

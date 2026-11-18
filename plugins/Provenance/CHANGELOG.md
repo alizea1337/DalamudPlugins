@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0
+
+Crafting.
+
+- After gathering, the run crafts the whole order, intermediates first. For each recipe it
+  switches to the job's best gearset, repairs below a set percentage (self-repair with Dark
+  Matter), uses the food and medicine picked on the Character page, and asks Raphael for a
+  rotation worked out for your live stats. Ordered items aim for high quality; intermediates get
+  the fastest rotation.
+- Ingredients are filled in NQ first, then HQ. The rotation is played action by action; if it
+  ends early the item is finished with Basic Synthesis.
+- Pause and Stop wait for the item being crafted, so no materials are lost ("Stop now" skips
+  the wait). Recipes whose materials aren't in your bags are skipped and listed at the end.
+- Run page shows the recipe, craft number, the current action of the rotation and the queue.
+- Crafting settings: aim for high quality, specialist actions, repair threshold.
+
 ## 0.2.0
 
 Gathering runs.

@@ -60,6 +60,24 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Buy instead of gathering when a vendor sells it", ref v, "Faster for common materials such as shards and basic ores.")) { Config.Buying.PreferVendor = v; Changed(); }
         Ui.EndCard();
 
+        // Crafting
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Crafting");
+        Ui.Wrapped("Rotations come from Raphael and are worked out for your stats right before each recipe, with the food and medicine from the Character page.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var cr = Config.Crafting;
+        v = cr.AimForHq;
+        if (Ui.Checkbox("Aim for high quality on ordered items", ref v, "Intermediate materials always get the fastest rotation, since their quality doesn't matter.")) { cr.AimForHq = v; Config.Save(); }
+        v = cr.UseSpecialistActions;
+        if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
+        Ui.Text("Repair gear below");
+        ImGui.SameLine(0, 10 * s);
+        var repair = cr.RepairBelow;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##repair", ref repair, 0, 99, repair == 0 ? "never" : "%d%%")) { cr.RepairBelow = repair; Config.Save(); }
+        Ui.Wrapped("Self-repair needs Dark Matter of a high enough grade in your bags.", Palette.TextMuted);
+        Ui.EndCard();
+
         // Plugins
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Plugins Provenance works with");

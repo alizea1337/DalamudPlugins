@@ -40,6 +40,10 @@ Open it with `/provenance` (or `/prov`).
   current node first. The run stops on its own when you are knocked out, when only 2 inventory
   slots are left, or when GatherBuddy Reborn or vnavmesh is unloaded; a duty pauses it until the
   duty ends. Every stop shows a notification and a chat line.
+- **Run (crafting)**: after gathering, every recipe is crafted, intermediates first, on the job's
+  best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
+  (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
+  being crafted. Recipes whose materials aren't in your bags are skipped and listed.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
@@ -51,7 +55,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | Milestone | Scope |
 |---|---|
 | M2 | Gathering through GatherBuddy Reborn, movement with vnavmesh, own teleport (done) |
-| M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver |
+| M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver (done) |
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules |
 | M5 | Retainer withdrawal at a summoning bell, vendor buying |
 | M6 | Monster drops with a basic combo on a job you choose |
