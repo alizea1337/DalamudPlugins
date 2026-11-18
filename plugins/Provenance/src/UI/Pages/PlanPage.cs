@@ -5,6 +5,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Provenance.Core.Catalog;
+using Provenance.Core.Estimating;
 using Provenance.Core.Planning;
 using Provenance.Data;
 using Provenance.UI.Theme;
@@ -20,6 +21,11 @@ internal sealed class PlanPage : Page
     private const float RowHeight = 36f;
 
     private DateTime clearArmedUntil = DateTime.MinValue;
+    private static OrderEstimate currentEstimate = OrderEstimate.Empty;
+
+    /// <summary>", about 3 min" for a recipe's crafts in this order.</summary>
+    private static string CraftTime(RecipeInfo recipe)
+        => currentEstimate.Crafts.FirstOrDefault(c => c.Recipe.RecipeId == recipe.RecipeId) is { } c ? ", " + Estimator.Describe(c.Duration) : "";
 
     public PlanPage(Plugin plugin) : base(plugin) { }
 
@@ -35,7 +41,9 @@ internal sealed class PlanPage : Page
             if (Config.Order.IsEmpty) return ("The order is empty", Palette.TextFaint);
             if (plan.Missing.Count > 0) return (plan.Missing.Count == 1 ? "1 item to get yourself before starting" : $"{plan.Missing.Count} items to get yourself before starting", Palette.Danger);
             var crafts = plan.CraftSteps.Sum(l => l.Crafts);
-            return ($"Ready: {crafts} {(crafts == 1 ? "craft" : "crafts")} across {plan.CraftSteps.Count} {(plan.CraftSteps.Count == 1 ? "recipe" : "recipes")}", Palette.Accent);
+            var total = Plans.Estimate.Total;
+            return ($"Ready: {crafts} {(crafts == 1 ? "craft" : "crafts")} across {plan.CraftSteps.Count} {(plan.CraftSteps.Count == 1 ? "recipe" : "recipes")}" +
+                    (total > TimeSpan.Zero ? ", " + Estimator.Describe(total) + " in total" : ""), Palette.Accent);
         }
     }
 
@@ -70,6 +78,7 @@ internal sealed class PlanPage : Page
         }
 
         var plan = Plans.Plan;
+        currentEstimate = Plans.Estimate;
         DrawOrderHeader();
         DrawMissing(plan, catalog);
         DrawTargets(plan, catalog);
@@ -101,6 +110,25 @@ internal sealed class PlanPage : Page
         if (Ui.Button("Browse recipes", Ui.Kind.Secondary, FontAwesomeIcon.Search)) Go<BrowsePage>();
     }
 
+    /// <summary>One line under the order name: the whole order, split into gathering and crafting.</summary>
+    private void DrawEstimateLine()
+    {
+        var e = Plans.Estimate;
+        if (e.Total <= TimeSpan.Zero) return;
+        var parts = new List<string>();
+        if (e.Gathering > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Gathering).Replace("about ", "") + " gathering");
+        if (e.Crafting > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Crafting).Replace("about ", "") + " crafting");
+        var text = $"{Capitalize(Estimator.Describe(e.Total))} for the whole order ({string.Join(", ", parts)}).";
+        if (e.HasTimedNodes) text += " Waiting for timed nodes comes on top.";
+        if (e.Approximate) text += Plans.Profile == null ? " Check your character for closer crafting times." : " Still working out some rotations.";
+        Ui.Icon(FontAwesomeIcon.Clock, Palette.TextMuted, small: true);
+        ImGui.SameLine(0, 8 * Ui.S);
+        Ui.Wrapped(text, Palette.TextMuted);
+        Ui.Tooltip("Estimates follow your own runs: each craft and gathering session adjusts the timings.");
+    }
+
+    private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
     private void DrawOrderHeader()
     {
         var s = Ui.S;
@@ -116,6 +144,7 @@ internal sealed class PlanPage : Page
             ImGui.PopStyleColor();
         }
         Ui.Tooltip("Rename the order");
+        DrawEstimateLine();
 
         var armed = DateTime.UtcNow < clearArmedUntil;
         var label = armed ? "Click again to clear" : "Clear order";
@@ -180,10 +209,12 @@ internal sealed class PlanPage : Page
                 Ui.Chip($"{r.Job.Abbreviation()} level {r.Level}", Palette.JobColor(r.Job));
                 if (line.Crafts == 0) { ImGui.SameLine(0, 6 * s); Ui.Chip("covered by what you own", Palette.Accent); }
                 else if (r.Yield > 1) { ImGui.SameLine(0, 6 * s); Ui.Chip($"{line.Crafts} crafts make {line.Produced}", Palette.TextMuted); }
+                ReadyChip(orderLine.ItemId);
             }
             else if (line != null)
             {
                 Ui.Chip(Palette.SupplyLabel(line.Supply), Palette.SupplyColor(line.Supply));
+                ReadyChip(orderLine.ItemId);
             }
 
             var qtyW = 104 * s;
@@ -207,6 +238,15 @@ internal sealed class PlanPage : Page
             ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h + 4 * s));
         }
         Ui.EndCard();
+    }
+
+    /// <summary>"ready in about 12 min", counted from the start of the run in the order it works.</summary>
+    private void ReadyChip(uint itemId)
+    {
+        if (!Plans.Estimate.ReadyAfter.TryGetValue(itemId, out var after) || after <= TimeSpan.Zero) return;
+        ImGui.SameLine(0, 6 * Ui.S);
+        Ui.Chip("ready in " + Estimator.Describe(after), Palette.TextMuted, FontAwesomeIcon.Clock);
+        Ui.Tooltip("From the start of the run: gathering first, then the recipes in order, ingredients before the items that use them.");
     }
 
     // ------------------------------------------------------------------ material totals
@@ -271,7 +311,7 @@ internal sealed class PlanPage : Page
         {
             Supply.GatherTimed => ("timed node", Palette.SupplyColor(Supply.GatherTimed)),
             Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each", Palette.SupplyColor(Supply.Vendor)),
-            Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}", Palette.JobColor(line.Recipe.Job)),
+            Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}" + CraftTime(line.Recipe), Palette.JobColor(line.Recipe.Job)),
             _ => null,
         };
         if (chip is { } c && !(line.Supply == Supply.Craft && line.Crafts == 0))

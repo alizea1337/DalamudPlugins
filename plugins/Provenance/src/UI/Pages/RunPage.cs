@@ -107,7 +107,8 @@ internal sealed class RunPage : Page
             Ui.Bar("##craftprogress", c.CraftsDone / (float)c.CraftsTotal, Palette.Accent, barW, 8);
             Ui.Muted($"{c.CraftsDone} of {c.CraftsTotal} crafts done");
         }
-        Ui.Muted(Elapsed().TrimStart(',', ' '));
+        var left = Runs.TimeLeft();
+        Ui.Muted(Elapsed().TrimStart(',', ' ') + (left is { } l && l > TimeSpan.Zero ? ", " + Core.Estimating.Estimator.Describe(l) + " left" : ""));
         Ui.EndCard();
 
         if (crafting) DrawCrafting();
@@ -190,13 +191,13 @@ internal sealed class RunPage : Page
         }
 
         foreach (var (job, done, skipped) in c.History)
-            RecipeRow(job, done, skipped, catalog);
+            RecipeRow(job, done, skipped, catalog, null);
         foreach (var job in c.Upcoming)
-            RecipeRow(job, 0, null, catalog);
+            RecipeRow(job, 0, null, catalog, Plans.PerCraft(job.Recipe, job.Hq) * job.Crafts);
         Ui.EndCard();
     }
 
-    private static void RecipeRow(Run.CraftJob job, int done, string? skipped, Data.GameCatalog catalog)
+    private static void RecipeRow(Run.CraftJob job, int done, string? skipped, Data.GameCatalog catalog, TimeSpan? duration)
     {
         var s = Ui.S;
         var start = ImGui.GetCursorScreenPos();
@@ -208,6 +209,7 @@ internal sealed class RunPage : Page
         var finished = skipped == null && done >= job.Crafts;
         dl.AddText(new Vector2(start.X + 32 * s, ty), Palette.U32(finished ? Palette.TextMuted : Palette.Text), catalog.ItemName(job.Recipe.ItemId));
         var label = skipped != null ? "skipped: " + skipped : finished ? $"{done} crafted" : $"{done} of {job.Crafts}";
+        if (duration is { } d && !finished && skipped == null) label += ", " + Core.Estimating.Estimator.Describe(d);
         var col = skipped != null ? Palette.Warn : finished ? Palette.Accent : Palette.TextMuted;
         using (Ui.F.Small.Push())
         {

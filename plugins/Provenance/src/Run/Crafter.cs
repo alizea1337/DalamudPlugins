@@ -12,6 +12,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
 using Provenance.Core.Crafting;
+using Provenance.Core.Estimating;
 using Provenance.Data;
 using Provenance.Integrations;
 
@@ -35,7 +36,10 @@ internal sealed unsafe class Crafter
     private const uint RepairAction = 6;
 
     private readonly Plugin plugin;
-    private readonly Raphael raphael = new();
+    private Raphael raphael => plugin.Raphael;
+    private DateTime synthStarted;
+    private DateTime lastCraftEnded;
+    private int actionsUsed;
     private readonly Action<string, bool> log;
     private readonly Queue<CraftJob> queue = new();
     private readonly HashSet<string> warnedOnce = new();
@@ -138,6 +142,7 @@ internal sealed unsafe class Crafter
         {
             History.Add((Current, doneThisJob, null));
             Current = null;
+            plugin.Config.Save();
         }
         if (Current == null)
         {
@@ -284,6 +289,7 @@ internal sealed unsafe class Crafter
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped(),
                 Current.Hq ? null : 0);
             Status = "Working out the rotation";
+            raphael.ForgetFailure(request);
             solving = raphael.Solve(request);
             Wait(0.1);
             return;
@@ -351,6 +357,14 @@ internal sealed unsafe class Crafter
     {
         if (Visible("Synthesis"))
         {
+            synthStarted = DateTime.UtcNow;
+            actionsUsed = 0;
+            // Time between two crafts of the same recipe, for estimates.
+            if (lastCraftEnded != default && doneThisJob > 0 && synthStarted - lastCraftEnded < TimeSpan.FromSeconds(30))
+            {
+                var t = plugin.Config.Timings;
+                t.SecondsBetweenCrafts = Math.Clamp(Timings.Blend(t.SecondsBetweenCrafts, (synthStarted - lastCraftEnded).TotalSeconds), 1, 20);
+            }
             actionIndex = 0;
             actionPending = false;
             fallback = false;
@@ -417,6 +431,7 @@ internal sealed unsafe class Crafter
         deadline = DateTime.UtcNow.AddSeconds(6);
         stepIndexBefore = stepIndex;
         actionPending = GameState.Use(type, id);
+        if (actionPending) actionsUsed++;
         if (actionPending && !fallback) actionIndex++;
         Wait(0.25);
     }
@@ -432,6 +447,14 @@ internal sealed unsafe class Crafter
         doneThisJob++;
         CraftsDone++;
         CurrentAction = "";
+        lastCraftEnded = DateTime.UtcNow;
+        if (actionsUsed > 0 && synthStarted != default)
+        {
+            // Seconds per action, measured on this craft, for estimates.
+            var t = plugin.Config.Timings;
+            var perAction = (lastCraftEnded - synthStarted).TotalSeconds / actionsUsed;
+            if (perAction is > 0.5 and < 10) t.SecondsPerAction = Timings.Blend(t.SecondsPerAction, perAction);
+        }
         var name = plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId);
         log($"Crafted {name} ({doneThisJob} of {Current.Crafts}).", false);
         if (pauseRequested) { Pause(); return; }

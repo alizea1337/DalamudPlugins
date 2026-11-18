@@ -290,7 +290,8 @@ internal sealed class MainWindow : Window
         {
             var order = plugin.Config.Order;
             return (Palette.TextFaint, "Not running", order.IsEmpty ? "the order is empty" : order.Name,
-                null, order.IsEmpty ? "" : plan.Missing.Count > 0 ? $"{plan.Missing.Count} items to get yourself first" : $"{plan.CraftSteps.Sum(l => l.Crafts)} crafts planned");
+                null, order.IsEmpty ? "" : plan.Missing.Count > 0 ? $"{plan.Missing.Count} items to get yourself first"
+                    : $"{plan.CraftSteps.Sum(l => l.Crafts)} crafts planned, " + Core.Estimating.Estimator.Describe(plugin.Plans.Estimate.Total));
         }
 
         var dot = runs.Phase switch
@@ -306,16 +307,19 @@ internal sealed class MainWindow : Window
             var detail = c.Current is { } cur && catalog != null
                 ? $"{catalog.ItemName(cur.Recipe.ItemId)}, craft {Math.Min(c.DoneThisRecipe + 1, cur.Crafts)} of {cur.Crafts}" + (c.CurrentAction.Length > 0 ? ", " + c.CurrentAction : "")
                 : runs.Detail;
-            return (dot, runs.Headline, detail, c.CraftsDone / (float)c.CraftsTotal, $"{c.CraftsDone} of {c.CraftsTotal} crafts");
+            return (dot, runs.Headline, detail, c.CraftsDone / (float)c.CraftsTotal, $"{c.CraftsDone} of {c.CraftsTotal} crafts" + TimeLeftText());
         }
         var targets = runs.Targets;
         if (targets.Count > 0)
         {
             var got = targets.Count(t => Run.RunEngine.Left(t) == 0);
-            return (dot, runs.Headline, runs.Detail, got / (float)targets.Count, $"{got} of {targets.Count} gathered");
+            return (dot, runs.Headline, runs.Detail, got / (float)targets.Count, $"{got} of {targets.Count} gathered" + TimeLeftText());
         }
         return (dot, runs.Headline, runs.Detail, null, "");
     }
+
+    private string TimeLeftText()
+        => plugin.Runs.TimeLeft() is { } left && left > TimeSpan.Zero ? ", " + Core.Estimating.Estimator.Describe(left).Replace("about ", "") + " left" : "";
 
     private void DrawFooter(Vector2 pos, Vector2 size, float s)
     {

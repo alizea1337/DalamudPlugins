@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Lumina.Excel.Sheets;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
+using Provenance.Core.Crafting;
+using Provenance.Core.Estimating;
+using Provenance.Integrations;
 using Provenance.Core.Planning;
 
 namespace Provenance.Data;
@@ -20,21 +23,26 @@ internal sealed class PlanService : IDisposable
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     private readonly Func<Configuration> config;
+    private readonly Raphael raphael;
+    private DateTime nextEstimate = DateTime.MinValue;
     private readonly Task<GameCatalog> loading;
     private Dictionary<uint, int> owned = new();
     private DateTime nextStockCheck = DateTime.MinValue;
     private DateTime nextRebuild = DateTime.MinValue;
     private bool dirty = true;
 
-    public PlanService(Func<Configuration> config)
+    public PlanService(Func<Configuration> config, Raphael raphael)
     {
         this.config = config;
+        this.raphael = raphael;
         loading = Task.Run(GameCatalog.Build);
     }
 
     public GameCatalog? Catalog => loading.IsCompletedSuccessfully ? loading.Result : null;
     public string? LoadError => loading.IsFaulted ? loading.Exception?.GetBaseException().Message : null;
     public Plan Plan { get; private set; } = Plan.Empty;
+    /// <summary>How long the order takes, refreshed every second.</summary>
+    public OrderEstimate Estimate { get; private set; } = OrderEstimate.Empty;
     public IReadOnlyDictionary<uint, int> Owned => owned;
 
     /// <summary>Call after changing the order or any setting that affects planning.</summary>
@@ -59,6 +67,13 @@ internal sealed class PlanService : IDisposable
 
         // Levels and books change without touching the bags; rebuild now and then to pick them up.
         if (DateTime.UtcNow >= nextRebuild) dirty = true;
+        if (DateTime.UtcNow >= nextEstimate)
+        {
+            nextEstimate = DateTime.UtcNow.AddSeconds(1);
+            var cfg = config();
+            var hqItems = cfg.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
+            Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains);
+        }
         if (!dirty) return;
         dirty = false;
         nextRebuild = DateTime.UtcNow.AddSeconds(10);
@@ -72,6 +87,28 @@ internal sealed class PlanService : IDisposable
             RecipeBlocker = r => RecipeBlocker(r, catalog),
             HasTome = HasTome,
         });
+    }
+
+    /// <summary>
+    /// Rotation length for a recipe at the stats from the last character check. Asks Raphael in the
+    /// background the first time; null until it has answered (or when the character isn't checked).
+    /// </summary>
+    private int? Steps(RecipeInfo recipe, bool hq) => Request(recipe, hq) is { } r ? raphael.Solve(r) is { IsCompletedSuccessfully: true } t ? t.Result.Count : null : null;
+
+    private RaphaelRequest? Request(RecipeInfo recipe, bool hq)
+    {
+        var job = Profile?.Job(recipe.Job.ClassJobId());
+        if (job == null || job.Source == StatSource.None || job.Stats.Length < 3 || job.Level <= 0) return null;
+        return new RaphaelRequest(recipe.RecipeId, job.Level, job.Stats[0], job.Stats[1], job.Stats[2], job.Manipulation,
+            config().Crafting.UseSpecialistActions && job.Specialist, hq ? null : 0);
+    }
+
+    /// <summary>Time for one craft of a recipe, from the rotation length when known.</summary>
+    public TimeSpan PerCraft(RecipeInfo recipe, bool hq)
+    {
+        var t = config().Timings;
+        var steps = Steps(recipe, hq) ?? (hq ? Estimator.TypicalStepsHq : Estimator.TypicalStepsFast);
+        return TimeSpan.FromSeconds(steps * t.SecondsPerAction + t.SecondsBetweenCrafts);
     }
 
     /// <summary>The logged-in character's last check, if any.</summary>

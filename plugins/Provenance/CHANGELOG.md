@@ -15,6 +15,12 @@ Crafting.
   the wait). Recipes whose materials aren't in your bags are skipped and listed at the end.
 - Run page shows the recipe, craft number, the current action of the rotation and the queue.
 - Crafting settings: aim for high quality, specialist actions, repair threshold.
+- HQ per item: a toggle in Browse and on the plan; only HQ items get a quality rotation.
+- Compact strip (`/prov compact`): run state, progress and buttons in a small window.
+- Time estimates: each ordered item shows when it's ready ("ready in about 12 min", counted in
+  the order the run works), the plan shows the whole order split into gathering and crafting,
+  and the Run page and compact strip show the time left. Crafting times come from Raphael's
+  rotation length at your checked stats; every craft and gathering session adjusts the timings.
 
 ## 0.2.0
 

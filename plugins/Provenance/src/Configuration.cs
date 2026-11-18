@@ -20,6 +20,8 @@ public sealed class Configuration : IPluginConfiguration
     public WindowSettings Window { get; set; } = new();
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
+    /// <summary>Timing figures for estimates, adjusted by every run.</summary>
+    public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
     public Dictionary<ulong, CharacterProfile> Characters { get; set; } = new();
 
@@ -39,6 +41,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
+        c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
         c.Consumables.CraftMedicine ??= new();
         c.Consumables.GatherFood ??= new();

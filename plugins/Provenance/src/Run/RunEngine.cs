@@ -4,6 +4,7 @@ using System.Linq;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Interface.ImGuiNotification;
+using Provenance.Core.Estimating;
 using Provenance.Core.Planning;
 using Provenance.Core.Run;
 using Provenance.Data;
@@ -46,6 +47,8 @@ internal sealed class RunEngine : IDisposable
     private int reEnables;
     private bool pausedForDuty;
     private string? pendingStop;
+    private double gatherActiveSeconds;
+    private DateTime lastGatherTick;
     private bool pendingStopProblem;
 
     public RunEngine(Plugin plugin)
@@ -134,6 +137,8 @@ internal sealed class RunEngine : IDisposable
             targets = targets.Where(t => !unknown.Contains(t.ItemId)).ToList();
         }
         Targets = targets;
+        gatherActiveSeconds = 0;
+        lastGatherTick = DateTime.UtcNow;
         GatherBuddyIpc.SetEnabled(true);
         Headline = "Gathering";
         Add($"Gathering {targets.Count} {(targets.Count == 1 ? "item" : "items")} with GatherBuddy Reborn.", false);
@@ -260,10 +265,16 @@ internal sealed class RunEngine : IDisposable
             if (Phase == RunPhase.Running) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
         }
 
+        // Time actually spent gathering (not paused, not waiting for timed nodes), for the gathering rate.
+        var now = DateTime.UtcNow;
+        if (Phase == RunPhase.Running && !GatherBuddyIpc.Waiting) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
+        lastGatherTick = now;
+
         if (GatherTargets.AllDone(Targets, GbrCount))
         {
             GatherBuddyIpc.SetEnabled(false);
             lists.Uninstall();
+            LearnGatheringRate();
             Add("Gathering done.", false);
             if (Phase == RunPhase.Pausing)
             {
@@ -318,6 +329,33 @@ internal sealed class RunEngine : IDisposable
                 Add("Paused.", false);
             }
         }
+    }
+
+    private void LearnGatheringRate()
+    {
+        var gathered = Targets.Where(t => t.Supply != Supply.Fish).Sum(t => t.Remaining);
+        if (gatherActiveSeconds < 60 || gathered < 10 || Targets.Any(t => t.Supply == Supply.Fish)) return;
+        var t = plugin.Config.Timings;
+        t.GatheredPerMinute = Math.Clamp(Timings.Blend(t.GatheredPerMinute, gathered / (gatherActiveSeconds / 60)), 1, 120);
+        plugin.Config.Save();
+    }
+
+    /// <summary>Estimated time until the run is done, or null when not running.</summary>
+    public TimeSpan? TimeLeft()
+    {
+        if (!Active) return null;
+        var plans = plugin.Plans;
+        var crafting = TimeSpan.Zero;
+        if (Stage == RunStage.Craft)
+        {
+            if (Crafter.Current is { } cur) crafting += plans.PerCraft(cur.Recipe, cur.Hq) * Math.Max(0, cur.Crafts - Crafter.DoneThisRecipe);
+            foreach (var job in Crafter.Upcoming) crafting += plans.PerCraft(job.Recipe, job.Hq) * job.Crafts;
+            return crafting;
+        }
+        var t = plugin.Config.Timings;
+        var left = Targets.Where(x => x.Supply != Supply.Fish).Sum(Left);
+        var fish = Targets.Where(x => x.Supply == Supply.Fish).Sum(Left);
+        return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute)) + plans.Estimate.Crafting;
     }
 
     /// <summary>GatherBuddy Reborn can switch itself off; turn it back on a few times before giving up.</summary>

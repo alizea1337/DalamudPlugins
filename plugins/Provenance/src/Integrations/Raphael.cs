@@ -21,6 +21,8 @@ internal sealed class Raphael
     private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
 
     private readonly ConcurrentDictionary<string, Task<List<uint>>> cache = new();
+    /// <summary>Estimates ask for many recipes at once; two solver processes at a time is plenty.</summary>
+    private static readonly SemaphoreSlim Gate = new(2);
 
     /// <summary>Where raphael-cli was found, or null.</summary>
     public static string? ExecutablePath()
@@ -51,15 +53,28 @@ internal sealed class Raphael
         return null;
     }
 
+    /// <summary>Cached per request for the session; failures stay cached too, so a broken recipe isn't retried every second.</summary>
     public Task<List<uint>> Solve(RaphaelRequest request)
+        => cache.GetOrAdd(request.CacheKey, _ => Task.Run(() => Run(request)));
+
+    /// <summary>The finished answer for a request, without starting one.</summary>
+    public List<uint>? Known(RaphaelRequest request)
+        => cache.TryGetValue(request.CacheKey, out var t) && t.IsCompletedSuccessfully ? t.Result : null;
+
+    /// <summary>Drops a cached failure so the next solve tries again (the crafter does this before a real craft).</summary>
+    public void ForgetFailure(RaphaelRequest request)
     {
-        var task = cache.GetOrAdd(request.CacheKey, _ => Task.Run(() => Run(request)));
-        // Don't keep failures; a later try may work (for example after Raphael is installed).
-        if (task.IsFaulted || task.IsCanceled) cache.TryRemove(request.CacheKey, out _);
-        return task;
+        if (cache.TryGetValue(request.CacheKey, out var t) && (t.IsFaulted || t.IsCanceled)) cache.TryRemove(request.CacheKey, out _);
     }
 
     private static async Task<List<uint>> Run(RaphaelRequest request)
+    {
+        await Gate.WaitAsync().ConfigureAwait(false);
+        try { return await RunOne(request).ConfigureAwait(false); }
+        finally { Gate.Release(); }
+    }
+
+    private static async Task<List<uint>> RunOne(RaphaelRequest request)
     {
         var exe = ExecutablePath() ?? throw new FileNotFoundException("raphael-cli.exe wasn't found next to Provenance or GatherBuddy Reborn.");
         var args = RaphaelCli.Arguments(request);

@@ -22,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
 
     internal Configuration Config { get; }
     internal PlanService Plans { get; }
+    internal Raphael Raphael { get; } = new();
     internal RunEngine Runs { get; }
     internal MainWindow Main { get; }
 
@@ -36,7 +37,7 @@ public sealed class Plugin : IDalamudPlugin
         fonts = new Fonts();
         Ui.Init(fonts);
 
-        Plans = new PlanService(() => Config);
+        Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);
         Main = new MainWindow(this, new Page[]
         {
