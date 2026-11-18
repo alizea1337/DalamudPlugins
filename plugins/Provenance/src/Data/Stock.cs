@@ -18,13 +18,28 @@ internal static unsafe class Stock
         InventoryType.PremiumSaddleBag1, InventoryType.PremiumSaddleBag2,
     };
 
-    public static Dictionary<uint, int> Snapshot(StockSettings settings)
+    public static Dictionary<uint, int> Snapshot(Configuration config)
     {
+        var settings = config.Stock;
         var counts = new Dictionary<uint, int>();
         var manager = InventoryManager.Instance();
         if (manager == null) return counts;
         if (settings.Inventory) Add(manager, Bags, counts);
         if (settings.Saddlebag) Add(manager, Saddlebags, counts);
+        if (settings.Retainers)
+            foreach (var (id, n) in RetainerCache.Totals(config))
+                counts[id] = counts.GetValueOrDefault(id) + n;
+        return counts;
+    }
+
+    /// <summary>Bags and saddlebag only (what a craft or a vendor can use without visiting a retainer).</summary>
+    public static Dictionary<uint, int> OnHand(Configuration config)
+    {
+        var counts = new Dictionary<uint, int>();
+        var manager = InventoryManager.Instance();
+        if (manager == null) return counts;
+        Add(manager, Bags, counts);
+        if (config.Stock.Saddlebag) Add(manager, Saddlebags, counts);
         return counts;
     }
 

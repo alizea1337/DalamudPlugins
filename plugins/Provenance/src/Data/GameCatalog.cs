@@ -64,6 +64,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexGathering();
         c.IndexFishing();
         c.IndexVendors();
+        c.IndexBells();
         c.IndexDrops();
         c.IndexNames();
         c.IndexBooks();
@@ -220,17 +221,29 @@ internal sealed class GameCatalog : IGameCatalog
             }
     }
 
+    /// <summary>Event objects that are summoning bells (every row named like the classic one).</summary>
+    public HashSet<uint> SummoningBells { get; } = new();
+
+    private void IndexBells()
+    {
+        var names = Services.Data.GetExcelSheet<EObjName>();
+        var bell = names.GetRowOrDefault(2000401)?.Singular.ExtractText();
+        if (string.IsNullOrEmpty(bell)) return;
+        foreach (var row in names)
+            if (row.Singular.ExtractText().Equals(bell, StringComparison.OrdinalIgnoreCase)) SummoningBells.Add(row.RowId);
+    }
+
+    /// <summary>Gil vendors the run can actually reach (known position, city or open zone).</summary>
+    public VendorIndex Vendors { get; private set; } = new();
+
     private void IndexVendors()
     {
-        var items = Services.Data.GetExcelSheet<Item>();
-        foreach (var shop in Services.Data.GetSubrowExcelSheet<GilShopItem>())
-        foreach (var entry in shop)
+        Vendors = VendorIndex.Build();
+        foreach (var id in Vendors.Items)
         {
-            var id = entry.Item.RowId;
-            if (id == 0) continue;
-            var price = items.GetRowOrDefault(id)?.PriceMid ?? 0;
+            var price = Vendors.For(id).Min(o => o.Price);
             var existing = sources.GetValueOrDefault(id);
-            sources[id] = new ItemSources(existing.Flags | Obtain.Vendor, price);
+            sources[id] = existing with { Flags = existing.Flags | Obtain.Vendor, VendorPrice = price };
         }
     }
 

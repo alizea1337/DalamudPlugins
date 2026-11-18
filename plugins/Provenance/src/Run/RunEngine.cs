@@ -29,8 +29,11 @@ internal enum RunPhase
     Stopped,
 }
 
-/// <summary>Learn books first, then gather (crafting while timed nodes are closed), then craft the rest.</summary>
-internal enum RunStage { Learn, Gather, Craft }
+/// <summary>
+/// Learn books, take items out of retainers, buy from vendors, gather (crafting while timed nodes are
+/// closed), then craft the rest.
+/// </summary>
+internal enum RunStage { Retainers, Learn, Vendors, Gather, Craft }
 
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
@@ -82,6 +85,8 @@ internal sealed class RunEngine : IDisposable
         this.plugin = plugin;
         Crafter = new Crafter(plugin, Add);
         Crafter.Crafted += OnCrafted;
+        Shopper = new Shopper(plugin, Add);
+        Retainers = new RetainerRun(plugin, Add);
     }
 
     public RunPhase Phase { get; private set; } = RunPhase.Idle;
@@ -92,6 +97,8 @@ internal sealed class RunEngine : IDisposable
     public DateTime? EndedAt { get; private set; }
     public IReadOnlyList<GatherTarget> Targets { get; private set; } = Array.Empty<GatherTarget>();
     public Crafter Crafter { get; }
+    public Shopper Shopper { get; }
+    public RetainerRun Retainers { get; }
     public IReadOnlyList<RunLogEntry> Log => log;
     /// <summary>When the next timed node opens, while only timed nodes are left.</summary>
     public TimeSpan? NextWindow { get; private set; }
@@ -122,10 +129,12 @@ internal sealed class RunEngine : IDisposable
         if (Stock.FreeSlots() <= MinFreeSlots) return $"Your inventory has {MinFreeSlots} or fewer free slots.";
         var gather = GatherTargets.Build(plan, BagNq).Count > 0;
         var craft = plan.CraftSteps.Any(l => l.Crafts > 0);
-        if (!gather && !craft && plan.Learn.Count == 0) return "Nothing to gather or craft for this order.";
+        if (!gather && !craft && plan.Learn.Count == 0 && plan.Count(Supply.Vendor) == 0) return "Nothing to gather, buy or craft for this order.";
         if (gather && !GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
         if (gather && !Vnav.Available) return "vnavmesh isn't loaded.";
         if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
+        if ((plan.Count(Supply.Vendor) > 0 || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
+            return "vnavmesh isn't loaded; it walks to vendors and summoning bells.";
         if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
         return null;
     }
@@ -159,27 +168,120 @@ internal sealed class RunEngine : IDisposable
         craftQueueBuilt = false;
         Crafter.Begin(Array.Empty<CraftJob>());
 
-        // Books and tomes come first: recipes and legendary nodes need them.
-        toLearn.Clear();
-        foreach (var l in plugin.Plans.Plan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
-        if (toLearn.Count > 0) StartLearning();
-        else StartAfterLearning();
+        // Retainers first (a book may be with a retainer), then books, vendors, gathering, crafting.
+        StartRetainers();
         if (Active) Notify("Run started for " + plugin.Config.Order.Name + ".", false);
     }
 
+    /// <summary>Books and tomes from the bags come before buying and gathering: recipes and legendary nodes need them.</summary>
     private void StartLearning()
     {
+        plugin.Plans.Invalidate();
+        toLearn.Clear();
+        foreach (var l in plugin.Plans.Plan.Learn.Where(l => GameState.BagCount(l.ItemId) > 0)) toLearn.Enqueue(l.ItemId);
+        if (toLearn.Count == 0) { StartVendors(); return; }
         Stage = RunStage.Learn;
         Headline = "Learning";
         learnDeadline = default;
         Add($"Reading {toLearn.Count} {(toLearn.Count == 1 ? "book" : "books")} first.", false);
     }
 
-    private void StartAfterLearning()
+    private void StartAfterLearning() => StartVendors();
+
+    private void StartRetainers()
     {
+        var work = plugin.Config.Stock.Retainers ? RetainerWork() : new();
+        if (work.Count == 0) { StartLearning(); return; }
+        Stage = RunStage.Retainers;
+        Headline = "Taking items from retainers";
+        Retainers.Begin(work);
+        Add($"Taking items from {work.Count} {(work.Count == 1 ? "retainer" : "retainers")}.", false);
+    }
+
+    private void StartVendors()
+    {
+        plugin.Plans.Invalidate();
+        var purchases = Purchases();
+        if (purchases.Count == 0) { StartGatherOrCraft(); return; }
+        Stage = RunStage.Vendors;
+        Headline = "Buying from vendors";
+        Shopper.Begin(purchases);
+        var stops = purchases.Select(p => p.Offer.NpcId).Distinct().Count();
+        Add($"Buying {purchases.Count} {(purchases.Count == 1 ? "item" : "items")} from {stops} {(stops == 1 ? "vendor" : "vendors")}.", false);
+    }
+
+    private void StartGatherOrCraft()
+    {
+        plugin.Plans.Invalidate();
         var targets = GatherTargets.Build(plugin.Plans.Plan, BagNq);
         if (targets.Count > 0) StartGathering(targets);
         else StartCrafting();
+    }
+
+    /// <summary>
+    /// What to take from which retainer: for every item the plan counts as owned, the part that isn't
+    /// in the bags or saddlebag, taken from the retainers that hold it (as last seen).
+    /// </summary>
+    private List<(ulong Retainer, string Name, List<(uint Item, int Amount)> Items)> RetainerWork()
+    {
+        var result = new Dictionary<ulong, (string Name, List<(uint, int)> Items)>();
+        if (!Services.PlayerState.IsLoaded || RetainerCache.For(plugin.Config, Services.PlayerState.ContentId) is not { } retainers) return new();
+        var onHand = Stock.OnHand(plugin.Config);
+        foreach (var line in plugin.Plans.Plan.Lines)
+        {
+            var need = Math.Min(line.Needed, line.FromStock) - onHand.GetValueOrDefault(line.ItemId);
+            foreach (var (id, stock) in retainers.OrderByDescending(r => r.Value.Items.GetValueOrDefault(line.ItemId)))
+            {
+                if (need <= 0) break;
+                var have = stock.Items.GetValueOrDefault(line.ItemId);
+                if (have <= 0) continue;
+                var take = Math.Min(have, need);
+                if (!result.TryGetValue(id, out var entry)) result[id] = entry = (stock.Name, new List<(uint, int)>());
+                entry.Items.Add((line.ItemId, take));
+                need -= take;
+            }
+        }
+        return result.Select(kv => (kv.Key, kv.Value.Name, kv.Value.Items)).ToList();
+    }
+
+    /// <summary>
+    /// Vendor purchases: for each item, a vendor under the price cap in a zone the character can
+    /// teleport to, closest to an aetheryte; a vendor already on the route is reused when it sells it.
+    /// </summary>
+    private List<Purchase> Purchases()
+    {
+        var catalog = plugin.Plans.Catalog!;
+        var cap = plugin.Config.Buying.VendorMaxPrice;
+        var unlocked = Teleporter.Unlocked();
+        var here = Services.ClientState.TerritoryType;
+        float Score(VendorOffer o)
+        {
+            if (o.TerritoryId == here && Services.Objects.LocalPlayer is { } me)
+                return System.Numerics.Vector2.Distance(new System.Numerics.Vector2(me.Position.X, me.Position.Z), o.Position) - 10000;
+            var best = float.MaxValue;
+            foreach (var d in unlocked.Where(d => d.TerritoryId == o.TerritoryId))
+                if (Teleporter.Position(d.AetheryteId) is { } a)
+                    best = Math.Min(best, System.Numerics.Vector2.Distance(new System.Numerics.Vector2(a.X, a.Z), o.Position));
+            return best;
+        }
+
+        var chosen = new List<Purchase>();
+        foreach (var line in plugin.Plans.Plan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0))
+        {
+            var offers = catalog.Vendors.For(line.ItemId)
+                .Where(o => cap == 0 || o.Price <= cap)
+                .Where(o => o.TerritoryId == here || unlocked.Any(d => d.TerritoryId == o.TerritoryId))
+                .ToList();
+            if (offers.Count == 0)
+            {
+                Add($"No vendor you can reach sells {catalog.ItemName(line.ItemId)}; get it yourself.", true);
+                continue;
+            }
+            var onRoute = offers.FirstOrDefault(o => chosen.Any(c => c.Offer.NpcId == o.NpcId));
+            var offer = onRoute ?? offers.OrderBy(Score).First();
+            chosen.Add(new Purchase(line.ItemId, line.Remaining, offer));
+        }
+        return chosen;
     }
 
     private void StartGathering(List<GatherTarget> targets)
@@ -252,6 +354,8 @@ internal sealed class RunEngine : IDisposable
             Crafter.RequestPause();
             Headline = "Pausing after this craft";
         }
+        else if (Stage == RunStage.Vendors) { Shopper.RequestPause(); Headline = "Pausing after this vendor"; }
+        else if (Stage == RunStage.Retainers) { Retainers.RequestPause(); Headline = "Pausing after this retainer"; }
         else Headline = "Pausing after this node";
         Add("Pause asked for; finishing what's under way first.", false);
     }
@@ -262,9 +366,17 @@ internal sealed class RunEngine : IDisposable
         var wasPaused = Phase == RunPhase.Paused;
         Phase = RunPhase.Running;
         gbrOffSince = DateTime.MinValue;
-        if (Stage == RunStage.Craft || craftingBetween) Crafter.Resume();
+        if (Stage == RunStage.Vendors) Shopper.Resume();
+        else if (Stage == RunStage.Retainers) Retainers.Resume();
+        else if (Stage == RunStage.Craft || craftingBetween) Crafter.Resume();
         else if (Stage == RunStage.Gather && wasPaused) HandBackToGathering(log: false);
-        Headline = Crafting ? "Crafting" : Stage == RunStage.Learn ? "Learning" : "Gathering";
+        Headline = Crafting ? "Crafting" : Stage switch
+        {
+            RunStage.Learn => "Learning",
+            RunStage.Retainers => "Taking items from retainers",
+            RunStage.Vendors => "Buying from vendors",
+            _ => "Gathering",
+        };
         Add("Resumed.", false);
     }
 
@@ -287,6 +399,8 @@ internal sealed class RunEngine : IDisposable
         }
         GatherBuddyIpc.SetEnabled(false);
         lists.Uninstall();
+        Shopper.Cancel();
+        Retainers.Cancel();
         End(RunPhase.Stopped, problem ? "Stopped" : "Stopped by you", reason, problem);
     }
 
@@ -297,7 +411,7 @@ internal sealed class RunEngine : IDisposable
         var skipped = Crafter.History.Where(h => h.Skipped != null).ToList();
         var detail = skipped.Count == 0
             ? "Everything for this order is gathered and crafted."
-            : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ". Buying from vendors arrives in a later milestone.";
+            : $"Done, but {skipped.Count} {(skipped.Count == 1 ? "recipe was" : "recipes were")} skipped: " + string.Join("; ", skipped.Select(h => $"{plugin.Plans.Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped})")) + ".";
         End(RunPhase.Finished, "Order done", detail, skipped.Count > 0);
     }
 
@@ -320,7 +434,10 @@ internal sealed class RunEngine : IDisposable
         if (!Active) return;
 
         // The crafter needs every frame; the checks below only twice a second.
-        if (Crafting && !pausedForDuty && !knockedOut && Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Stopping) Crafter.Tick();
+        var working = !pausedForDuty && !knockedOut && Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Stopping;
+        if (working && Crafting) Crafter.Tick();
+        if (working && Stage == RunStage.Vendors) Shopper.Tick();
+        if (working && Stage == RunStage.Retainers) Retainers.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
 
@@ -334,6 +451,8 @@ internal sealed class RunEngine : IDisposable
         switch (Stage)
         {
             case RunStage.Learn: TickLearning(); break;
+            case RunStage.Retainers: TickErrand(Retainers.Finished, Retainers.Failure, Retainers.IsPaused, Retainers.Status, StartLearning); break;
+            case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartGatherOrCraft); break;
             case RunStage.Gather: TickGathering(); break;
             default: TickCrafting(); break;
         }
@@ -396,6 +515,16 @@ internal sealed class RunEngine : IDisposable
         Add("Duty over; carrying on.", false);
         if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
         return false;
+    }
+
+    /// <summary>Retainers and vendors: move on when done, stop on failure, honour pause and stop.</summary>
+    private void TickErrand(bool finished, string? failure, bool paused, string status, Action next)
+    {
+        Detail = status;
+        if (failure != null) { Stop(failure, true, now: true); return; }
+        if (Phase == RunPhase.Stopping) { Stop(pendingStop ?? "Stopped.", pendingStopProblem, now: true); return; }
+        if (paused && Phase == RunPhase.Pausing) { Phase = RunPhase.Paused; Headline = "Paused"; Add("Paused.", false); return; }
+        if (finished && Phase == RunPhase.Running) next();
     }
 
     /// <summary>Uses each book or tome from the bags and waits until the game counts it as learned.</summary>

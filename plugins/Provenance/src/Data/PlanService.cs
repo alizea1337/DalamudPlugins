@@ -57,7 +57,8 @@ internal sealed class PlanService : IDisposable
         if (DateTime.UtcNow >= nextStockCheck && Services.ClientState.IsLoggedIn)
         {
             nextStockCheck = DateTime.UtcNow.AddSeconds(1);
-            var snapshot = Stock.Snapshot(config().Stock);
+            RetainerCache.Tick(config());
+            var snapshot = Stock.Snapshot(config());
             if (!SameCounts(snapshot, owned))
             {
                 owned = snapshot;

@@ -57,7 +57,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M2 | Gathering through GatherBuddy Reborn, movement with vnavmesh, own teleport (done) |
 | M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver (done) |
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules (done) |
-| M5 | Retainer withdrawal at a summoning bell, vendor buying |
+| M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
 | M6 | Monster drops with a basic combo on a job you choose |
 | Later | Scrip items, several orders in a queue |
 

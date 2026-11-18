@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0
+
+Retainers and vendors.
+
+- Retainers: Provenance remembers what each retainer holds whenever you open it at a summoning
+  bell. With "Retainers" ticked, those items count as owned and a run takes them out first: it
+  walks to a nearby bell (or teleports to the aetheryte set in Settings), opens each retainer that
+  holds something the order needs, and moves the stacks into your bags.
+- Vendors: materials sold for gil under your price cap are bought. The run picks a vendor in a
+  zone you can teleport to (never a housing district), closest to an aetheryte, reuses a vendor
+  already on the route, walks there, picks the shop from the menu and buys up to 99 at a time.
+- Order of a run: retainers, books, vendors, gathering (crafting while timed nodes are closed),
+  crafting.
+- Getting stuck while walking: retried, then restarted from the zone's aetheryte, then reported.
+- Plan shows where vendor items are sold; the action bar says what an order needs instead of
+  "0 crafts".
+
 ## 0.4.0
 
 The whole run.

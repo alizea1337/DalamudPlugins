@@ -30,6 +30,16 @@ internal static class Ipc
         }
     }
 
+    public static TR? Func<T1, T2, T3, TR>(string name, T1 a, T2 b, T3 c, TR? fallback = default)
+    {
+        try { return Services.PluginInterface.GetIpcSubscriber<T1, T2, T3, TR>(name).InvokeFunc(a, b, c); }
+        catch (Exception e)
+        {
+            Services.Log.Verbose("IPC {Name} failed: {Message}", name, e.Message);
+            return fallback;
+        }
+    }
+
     public static TR? Func<T1, T2, TR>(string name, T1 a, T2 b, TR? fallback = default)
     {
         try { return Services.PluginInterface.GetIpcSubscriber<T1, T2, TR>(name).InvokeFunc(a, b); }
@@ -90,6 +100,14 @@ internal static class Vnav
         => Ipc.Func("vnavmesh.SimpleMove.PathfindAndMoveTo", destination, fly, false);
 
     public static Vector3? FlagPoint => Ipc.Func<Vector3?>("vnavmesh.Query.Mesh.FlagToPoint");
+
+    /// <summary>Walks until within <paramref name="range"/> of the destination.</summary>
+    public static bool MoveCloseTo(Vector3 destination, bool fly, float range)
+        => Ipc.Func<Vector3, bool, float, bool>("vnavmesh.SimpleMove.PathfindAndMoveCloseTo", destination, fly, range, false);
+
+    /// <summary>Closest point on the walkable mesh to a spot (height guessed from where the player stands).</summary>
+    public static Vector3? NearestPoint(Vector3 near, float halfXz, float halfY)
+        => Ipc.Func<Vector3, float, float, Vector3?>("vnavmesh.Query.Mesh.NearestPoint", near, halfXz, halfY);
 
     public static void Stop() => Ipc.Action("vnavmesh.Path.Stop");
 }

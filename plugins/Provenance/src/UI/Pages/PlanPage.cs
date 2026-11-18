@@ -42,8 +42,13 @@ internal sealed class PlanPage : Page
             if (plan.Missing.Count > 0) return (plan.Missing.Count == 1 ? "1 item to get yourself before starting" : $"{plan.Missing.Count} items to get yourself before starting", Palette.Danger);
             var crafts = plan.CraftSteps.Sum(l => l.Crafts);
             var total = Plans.Estimate.Total;
-            return ($"Ready: {crafts} {(crafts == 1 ? "craft" : "crafts")} across {plan.CraftSteps.Count} {(plan.CraftSteps.Count == 1 ? "recipe" : "recipes")}" +
-                    (total > TimeSpan.Zero ? ", " + Estimator.Describe(total) + " in total" : ""), Palette.Accent);
+            var parts = new List<string>();
+            var gather = plan.Count(Supply.Gather) + plan.Count(Supply.GatherTimed) + plan.Count(Supply.Fish);
+            if (gather > 0) parts.Add($"{gather} to gather");
+            if (plan.Count(Supply.Vendor) > 0) parts.Add($"{plan.Count(Supply.Vendor)} to buy");
+            if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
+            var what = parts.Count > 0 ? string.Join(", ", parts) : "everything is in your bags";
+            return ("Ready: " + what + (total > TimeSpan.Zero ? ", " + Estimator.Describe(total) + " in total" : ""), Palette.Accent);
         }
     }
 
@@ -340,7 +345,7 @@ internal sealed class PlanPage : Page
         (string Text, Vector4 Color)? chip = line.Supply switch
         {
             Supply.GatherTimed => (TimedChip(catalog.TimedMask(line.ItemId)), Palette.SupplyColor(Supply.GatherTimed)),
-            Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each", Palette.SupplyColor(Supply.Vendor)),
+            Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each" + VendorPlace(line.ItemId, catalog), Palette.SupplyColor(Supply.Vendor)),
             Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}" + CraftTime(line.Recipe), Palette.JobColor(line.Recipe.Job)),
             _ => null,
         };
@@ -382,6 +387,13 @@ internal sealed class PlanPage : Page
 
         ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
         ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    /// <summary>" at Material Supplier, Limsa Lominsa Lower Decks" for the cheapest reachable vendor.</summary>
+    private static string VendorPlace(uint itemId, GameCatalog catalog)
+    {
+        var offer = catalog.Vendors.For(itemId).OrderBy(o => o.Price).FirstOrDefault();
+        return offer == null ? "" : $" at {offer.NpcName}, {offer.PlaceName}";
     }
 
     /// <summary>"timed node, up now" / "timed node, opens in 12 min", from the node's Eorzea hours.</summary>

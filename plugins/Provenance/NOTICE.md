@@ -35,6 +35,12 @@ IMPLIED WARRANTIES ARE DISCLAIMED.
 Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds). Provenance runs it as a
 separate program to work out crafting rotations.
 
+## FFXIV Teamcraft (vendor positions)
+
+`Resources/vendors.json` holds world positions of gil vendors, converted by `tools/VendorTable` from
+Teamcraft's NPC data (<https://github.com/ffxiv-teamcraft/ffxiv-teamcraft>), MIT License,
+Copyright (c) 2017 Flavien Normand.
+
 ## ECommons
 
 <https://github.com/NightmareXIV/ECommons>, MIT License, Copyright (c) 2023 NightmareXIV. Used for

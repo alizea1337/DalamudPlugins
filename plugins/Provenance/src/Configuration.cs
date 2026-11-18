@@ -25,6 +25,8 @@ public sealed class Configuration : IPluginConfiguration
     public Core.Estimating.Timings Timings { get; set; } = new();
     /// <summary>Last "Check character" result per character (content id).</summary>
     public Dictionary<ulong, CharacterProfile> Characters { get; set; } = new();
+    /// <summary>Remembered retainer inventories per character (content id), then per retainer.</summary>
+    public Dictionary<ulong, Dictionary<ulong, Data.RetainerStock>> Retainers { get; set; } = new();
 
     public void Save() => Services.PluginInterface.SavePluginConfig(this);
 
@@ -43,6 +45,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Consumables ??= new();
         c.Crafting ??= new();
         c.Run ??= new();
+        c.Retainers ??= new();
         c.Timings ??= new();
         c.Consumables.CraftFood ??= new();
         c.Consumables.CraftMedicine ??= new();
@@ -96,6 +99,8 @@ public sealed class RunSettings
     public bool CraftWhileWaiting { get; set; } = true;
     /// <summary>Real minutes before a timed node opens to hand back to gathering.</summary>
     public int TimedLeadMinutes { get; set; } = 2;
+    /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
+    public uint BellAetheryte { get; set; } = 8;
 }
 
 [Serializable]

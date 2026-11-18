@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -22,6 +23,35 @@ internal sealed class SettingsPage : Page
 
     public override (string Text, Vector4 Color)? Status => ("Changes are saved as you make them", Palette.TextFaint);
 
+    private List<Integrations.Teleporter.Destination>? aetherytes;
+
+    private void BellPicker()
+    {
+        var s = Ui.S;
+        var id = Config.Run.BellAetheryte;
+        var name = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Aetheryte>().GetRowOrDefault(id)?.PlaceName.ValueNullable?.Name.ExtractText() ?? "Aetheryte " + id;
+        if (Ui.Button(name, Ui.Kind.Secondary, FontAwesomeIcon.MapMarkerAlt, id: "##bellpick"))
+        {
+            aetherytes = Integrations.Teleporter.Unlocked().OrderBy(d => d.Name).ToList();
+            ImGui.OpenPopup("##bellpopup");
+        }
+        ImGui.SetNextWindowSize(new Vector2(320 * s, 0));
+        if (!ImGui.BeginPopup("##bellpopup")) return;
+        if (ImGui.BeginChild("##bells", new Vector2(0, 300 * s)))
+        {
+            foreach (var d in aetherytes ?? new())
+                if (ImGui.Selectable(d.Name + "##" + d.AetheryteId, d.AetheryteId == id)) { Config.Run.BellAetheryte = d.AetheryteId; Config.Save(); ImGui.CloseCurrentPopup(); }
+        }
+        ImGui.EndChild();
+        ImGui.EndPopup();
+    }
+
+    private static string Ago(DateTime utc)
+    {
+        var span = DateTime.UtcNow - utc;
+        return span.TotalHours < 1 ? $"{Math.Max(1, (int)span.TotalMinutes)} min ago" : span.TotalDays < 1 ? $"{(int)span.TotalHours} h ago" : utc.ToLocalTime().ToString("d MMM");
+    }
+
     public override void Draw()
     {
         var s = Ui.S;
@@ -40,7 +70,19 @@ internal sealed class SettingsPage : Page
         v = st.Saddlebag;
         if (Ui.Checkbox("Saddlebag", ref v, "Counted once you've opened the saddlebag this session.")) { st.Saddlebag = v; Changed(); }
         v = st.Retainers;
-        if (Ui.Checkbox("Retainers", ref v, "Takes items out at a summoning bell during a run. Arrives together with retainer withdrawal.", enabled: false)) { }
+        var known = Services.PlayerState.IsLoaded ? Data.RetainerCache.For(Config, Services.PlayerState.ContentId) : null;
+        var retainerHint = known is { Count: > 0 }
+            ? $"Counts what your {known.Count} known retainers held when last opened; a run takes it out at a summoning bell."
+            : "Open each retainer once at a summoning bell so Provenance knows what they hold; a run then takes it out.";
+        if (Ui.Checkbox("Retainers", ref v, retainerHint)) { st.Retainers = v; Changed(); }
+        if (st.Retainers && known is { Count: > 0 })
+        {
+            foreach (var r in known.Values.OrderBy(r => r.Name))
+            {
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+                using (Ui.F.Small.Push()) Ui.Muted($"{r.Name}: {r.Items.Count} kinds of items, seen {Ago(r.SeenUtc)}");
+            }
+        }
         v = st.CountFinishedItems;
         if (Ui.Checkbox("Count ordered items I already have", ref v, "Off: ordered items are crafted or gathered in full, on top of what's already in your bags. Materials always use what you have.")) { st.CountFinishedItems = v; Changed(); }
         Ui.EndCard();
@@ -92,6 +134,14 @@ internal sealed class SettingsPage : Page
         ImGui.SetNextItemWidth(160 * s);
         if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
         Ui.Wrapped("Real minutes before a window opens; enough for the craft under way and the trip to the node.", Palette.TextMuted);
+        Ui.EndCard();
+
+        // Summoning bell
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Summoning bell");
+        Ui.Wrapped("When no summoning bell is nearby, the run teleports to this aetheryte and uses the bell there. Pick one with a bell close by (the Limsa Lominsa Lower Decks plaza has several).");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        BellPicker();
         Ui.EndCard();
 
         // Plugins
