@@ -238,9 +238,8 @@ internal sealed class RunPage : Page
     {
         if (Runs.StartedAt is not { } start) return "";
         var span = (Runs.EndedAt ?? DateTime.Now) - start;
-        return span.TotalMinutes < 1 ? ", under a minute so far"
-            : Runs.EndedAt != null ? $", took {(int)span.TotalMinutes} min"
-            : $", {(int)span.TotalMinutes} min so far";
+        var minutes = span.TotalMinutes < 1 ? "under a minute" : $"{(int)span.TotalMinutes} min";
+        return Runs.EndedAt != null ? ", took " + minutes : ", " + minutes + " so far";
     }
 
     private static string Ago(DateTime? at)

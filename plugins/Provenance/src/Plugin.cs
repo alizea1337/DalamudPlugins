@@ -49,7 +49,7 @@ public sealed class Plugin : IDalamudPlugin
         });
         windows.AddWindow(Main);
 
-        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings | start | pause | stop | tp <aetheryte> | flag" };
+        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings | start | pause | stop | compact | tp <aetheryte> | flag" };
         Services.Commands.AddHandler(Command, help);
         Services.Commands.AddHandler(Alias, new CommandInfo(OnCommand) { ShowInHelp = false });
         pluginInterface.UiBuilder.Draw += windows.Draw;
@@ -80,6 +80,7 @@ public sealed class Plugin : IDalamudPlugin
             case "stop": StopCommand(); return;
             case "tp": TeleportCommand(rest); return;
             case "flag": FlagCommand(); return;
+            case "compact": Main.IsOpen = true; Main.SetCompact(!Main.Compact); return;
         }
         switch (trimmed.ToLowerInvariant())
         {

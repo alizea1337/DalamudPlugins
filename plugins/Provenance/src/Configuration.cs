@@ -112,4 +112,9 @@ public sealed class ConsumableSettings
 public sealed class WindowSettings
 {
     public int LastTab { get; set; } = 0;
+    /// <summary>Show the small run strip instead of the full window.</summary>
+    public bool Compact { get; set; } = false;
+    /// <summary>Size of the full window, restored when leaving the compact strip.</summary>
+    public float FullWidth { get; set; } = 980;
+    public float FullHeight { get; set; } = 680;
 }
