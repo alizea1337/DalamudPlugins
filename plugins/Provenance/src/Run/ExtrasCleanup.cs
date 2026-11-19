@@ -8,9 +8,10 @@ namespace Provenance.Run;
 
 /// <summary>
 /// Throws away what gathering brought in over the order's amount (a node is always finished, so the
-/// last one usually overshoots), and fish caught on the side that the order doesn't need. Only
-/// normal-quality items in the main bags; a stack bigger than the extra is split first so exactly the
-/// extra goes. One step a second, so the server keeps up.
+/// last one usually overshoots), and fish caught on the side that the order doesn't need. Only plain
+/// normal-quality stacks in the main bags, the ones <see cref="GameState.BagCount(uint, bool)"/> counts:
+/// never high-quality items or collectables (such as the player's own collectable fish). A stack bigger
+/// than the extra is split first so exactly the extra goes. One step a second, so the server keeps up.
 /// </summary>
 internal sealed unsafe class ExtrasCleanup
 {
@@ -32,8 +33,8 @@ internal sealed unsafe class ExtrasCleanup
     public bool Done => work.Count == 0;
     public string Status { get; private set; } = "";
 
-    /// <param name="extras">Per gathered item, how many normal-quality ones to keep in the bags.</param>
-    /// <param name="byCatch">Per fish caught on the side, how many to keep (what was there before).</param>
+    /// <param name="extras">Per gathered item, how many normal-quality ones to keep in the bags (counted as <see cref="Plain"/>).</param>
+    /// <param name="byCatch">Per fish caught on the side, how many normal-quality ones to keep (at least what was there before).</param>
     public void Begin(IEnumerable<(uint ItemId, int Keep)> extras, IEnumerable<(uint ItemId, int Keep)>? byCatch = null)
     {
         work.Clear();
@@ -88,7 +89,8 @@ internal sealed unsafe class ExtrasCleanup
             for (var i = 0; i < container->Size; i++)
             {
                 var slot = container->GetInventorySlot(i);
-                if (slot == null || slot->ItemId != item || slot->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality)) continue;
+                // Only stacks the keep and the extra are counted in: a collectable keeps the plain item id in its slot.
+                if (slot == null || slot->ItemId != item || !Plain(slot)) continue;
                 var qty = (int)slot->Quantity;
                 if (qty <= extra && (whole == null || qty > whole.Value.Qty)) whole = (bag, (ushort)i, qty);
                 if (smallest == null || qty < smallest.Value.Qty) smallest = (bag, (ushort)i, qty);
@@ -102,7 +104,8 @@ internal sealed unsafe class ExtrasCleanup
 
     /// <summary>
     /// Normal-quality count of every item in the main bags, taken when gathering starts: fish caught on
-    /// the side are never thrown away below what was there before.
+    /// the side are never thrown away below what was there before. Counted like <see cref="GameState.BagCount(uint, bool)"/>
+    /// (plain stacks only), so it compares with the count the keep and the extra are worked out in.
     /// </summary>
     public static Dictionary<uint, int> NormalCounts()
     {
@@ -116,12 +119,20 @@ internal sealed unsafe class ExtrasCleanup
             for (var i = 0; i < container->Size; i++)
             {
                 var slot = container->GetInventorySlot(i);
-                if (slot == null || slot->ItemId == 0 || slot->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality)) continue;
+                if (slot == null || slot->ItemId == 0 || !Plain(slot)) continue;
                 counts[slot->ItemId] = counts.GetValueOrDefault(slot->ItemId) + (int)slot->Quantity;
             }
         }
         return counts;
     }
+
+    /// <summary>
+    /// A normal-quality stack that isn't a collectable: what the game's own item count (<see cref="GameState.BagCount(uint, bool)"/>
+    /// with hq false) counts. High-quality items and collectables are left out of that count, and a collectable
+    /// keeps the plain item id in its slot, so only these stacks may ever be thrown away.
+    /// </summary>
+    private static bool Plain(InventoryItem* slot)
+        => !slot->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality) && !slot->IsCollectable();
 
     private void Next()
     {

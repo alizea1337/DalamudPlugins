@@ -47,7 +47,7 @@ internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 /// </summary>
 internal sealed class RunEngine : IDisposable
 {
-    /// <summary>The two workers of the gathering stage; only one is ticked at a time.</summary>
+    /// <summary>The two workers of the gathering stage; only one works at a time (the fisher keeps its ticks while it reels in).</summary>
     private enum Worker { Land, Fish }
 
     private int MinFreeSlots => plugin.Config.Security.MinFreeSlots;
@@ -114,7 +114,7 @@ internal sealed class RunEngine : IDisposable
     private static readonly TimeSpan LandRecheck = TimeSpan.FromMinutes(2);
     /// <summary>A catch (or spearfishing node) still going after this long is let go.</summary>
     private static readonly TimeSpan ReelInPatience = TimeSpan.FromMinutes(2);
-    /// <summary>After the run ends with the rod out, the fisher keeps its ticks this long to reel in.</summary>
+    /// <summary>After fishing stops with the rod out, the fisher keeps its ticks this long to reel in.</summary>
     private static readonly TimeSpan WindDown = TimeSpan.FromSeconds(30);
     /// <summary>The trip to a fishing hole, on top of the settings' lead, when deciding to go for a fish window.</summary>
     private static readonly TimeSpan FishTrip = TimeSpan.FromMinutes(1.5);
@@ -140,7 +140,7 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Even that didn't bring the rod in or close the spearfishing window: the run stops.</summary>
     private bool fisherStuck;
     private DateTime nextQuitPress;
-    /// <summary>After the run ended with the rod out: the fisher keeps its ticks until this time to reel in.</summary>
+    /// <summary>After fishing stopped with the rod out: the fisher keeps its ticks until this time to reel in.</summary>
     private DateTime fishWindDownUntil;
     /// <summary>A gathering window opened while the fisher works (the gatherer had pressed the node just before).</summary>
     private DateTime? strayNodeSince;
@@ -158,7 +158,10 @@ internal sealed class RunEngine : IDisposable
     private DateTime fishWindowsEnd;
     /// <summary>Fish the run caught that went back into the water as bait (mooch, swimbait), for the log.</summary>
     private readonly Dictionary<uint, int> usedAsBait = new();
-    /// <summary>Normal-quality counts in the main bags when gathering started: by-catch is never thrown away below these.</summary>
+    /// <summary>
+    /// Plain normal-quality counts in the main bags when gathering started (as <see cref="GameState.BagCount(uint, bool)"/>
+    /// counts: no high-quality items, no collectables): by-catch is never thrown away below these.
+    /// </summary>
     private Dictionary<uint, int> bagsAtStart = new();
 
     public RunEngine(Plugin plugin)
@@ -588,6 +591,8 @@ internal sealed class RunEngine : IDisposable
         landActiveSeconds = fishActiveSeconds = 0;
         lastGatherTick = DateTime.UtcNow;
         ResetWorkers();
+        // From here on the stage ticks the fisher itself, also while it reels in.
+        fishWindDownUntil = default;
         bagsAtStart = ExtrasCleanup.NormalCounts();
 
         // The crafter gets the whole order now, so it can work between timed nodes and fish windows.
@@ -872,10 +877,13 @@ internal sealed class RunEngine : IDisposable
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
         if (working && Stage == RunStage.TurnIn) TurnIn.Tick();
         if (working && Stage == RunStage.Hunt) Hunt.Tick();
-        if (working && Stage == RunStage.Gather && !craftingBetween && tripSpot == null) TickWorker();
-        // Paused, or crafting meanwhile, with the rod still out: the fisher keeps its ticks to reel in.
-        else if (Stage == RunStage.Gather && !pausedForDuty && !knockedOut && worker == Worker.Fish
-                 && (Fish.Busy || Services.Condition[ConditionFlag.Fishing])) TickWorker();
+        var workerTicked = working && Stage == RunStage.Gather && !craftingBetween && tripSpot == null;
+        if (workerTicked) TickWorker(worker);
+        // Whoever works (the gatherer, the crafter meanwhile, nobody while paused): a fisher with the rod out, a
+        // catch, a spearfishing window or a bait trip still under way keeps its ticks until it has reeled in or
+        // closed it (and then pauses, as Pause() asked). Never twice in one frame.
+        if (Stage == RunStage.Gather && !pausedForDuty && !knockedOut && !(workerTicked && worker == Worker.Fish)
+            && (Fish.Busy || Services.Condition[ConditionFlag.Fishing])) TickWorker(Worker.Fish);
         if (Stage == RunStage.Return && !pausedForDuty && !knockedOut) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
@@ -907,22 +915,22 @@ internal sealed class RunEngine : IDisposable
         }
     }
 
-    /// <summary>The active worker's frame. A tick that keeps throwing stops the run (with the reason) instead of failing every frame.</summary>
-    private void TickWorker()
+    /// <summary>A worker's frame. A tick that keeps throwing stops the run (with the reason) instead of failing every frame.</summary>
+    private void TickWorker(Worker which)
     {
         if (workerError != null) return;
         try
         {
-            if (worker == Worker.Fish) Fish.Tick();
+            if (which == Worker.Fish) Fish.Tick();
             else Gather.Tick();
         }
         catch (Exception e)
         {
-            Services.Log.Error(e, "The {Worker} tick failed", worker);
+            Services.Log.Error(e, "The {Worker} tick failed", which);
             // A one-off glitch is logged; one that keeps coming back stops the run.
             var now = DateTime.UtcNow;
             if (now - workerErrorsSince > TimeSpan.FromSeconds(10)) { workerErrorsSince = now; workerErrors = 0; }
-            if (++workerErrors >= 5) workerError ??= (worker == Worker.Fish ? "Fishing hit an error: " : "Gathering hit an error: ") + e.Message;
+            if (++workerErrors >= 5) workerError ??= (which == Worker.Fish ? "Fishing hit an error: " : "Gathering hit an error: ") + e.Message;
         }
     }
 
@@ -1109,10 +1117,7 @@ internal sealed class RunEngine : IDisposable
                 Add("Caught and used as bait along the way: " + string.Join(", ", usedAsBait.Select(kv => $"{kv.Value}× {ItemName(kv.Key)}")) + ".", false);
             fishWaits.Clear();
             // While earning scrips the extras stay: they become more collectables. By-catch goes either way.
-            var extras = Settings.DiscardExtras && !scripPhase
-                ? Targets.Where(t => !Items.IsCrystal(t.ItemId) && (Settings.DiscardTimedExtras || !Windowed(t)))
-                    .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))).ToList()
-                : new List<(uint, int)>();
+            var extras = Settings.DiscardExtras && !scripPhase ? TargetExtras() : new List<(uint, int)>();
             cleanup.Begin(extras, byCatch);
             if (!cleanup.Done)
             {
@@ -1302,7 +1307,7 @@ internal sealed class RunEngine : IDisposable
     private void EndNodeTrip()
     {
         CancelNodeTrip();
-        if (worker == Worker.Land) Gather.Resume();
+        if (worker == Worker.Land) ResumeGatherer();
     }
 
     private void CancelNodeTrip()
@@ -1504,8 +1509,9 @@ internal sealed class RunEngine : IDisposable
 
     /// <summary>
     /// The gatherer has something to do now. While it works (and has had a moment to look), its own view
-    /// counts: busy with a node, a trip or upkeep is work, and "nothing to gather" for a few seconds isn't.
-    /// Otherwise it goes by the targets: a regular item, or a timed node that is up or opens within the lead.
+    /// counts: busy with a node, a trip or upkeep is work, so is waiting for a timed node that opens within
+    /// the lead, and "nothing to gather" for a few seconds isn't. Otherwise it goes by the targets: a regular
+    /// item, or a timed node that is up or opens within the lead.
     /// </summary>
     private bool LandHasWork()
     {
@@ -1518,10 +1524,21 @@ internal sealed class RunEngine : IDisposable
                 landIdleUntil = default;
                 return true;
             }
+            // A timed node that isn't up yet but opens within the lead: the gatherer only takes nodes that are up,
+            // so it waits for this one and sets out the moment it opens. That's its own wait, not "nothing to
+            // gather" (handing over would bring it back late, after the catch under way).
+            if (!Gather.WaitingToRetry && LandNextWindow(closed: true) is { } opens && opens <= TimeSpan.FromMinutes(Settings.TimedLeadMinutes))
+            {
+                landWaitingSince = null;
+                landIdleUntil = default;
+                return true;
+            }
             landWaitingSince ??= now;
             if (now - landWaitingSince < LandSettle) return LandWorkByTargets();
-            // It finds nothing although the targets say otherwise (nodes given up on for a while): fish meanwhile.
-            if (LandWorkByTargets()) landIdleUntil = now + LandRecheck;
+            // It finds nothing although the targets say otherwise (nodes given up on for a while): fish meanwhile,
+            // and look again after a while, or as the next timed node opens if that comes first.
+            if (LandWorkByTargets())
+                landIdleUntil = now + (LandNextWindow(closed: true) is { } next && next < LandRecheck ? next : LandRecheck);
             return false;
         }
         return LandWorkByTargets() && now >= landIdleUntil;
@@ -1547,14 +1564,18 @@ internal sealed class RunEngine : IDisposable
         return false;
     }
 
-    /// <summary>The timed node still needed that opens soonest (zero when one is up), or null.</summary>
-    private TimeSpan? LandNextWindow()
+    /// <summary>
+    /// The timed node still needed that opens soonest (zero when one is up), or null. With <paramref name="closed"/>,
+    /// only nodes that aren't up yet count (one that is up may be one the gatherer can't use at this hour).
+    /// </summary>
+    private TimeSpan? LandNextWindow(bool closed = false)
     {
         var catalog = plugin.Plans.Catalog!;
         var now = DateTimeOffset.UtcNow;
         TimeSpan? best = null;
         foreach (var t in Targets.Where(t => t.Supply == Supply.GatherTimed && Left(t) > 0 && !Gather.Unreachable.Contains(t.ItemId)))
-            if (catalog.TimedMask(t.ItemId) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w && (best == null || w < best))
+            if (catalog.TimedMask(t.ItemId) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w
+                && (!closed || w > TimeSpan.Zero) && (best == null || w < best))
                 best = w;
         return best;
     }
@@ -1666,7 +1687,7 @@ internal sealed class RunEngine : IDisposable
     private void CancelSwitch()
     {
         if (worker == Worker.Fish) Fish.Resume(); // withdraws the pause request; the fishing goes on
-        else if (handoverAt != default) Gather.Resume();
+        else if (handoverAt != default) ResumeGatherer();
         switchingTo = null;
         handoverAt = default;
         reelInSince = null;
@@ -1690,12 +1711,18 @@ internal sealed class RunEngine : IDisposable
         else
         {
             Fish.Pause();
-            Gather.Resume();
-            landWaitingSince = null;
-            landActiveSince = DateTime.UtcNow;
+            ResumeGatherer();
         }
         worker = next;
         if (why != null) Add(why, false);
+    }
+
+    /// <summary>The gatherer carries on (a hand-over, a trip ahead that ended): its "nothing to gather" counts afresh once it has looked again.</summary>
+    private void ResumeGatherer()
+    {
+        Gather.Resume();
+        landWaitingSince = null;
+        landActiveSince = DateTime.UtcNow;
     }
 
     /// <summary>The active worker runs: a "Keep going" before the catch was in, or a resume that came early, can leave it paused.</summary>
@@ -1703,7 +1730,7 @@ internal sealed class RunEngine : IDisposable
     {
         if (switchingTo != null || tripSpot != null) return;
         if (worker == Worker.Fish) { if (Fish.IsPaused) Fish.Resume(); }
-        else if (!Gather.Running) Gather.Resume();
+        else if (!Gather.Running) ResumeGatherer();
     }
 
     /// <summary>
@@ -1791,38 +1818,57 @@ internal sealed class RunEngine : IDisposable
 
     // ------------------------------------------------------------------ fishing: stopping, by-catch, headlines
 
-    /// <summary>Ends fishing. With the rod still out, the fisher keeps its ticks after the run until it has reeled in.</summary>
+    /// <summary>
+    /// Ends fishing. With the rod still out (or a catch or spearfishing window under way), the fisher keeps
+    /// its ticks for a while after this until it has reeled in: <see cref="TickFishWindDown"/>.
+    /// </summary>
     private void StopFisher()
     {
         if (!fishBegun) return;
         var gone = !Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer is not { IsDead: false };
         var rodOut = Fish.Busy || Services.Condition[ConditionFlag.Fishing];
         Fish.Stop(now: gone);
-        if (rodOut && !gone) fishWindDownUntil = DateTime.UtcNow + WindDown;
+        if (!rodOut || gone) return;
+        fishWindDownUntil = DateTime.UtcNow + WindDown;
+        windDownTickFailed = false;
     }
 
-    /// <summary>The run ended with the rod out: the fisher reels in (it needs its ticks); Quit is pressed here at the end.</summary>
+    /// <summary>The fisher's tick threw during the wind-down: only Quit is pressed from then on.</summary>
+    private bool windDownTickFailed;
+
+    /// <summary>
+    /// Fishing stopped with something still out (the run ended, or went on past gathering): the fisher keeps its
+    /// ticks while it is busy, as it reels in, lets the bite go and closes a spearfishing window; Quit is pressed
+    /// here too in the last seconds. A gathering stage ticks the fisher itself.
+    /// </summary>
     private void TickFishWindDown()
     {
-        if (Active || (!Fish.Busy && !Services.Condition[ConditionFlag.Fishing]))
+        if (!Fish.Busy && !Services.Condition[ConditionFlag.Fishing])
         {
             fishWindDownUntil = default;
             return;
         }
-        if (DateTime.UtcNow > fishWindDownUntil)
+        if (Active && Stage == RunStage.Gather) return;
+        var now = DateTime.UtcNow;
+        if (now > fishWindDownUntil)
         {
             fishWindDownUntil = default;
             if (Services.Condition[ConditionFlag.Fishing]) Add("The fishing rod is still out; use Quit to put it away.", true);
             return;
         }
         if (Services.Objects.LocalPlayer is not { IsDead: false } || Services.Condition[ConditionFlag.BetweenAreas]) return;
-        if (fishWindDownUntil - DateTime.UtcNow < TimeSpan.FromSeconds(10)) { LastResortQuit(); return; }
-        try { Fish.Tick(); }
-        catch (Exception e)
+        if (!windDownTickFailed)
         {
-            Services.Log.Error(e, "The fisher's tick failed while reeling in");
-            fishWindDownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            try { Fish.Tick(); }
+            catch (Exception e)
+            {
+                Services.Log.Error(e, "The fisher's tick failed while reeling in");
+                windDownTickFailed = true;
+                if (fishWindDownUntil - now > TimeSpan.FromSeconds(10)) fishWindDownUntil = now + TimeSpan.FromSeconds(10);
+            }
         }
+        // The fisher should have reeled in by now: Quit as a last resort.
+        if (fishWindDownUntil - now < TimeSpan.FromSeconds(10)) LastResortQuit();
     }
 
     /// <summary>The fisher didn't reel in: Quit, at most every 3 s, never while dead, zoning or in a cutscene.</summary>
@@ -1842,8 +1888,23 @@ internal sealed class RunEngine : IDisposable
         => t.Supply == Supply.GatherTimed || (t.Supply == Supply.Fish && plugin.Plans.Catalog?.Gather.Fish(t.ItemId) is { Restricted: true });
 
     /// <summary>
-    /// Fish caught on the side to throw away (Settings): what the fisher counted as by-catch, never below
-    /// what the bags held when gathering started, and never anything a plan uses or the order needs.
+    /// The gathered targets whose extras the clean-up throws away (Settings), each with how many to keep.
+    /// Counts are plain normal-quality items in the main bags (<see cref="GameState.BagCount(uint, bool)"/>;
+    /// high-quality items and collectables are never touched). Keep what the order still needs there: the
+    /// target (what the bags held when gathering started plus what the order still needed) less what crafting
+    /// meanwhile already used up. The crafter takes normal-quality materials before high-quality ones, so this
+    /// never drops below what the bags held before gathering, less what crafting took of it: only what this
+    /// gathering stage brought in over the order's amount goes. Crystals always stay.
+    /// </summary>
+    private List<(uint ItemId, int Keep)> TargetExtras()
+        => Targets.Where(t => !Items.IsCrystal(t.ItemId) && (Settings.DiscardTimedExtras || !Windowed(t)))
+            .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))).ToList();
+
+    /// <summary>
+    /// Fish caught on the side to throw away (Settings), each with how many to keep, in the same count as
+    /// <see cref="TargetExtras"/>. Never a fish the order, a plan, the scrip earning or a needed collectable
+    /// includes. Keep at least what the bags held when gathering started (the player's own) and everything
+    /// the fisher didn't count as caught on the side, so only this run's by-catch goes.
     /// </summary>
     private IEnumerable<(uint ItemId, int Keep)> ByCatchToDiscard()
     {
@@ -1854,7 +1915,8 @@ internal sealed class RunEngine : IDisposable
         {
             if (caught <= 0 || needed.Contains(id) || plans.Plan[id] != null || plans.ScripPlan[id] != null) continue;
             var have = GameState.BagCount(id, false);
-            var keep = Math.Max(bagsAtStart.GetValueOrDefault(id), have - caught);
+            var before = bagsAtStart.GetValueOrDefault(id);
+            var keep = Math.Max(before, have - caught);
             if (have > keep) yield return (id, keep);
         }
     }
