@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.6.2.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.2/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.2/latest.zip",
-    "TestingAssemblyVersion": "0.8.0.0",
-    "TestingDalamudApiLevel": 15,
-    "DownloadLinkTesting": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.8.0-testing/latest.zip",
-    "LastUpdate": 1795132052
+    "AssemblyVersion": "0.8.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.8.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.8.0/latest.zip",
+    "TestingAssemblyVersion": null,
+    "TestingDalamudApiLevel": null,
+    "DownloadLinkTesting": null,
+    "LastUpdate": 1795132404
   }
 ]
