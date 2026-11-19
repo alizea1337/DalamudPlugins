@@ -20,6 +20,8 @@ internal sealed class BrowsePage : Page
     private const float RowHeight = 54f;
 
     private string query = "";
+    /// <summary>The clear button was used: the search field takes the keyboard again next frame.</summary>
+    private bool refocusSearch;
     private List<BrowseEntry> results = new();
     /// <summary>Jobs left out by the job filter that would have items with the other filters (bit per job, like JobMask).</summary>
     private int otherJobs;
@@ -52,18 +54,52 @@ internal sealed class BrowsePage : Page
         Ui.Heading("Find items");
         ImGui.Dummy(new Vector2(0, 2 * s));
 
-        // Search
+        // Search. The padding keeps room on both sides: the magnifier left, the clear button right.
         var w = ImGui.GetContentRegionAvail().X;
+        var searchW = MathF.Min(w, 520 * s);
+        if (refocusSearch)
+        {
+            ImGui.SetKeyboardFocusHere();
+            refocusSearch = false;
+        }
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(38, 10) * s);
-        ImGui.SetNextItemWidth(MathF.Min(w, 520 * s));
+        ImGui.SetNextItemWidth(searchW);
         ImGui.InputTextWithHint("##search", "Search recipes and gatherables by name", ref query, 128);
+        // Escape while typing empties the search (the field itself would only undo the last edit).
+        if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape)) query = "";
+        // The clear button sits on top of the field's right end.
+        ImGui.SetItemAllowOverlap();
         var searchMin = ImGui.GetItemRectMin();
         var searchH = ImGui.GetItemRectSize().Y;
         ImGui.PopStyleVar();
+        var searchDl = ImGui.GetWindowDrawList();
         using (Ui.F.Icon.Push())
         {
             var icon = FontAwesomeIcon.Search.ToIconString();
-            ImGui.GetWindowDrawList().AddText(searchMin + new Vector2(14 * s, (searchH - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.TextFaint), icon);
+            searchDl.AddText(searchMin + new Vector2(14 * s, (searchH - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.TextFaint), icon);
+        }
+        if (query.Length > 0)
+        {
+            // One click empties the search and puts the cursor back in it.
+            var d = 24 * s;
+            var at = new Vector2(searchMin.X + searchW - 8 * s - d, searchMin.Y + (searchH - d) / 2);
+            var after = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(at);
+            if (ImGui.InvisibleButton("##clearsearch", new Vector2(d)))
+            {
+                query = "";
+                refocusSearch = true;
+            }
+            var hovered = ImGui.IsItemHovered();
+            Ui.Tooltip("Clear the search");
+            if (hovered) searchDl.AddCircleFilled(at + new Vector2(d / 2), d / 2, Palette.U32(Palette.RaisedHover));
+            using (Ui.F.IconSmall.Push())
+            {
+                var glyph = FontAwesomeIcon.Times.ToIconString();
+                var gs = ImGui.CalcTextSize(glyph);
+                searchDl.AddText(at + (new Vector2(d) - gs) / 2, Palette.U32(hovered ? Palette.Text : Palette.TextMuted), glyph);
+            }
+            ImGui.SetCursorScreenPos(after);
         }
 
         // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow.
