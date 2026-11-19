@@ -78,6 +78,8 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 - Custom deliveries: a weekly mode that makes or gathers each client's items for crafters and
   gatherers and hands them in.
 - Allied society (tribal) quests: a weekly mode for the crafter and gatherer societies.
+- Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone).
+- The Diadem: gathering there, including clouded and umbral nodes.
 - Several orders in a queue.
 - An IPC for gathering lists in GatherBuddy Reborn (pull request upstream), instead of reflection.
 
