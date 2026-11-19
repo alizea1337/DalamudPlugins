@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Provenance.Core.Catalog;
 using Provenance.Core.Orders;
 using Provenance.Core.Planning;
 using Xunit;
@@ -47,6 +48,22 @@ public class PlannerTests
         var plan = Build(OrderOf((Bow, 1), (Shield, 1)));
         Assert.Equal(3, plan[Rivets]!.Needed);
         Assert.Equal(1, plan[Rivets]!.Crafts);
+    }
+
+    [Fact]
+    public void Items_only_gathered_in_special_content_are_got_by_hand()
+    {
+        var catalog = new FakeCatalog();
+        const uint Special = 9100;
+        catalog.SetSources(Special, new ItemSources(Obtain.GatherElsewhere, 0));
+        var plan = Planner.Build(OrderOf((Special, 3)), catalog, new Dictionary<uint, int>(), new PlannerOptions());
+        Assert.Equal(Supply.Manual, plan[Special]!.Supply);
+        Assert.Contains("Diadem", plan[Special]!.ManualReason);
+        Assert.False(plan.CanStart);
+
+        // Gatherable in the open world as well: gathered there.
+        catalog.SetSources(Special, new ItemSources(Obtain.Gather | Obtain.GatherElsewhere, 0));
+        Assert.Equal(Supply.Gather, Planner.Build(OrderOf((Special, 3)), catalog, new Dictionary<uint, int>(), new PlannerOptions())[Special]!.Supply);
     }
 
     [Fact]

@@ -16,6 +16,9 @@ Gathering without GatherBuddy Reborn.
   Both in Settings.
 - Node positions seen during runs are remembered on this PC (never uploaded).
 - Fishing isn't in this testing build yet; orders with fish can't start until it arrives.
+- Items gathered only in the Diadem or in special instanced content (Cosmic Exploration and the
+  like) are no longer planned as gathering: the plan lists them under "Get these yourself" with the
+  reason, instead of the run stopping halfway.
 - Groundwork for gathering and fishing without GatherBuddy Reborn and AutoHook: exact node
   positions, the fish database (bait, mooch chains, intuition, time and weather windows, hooks,
   bite times) and fishing spots with places to stand ship with the plugin (tools/GbrExport), plus

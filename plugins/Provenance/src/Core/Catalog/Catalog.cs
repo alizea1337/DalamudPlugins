@@ -71,6 +71,8 @@ public enum Obtain
     Vendor = 1 << 3,
     /// <summary>Dropped by monsters.</summary>
     Drop = 1 << 4,
+    /// <summary>Gathered only in the Diadem or special instanced content, which a run can't go to.</summary>
+    GatherElsewhere = 1 << 5,
 }
 
 /// <param name="Tome">

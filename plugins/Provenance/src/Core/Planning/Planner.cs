@@ -170,7 +170,9 @@ public static class Planner
                 line.Supply = Supply.Manual;
                 line.ManualReason = src.Has(Obtain.Vendor)
                     ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
-                    : "No gathering, fishing, vendor or monster source";
+                    : src.Has(Obtain.GatherElsewhere)
+                        ? "Only gathered in the Diadem or special content (like Cosmic Exploration), which a run can't go to"
+                        : "No gathering, fishing, vendor or monster source";
             }
             // Legendary nodes and some fishing holes only show up once their folklore tome is read.
             if (!tomeOk && line.Supply is Supply.GatherTimed or Supply.Fish) NeedToLearn(src.Tome, line.ItemId);

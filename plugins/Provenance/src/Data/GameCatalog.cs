@@ -177,9 +177,13 @@ internal sealed class GameCatalog : IGameCatalog
         var gatheringItems = Services.Data.GetExcelSheet<GatheringItem>();
         var transient = Services.Data.GetExcelSheet<GatheringPointTransient>();
         var exported = Services.Data.GetExcelSheet<ExportedGatheringPoint>();
+        var territories = Services.Data.GetExcelSheet<TerritoryType>();
         foreach (var point in Services.Data.GetExcelSheet<GatheringPoint>())
         {
             if (point.TerritoryType.RowId == 0) continue;
+            // Only open-world zones (intended use 1) can be travelled to; the Diadem (47) and the
+            // placeholder zone of instanced content (Cosmic Exploration and the like) can't.
+            var openWorld = territories.GetRowOrDefault(point.TerritoryType.RowId)?.TerritoryIntendedUse.RowId == 1;
             if (point.GatheringPointBase.ValueNullable is not { } pointBase) continue;
             // Types 0–3 are mining, quarrying, logging and harvesting; spearfishing rows point elsewhere.
             if (pointBase.GatheringType.RowId > 3) continue;
@@ -193,6 +197,13 @@ internal sealed class GameCatalog : IGameCatalog
                 if (reference.RowId == 0 || gatheringItems.GetRowOrDefault(reference.RowId) is not { } gi) continue;
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
+                if (!openWorld)
+                {
+                    // Still listed in Browse, but the plan says it has to be got by hand.
+                    Add(itemId, Obtain.GatherElsewhere);
+                    NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
+                    continue;
+                }
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
                 if (!gatherPoints.TryGetValue(itemId, out var pointList)) gatherPoints[itemId] = pointList = new List<GatherPoint>(2);
                 pointList.Add(new GatherPoint(point.RowId, pointBase.RowId, point.TerritoryType.RowId, job, pointBase.GatheringLevel, timed, mask, tome,
