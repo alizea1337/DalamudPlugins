@@ -260,6 +260,7 @@ internal sealed class PlanPage : Page
         ImGui.Dummy(new Vector2(0, 6 * s));
         foreach (var line in missing)
         {
+            if (line != missing[0]) ImGui.Dummy(new Vector2(0, 4 * s));
             var targets = plan.TargetsNeeding(line.ItemId);
             RemovableRow("missing" + line.ItemId, targets, line.ItemId, catalog, width =>
             {
@@ -306,8 +307,11 @@ internal sealed class PlanPage : Page
         if (Ui.LinkButton("Check again", Palette.Accent, FontAwesomeIcon.Sync, "Reads gearsets, stats, books and tomes again.", "##readycheck")) Plans.CheckCharacter();
         ImGui.Dummy(new Vector2(0, 4 * s));
 
+        var first = true;
         foreach (var issue in issues.OrderByDescending(i => i.Blocking))
         {
+            if (!first) ImGui.Dummy(new Vector2(0, 4 * s));
+            first = false;
             var targets = issue.ItemId != 0 ? plan.TargetsNeeding(issue.ItemId) : Array.Empty<uint>();
             RemovableRow($"ready{issue.ItemId}_{issue.ClassJobId}_{issue.Text.GetHashCode()}", targets, issue.ItemId, catalog, width =>
             {
@@ -338,13 +342,16 @@ internal sealed class PlanPage : Page
     {
         var s = Ui.S;
         var lineY = ImGui.GetCursorPosY();
+        // The card's own width (not the window's), so the action lines up with the rows' remove buttons.
+        var startX = ImGui.GetCursorPosX();
+        var avail = ImGui.GetContentRegionAvail().X;
         Ui.Icon(icon, color);
         ImGui.SameLine(0, 10 * s);
         using (Ui.F.Strong.Push()) Ui.Text(title, color);
         if (removable.Count == 0) return;
         var label = removable.Count == 1 ? "Remove it" : $"Remove all {removable.Count}";
         var size = Ui.LinkButtonSize(label, FontAwesomeIcon.TrashAlt);
-        ImGui.SameLine(ImGui.GetContentRegionMax().X - size.X);
+        ImGui.SameLine(startX + avail - size.X);
         ImGui.SetCursorPosY(lineY + (ImGui.GetTextLineHeight() - size.Y) / 2);
         if (Ui.LinkButton(label, Palette.Danger, FontAwesomeIcon.TrashAlt, "Takes these out of the order: " + Names(removable, catalog) + ".", "##removeall" + id))
             RemoveFromOrder(removable, catalog);
@@ -385,7 +392,6 @@ internal sealed class PlanPage : Page
             if (Ui.IconButton("##rm" + id, FontAwesomeIcon.TrashAlt, tip, Ui.Kind.Danger, 28)) RemoveFromOrder(targets, catalog);
             ImGui.SetCursorScreenPos(end);
         }
-        ImGui.Dummy(new Vector2(0, 4 * s));
     }
 
     private static string Names(IReadOnlyList<uint> items, GameCatalog catalog)
