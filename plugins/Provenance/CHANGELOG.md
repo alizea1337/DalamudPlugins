@@ -7,7 +7,8 @@ Gathering without GatherBuddy Reborn.
 - Provenance gathers by itself now; GatherBuddy Reborn is no longer needed. It picks the next node
   (timed nodes while up, then the current zone, then the cheapest teleport), changes into the
   gatherer's best gearset, uses Prospect/Triangulate and Stealth, travels and flies to the node's
-  known spawn spots, opens the node and works it with a rotation solver ported from GatherBuddy
+  known spawn spots, lands and walks the last yalms (nodes set in cliffs open from their foot),
+  opens the node and works it with a rotation solver ported from GatherBuddy
   Reborn (King's Yield, Bountiful, Gift of the Land, Tidings, Solid Reason, Wise to the World,
   Twelve's Bounty, The Giving Land; best yield on timed nodes, best yield per GP on regular ones)
   or the collectable rotation (Scour, Brazen, Meticulous, Scrutiny), always to the end of the node.

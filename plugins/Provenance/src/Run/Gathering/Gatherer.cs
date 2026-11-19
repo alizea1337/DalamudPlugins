@@ -28,9 +28,13 @@ namespace Provenance.Run.Gathering;
 /// </summary>
 internal sealed unsafe class Gatherer
 {
-    private enum Step { Idle, Paused, Choose, Gear, Buffs, Travel, Interact, Upkeep }
+    private enum Step { Idle, Paused, Choose, Gear, Buffs, Travel, Approach, Interact, Upkeep }
 
     private const uint LandOrDismount = 23;
+    /// <summary>A node this close counts as the one at this spot; the last yalms are walked.</summary>
+    private const float NodeHere = 15f;
+    /// <summary>Walks on foot to the node before opening it from wherever the walks ended.</summary>
+    private const int ApproachWalks = 2;
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
 
     private readonly Plugin plugin;
@@ -51,6 +55,8 @@ internal sealed unsafe class Gatherer
     private readonly HashSet<(uint Point, int X, int Z)> visited = new();
     private Vector3 spot;
     private int interactTries;
+    private int approachWalks;
+    private DateTime walkUntil;
     private bool wasOnNode;
     private Vector3 lastNodePosition;
 
@@ -152,6 +158,7 @@ internal sealed unsafe class Gatherer
             case Step.Gear: Gear(); return;
             case Step.Buffs: Buffs(); return;
             case Step.Travel: TravelTick(me); return;
+            case Step.Approach: ApproachTick(me); return;
             case Step.Interact: InteractTick(me); return;
         }
     }
@@ -279,10 +286,11 @@ internal sealed unsafe class Gatherer
             return;
         }
         if (travel.Current != Travel.State.Arrived) return;
-        if (LiveNode() is { } live && Vector3.Distance(live.Position, me.Position) < 6)
+        if (LiveNode() is { } live && Vector3.Distance(live.Position, me.Position) < NodeHere)
         {
             interactTries = 0;
-            Go(Step.Interact);
+            approachWalks = 0;
+            Go(Step.Approach);
             return;
         }
         // Nothing at this spot right now: try the next one.
@@ -291,10 +299,55 @@ internal sealed unsafe class Gatherer
         NextSpot();
     }
 
+    /// <summary>
+    /// The game opens a node from under 3.5 yalms across and under 3 up or down (a node set in a
+    /// cliff, flown to from above, is often further); a little margin keeps clear of the edge.
+    /// </summary>
+    private static bool InReach(Vector3 node, Vector3 me)
+        => Vector2.Distance(new Vector2(node.X, node.Z), new Vector2(me.X, me.Z)) < 3.2f && MathF.Abs(node.Y - me.Y) < 2.7f;
+
+    /// <summary>The last yalms: land, then walk up to the node until the game lets it open.</summary>
+    private void ApproachTick(IGameObject me)
+    {
+        var live = LiveNode();
+        if (live == null || Vector3.Distance(live.Position, me.Position) > NodeHere) { Vnav.Stop(); Go(Step.Choose); return; }
+        if (InReach(live.Position, me.Position))
+        {
+            Vnav.Stop();
+            Go(Step.Interact);
+            return;
+        }
+        var c = Services.Condition;
+        if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted])
+        {
+            Status = "Landing";
+            ActionManager.Instance()->UseAction(ActionType.GeneralAction, LandOrDismount);
+            Wait(1);
+            return;
+        }
+        if (Vnav.Busy && DateTime.UtcNow < walkUntil) return;
+        Vnav.Stop();
+        if (approachWalks >= ApproachWalks)
+        {
+            // As close as the ground gets: try opening it from here.
+            Go(Step.Interact);
+            return;
+        }
+        approachWalks++;
+        Status = "Walking up to the node";
+        // The walkable ground nearest the node: a node set in a wall opens from its foot.
+        var goal = Vnav.NearestPoint(live.Position, 3f, 4f) ?? live.Position;
+        if (!Vnav.MoveCloseTo(goal, false, 0.8f)) Vnav.MoveTo(goal, false);
+        walkUntil = DateTime.UtcNow.AddSeconds(10);
+        Wait(0.5);
+    }
+
     private void InteractTick(IGameObject me)
     {
         var live = LiveNode();
-        if (live == null || Vector3.Distance(live.Position, me.Position) > 6) { Go(Step.Choose); return; }
+        if (live == null || Vector3.Distance(live.Position, me.Position) > NodeHere) { Go(Step.Choose); return; }
+        // Drifted out of reach (a landing that slid down a slope): walk up again first.
+        if (!InReach(live.Position, me.Position) && approachWalks < ApproachWalks) { Go(Step.Approach); return; }
         var c = Services.Condition;
         if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted])
         {
