@@ -153,7 +153,7 @@ internal sealed unsafe partial class Fisher : IDisposable
     public bool Busy => StanceUp || (angler.Active && step != Step.Idle) || spear.Active || SpearGame.WindowOpen
                         || step is Step.Settle or Step.Upkeep or Step.Shop or Step.SpearOpen or Step.Spear or Step.Ending;
     /// <summary>A fish left in the order bites now (or within the lead time), at a spot the fisher can use.</summary>
-    public bool HasWorkNow => targets.Count > 0 && Ranked().Count > 0;
+    public bool HasWorkNow => targets.Count > 0 && (Ranked().Count > 0 || (current is { } t && FishingUnderIntuition(t.ItemId)));
     /// <summary>When the next fish window opens (zero when one is open now); null when no fish left has a window.</summary>
     /// <remarks>Fish that can't be fished, or don't bite within the forecast, have no window to wait for here (never MaxValue).</remarks>
     public TimeSpan? NextWindow

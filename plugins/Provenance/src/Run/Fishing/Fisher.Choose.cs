@@ -166,6 +166,15 @@ internal sealed partial class Fisher
         return IsBroken(s.Id);
     }
 
+    /// <summary>
+    /// The fish the angler is on right now, while the Fisher's Intuition its predators brought is still up: it bites
+    /// now whatever the predators' windows say. A fish whose window is only its predators' would otherwise stop being
+    /// due the moment their window closes, and the run would hand over to gathering with the intuition unused.
+    /// </summary>
+    private bool FishingUnderIntuition(uint itemId)
+        => step == Step.Fish && angler.Active && current is { } t && t.ItemId == itemId && left(t) > 0
+           && fish is { NeedsIntuition: true } && angler.IntuitionLeft is { } up && up > TimeSpan.Zero;
+
     /// <summary>"trying it again in 10 minutes", or "giving up on it for this run" once it's broken.</summary>
     private string AfterRest(bool broken) => broken ? "giving up on it for this run" : $"trying it again in {RestFor.TotalMinutes:0} minutes";
 
@@ -175,6 +184,7 @@ internal sealed partial class Fisher
         if (plugin.Plans.Catalog == null || Data.Fish(itemId) is not { } f) return null;
         var p = Places(itemId);
         if (!p.Windowed) return null;
+        if (FishingUnderIntuition(itemId)) return TimeSpan.Zero;
         if (p.Blocker != null) return TimeSpan.MaxValue;
         var now = DateTimeOffset.UtcNow;
         var best = TimeSpan.MaxValue;

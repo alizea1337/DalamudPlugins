@@ -114,9 +114,9 @@ public sealed class PlanLine
     public IReadOnlyList<uint> NeededFor { get; internal set; } = System.Array.Empty<uint>();
 
     /// <summary>
-    /// For a bait the run only crafts after the fishing (it's on the order or in a recipe): casts that neither the
-    /// bags nor a stand-in bait cover. Above 0 the bait is missing (<see cref="Plan.Missing"/>); the crafted amount
-    /// stays in <see cref="Needed"/>.
+    /// For a bait the run only crafts after the fishing (it's on the order or in a recipe) and no gil vendor sells
+    /// under the price cap: casts that neither the bags nor a stand-in bait cover. Above 0 the bait is missing
+    /// (<see cref="Plan.Missing"/>); the crafted amount stays in <see cref="Needed"/>.
     /// </summary>
     public int MissingBait { get; internal set; }
 
