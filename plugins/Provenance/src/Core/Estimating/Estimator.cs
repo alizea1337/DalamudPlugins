@@ -19,7 +19,13 @@ public sealed class Timings
     public double SecondsPerJobSwitch { get; set; } = 8.0;
     /// <summary>Gathered items per minute, travel between nodes included.</summary>
     public double GatheredPerMinute { get; set; } = 12;
+    /// <summary>
+    /// Fish per minute. The plan's estimate uses it for fish the fish data doesn't know; the others go by their
+    /// bite times, the casts a catch takes and their windows (<see cref="FishInputs"/>).
+    /// </summary>
     public double FishPerMinute { get; set; } = 1.5;
+    /// <summary>Getting to a fishing spot and ready to cast, once per kind of fish: the teleport, the walk to a stand, gearset and bait.</summary>
+    public double SecondsPerFishingTrip { get; set; } = 90;
     /// <summary>Collectables a collectable node gives (a few per node, with Solid Reason more).</summary>
     public double CollectablesPerVisit { get; set; } = 2;
     /// <summary>GP a collectable node visit spends (Scrutiny, sometimes Solid Reason).</summary>
@@ -51,7 +57,13 @@ public sealed record OrderEstimate(
     /// <summary>Some recipes have no rotation yet, so a typical step count was assumed.</summary>
     bool Approximate,
     /// <summary>Part of <see cref="Gathering"/>: waiting for GP before collectable nodes, and the cordials drunk instead.</summary>
-    GpWaitEstimate GpWait = default)
+    GpWaitEstimate GpWait = default,
+    /// <summary>Part of <see cref="Gathering"/>: fishing, with the waits for fish windows.</summary>
+    TimeSpan Fishing = default,
+    /// <summary>Part of <see cref="Fishing"/>: waiting for a fish to start biting with nothing else left to do.</summary>
+    TimeSpan FishWait = default,
+    /// <summary>Fish that don't bite within the weather forecast: their fishing is counted, the wait for them isn't.</summary>
+    IReadOnlyList<uint>? FishBeyondForecast = null)
 {
     public TimeSpan Crafting => Crafts.Aggregate(TimeSpan.Zero, (t, c) => t + c.Duration);
     public TimeSpan Total => Gathering + Crafting;
@@ -60,8 +72,9 @@ public sealed record OrderEstimate(
 }
 
 /// <summary>
-/// Estimates how long an order takes, in the order the run works: all gathering first, then the
-/// recipes, ingredients before the items that use them.
+/// Estimates how long an order takes, in the order the run works: all gathering first (fishing included,
+/// fitted around fish windows when <see cref="FishInputs"/> are given), then the recipes, ingredients before
+/// the items that use them.
 /// </summary>
 public static class Estimator
 {
@@ -72,8 +85,9 @@ public static class Estimator
     /// <param name="steps">Rotation length for a recipe (and whether HQ is wanted), or null when unknown.</param>
     /// <param name="hqWanted">Whether an ordered item should be crafted in high quality.</param>
     /// <param name="collectables">Collectable gathering: by node visits, with the wait for GP.</param>
+    /// <param name="fish">Fish by their catch time and windows; without it every fish goes at <see cref="Timings.FishPerMinute"/>.</param>
     public static OrderEstimate Estimate(Plan plan, Timings t, Func<RecipeInfo, bool, int?> steps, Func<uint, bool> hqWanted,
-        CollectableInputs? collectables = null)
+        CollectableInputs? collectables = null, FishInputs? fish = null)
     {
         if (plan.Lines.Count == 0) return OrderEstimate.Empty;
 
@@ -83,9 +97,39 @@ public static class Estimator
         var fished = plan.Lines.Where(l => l.Supply == Supply.Fish).Sum(l => Math.Max(0, l.Remaining));
         var collectLines = gatherLines.Where(l => collectable(l.ItemId)).ToList();
         var gpWait = CollectableGp(collectLines, t, collectables);
-        var gathering = TimeSpan.FromMinutes(gathered / Math.Max(0.1, t.GatheredPerMinute) + fished / Math.Max(0.05, t.FishPerMinute))
-                        + TimeSpan.FromSeconds(collectLines.Sum(l => Visits(l.Remaining, t)) * t.SecondsPerCollectableVisit)
-                        + gpWait.Wait;
+        var collectTime = TimeSpan.FromSeconds(collectLines.Sum(l => Visits(l.Remaining, t)) * t.SecondsPerCollectableVisit);
+        TimeSpan gathering, fishing;
+        var fishWait = TimeSpan.Zero;
+        IReadOnlyList<uint>? beyond = null;
+        if (fish == null)
+        {
+            gathering = TimeSpan.FromMinutes(gathered / Math.Max(0.1, t.GatheredPerMinute) + fished / Math.Max(0.05, t.FishPerMinute))
+                        + collectTime + gpWait.Wait;
+            fishing = TimeSpan.FromMinutes(fished / Math.Max(0.05, t.FishPerMinute));
+        }
+        else
+        {
+            // Fish the data knows take their catch time plus a trip; fish with a window fit around the rest.
+            var steady = 0.0;
+            var windowed = new List<WindowedWork>();
+            foreach (var line in plan.Lines.Where(l => l.Supply == Supply.Fish && l.Remaining > 0))
+            {
+                if (fish.Fish(line.ItemId) is not { } catchTime)
+                {
+                    steady += line.Remaining / Math.Max(0.05, t.FishPerMinute) * 60;
+                    continue;
+                }
+                var seconds = Math.Max(0, t.SecondsPerFishingTrip) + line.Remaining * Math.Max(0, catchTime.SecondsPerCatch);
+                if (catchTime.Windows == null) steady += seconds;
+                else windowed.Add(new WindowedWork(line.ItemId, seconds, catchTime.Windows));
+            }
+            var land = gathered / Math.Max(0.1, t.GatheredPerMinute) * 60 + collectTime.TotalSeconds + gpWait.Wait.TotalSeconds;
+            var schedule = FishSchedule.Run(land + steady, windowed, fish.Now);
+            gathering = schedule.Total;
+            fishWait = schedule.Waiting;
+            fishing = TimeSpan.FromSeconds(steady + windowed.Sum(w => w.Seconds)) + schedule.Waiting;
+            if (schedule.Unscheduled.Count > 0) beyond = schedule.Unscheduled;
+        }
         var timed = plan.Lines.Any(l => l.Supply == Supply.GatherTimed && l.Remaining > 0);
 
         var crafts = new List<CraftEstimate>();
@@ -111,7 +155,7 @@ public static class Estimator
         foreach (var line in plan.Lines.Where(l => l.IsTarget && l.Supply != Supply.Craft))
             ready.TryAdd(line.ItemId, gathering);
 
-        return new OrderEstimate(gathering, timed, crafts, ready, approximate, gpWait);
+        return new OrderEstimate(gathering, timed, crafts, ready, approximate, gpWait, fishing, fishWait, beyond);
     }
 
     /// <summary>Collectable node visits for an amount of collectables.</summary>

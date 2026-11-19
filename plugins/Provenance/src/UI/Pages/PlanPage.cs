@@ -8,6 +8,7 @@ using Provenance.Core.Catalog;
 using Provenance.Core.Estimating;
 using Provenance.Core.Planning;
 using Provenance.Data;
+using Provenance.Integrations;
 using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
@@ -52,8 +53,9 @@ internal sealed class PlanPage : Page
             var crafts = plan.CraftSteps.Sum(l => l.Crafts);
             var total = Plans.Estimate.Total;
             var parts = new List<string>();
-            var gather = plan.Count(Supply.Gather) + plan.Count(Supply.GatherTimed) + plan.Count(Supply.Fish);
+            var gather = plan.Count(Supply.Gather) + plan.Count(Supply.GatherTimed);
             if (gather > 0) parts.Add($"{gather} to gather");
+            if (plan.Count(Supply.Fish) > 0) parts.Add($"{plan.Count(Supply.Fish)} to fish");
             if (plan.Count(Supply.Vendor) > 0) parts.Add($"{plan.Count(Supply.Vendor)} to buy");
             if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
             var what = parts.Count > 0 ? string.Join(", ", parts) : "everything is in your bags";
@@ -127,27 +129,39 @@ internal sealed class PlanPage : Page
         if (Ui.Button("Browse recipes", Ui.Kind.Secondary, FontAwesomeIcon.Search)) Go<BrowsePage>();
     }
 
-    /// <summary>One line under the order name: the whole order, split into gathering and crafting.</summary>
+    /// <summary>One line under the order name: the whole order, split into gathering, fishing and crafting.</summary>
     private void DrawEstimateLine()
     {
         var e = Plans.Estimate;
         if (e.Total <= TimeSpan.Zero) return;
         var parts = new List<string>();
-        if (e.Gathering > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Gathering).Replace("about ", "") + " gathering");
-        if (e.Crafting > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Crafting).Replace("about ", "") + " crafting");
-        var text = $"{Capitalize(Estimator.Describe(e.Total))} for the whole order ({string.Join(", ", parts)}).";
+        // Fishing is part of the gathering stage; a second or two apart is rounding.
+        var gathering = e.Gathering - e.Fishing;
+        if (gathering > TimeSpan.FromSeconds(1)) parts.Add(Short(gathering) + " gathering");
+        if (e.Fishing > TimeSpan.Zero) parts.Add(Short(e.Fishing) + " fishing");
+        if (e.Crafting > TimeSpan.Zero) parts.Add(Short(e.Crafting) + " crafting");
+        var text = $"{Capitalize(Estimator.Describe(e.Total))} for the whole order" + (parts.Count > 0 ? $" ({string.Join(", ", parts)})." : ".");
         if (e.GpWait.Wait > TimeSpan.Zero)
             text += $" Gathering includes {Estimator.Describe(e.GpWait.Wait)} of waiting for GP before collectables"
                     + (e.GpWait.Cordials > 0 ? $", after {CordialCount(e.GpWait.Cordials)}." : ".");
         else if (e.GpWait.Cordials > 0)
             text += $" {Capitalize(CordialCount(e.GpWait.Cordials))} {(e.GpWait.Cordials == 1 ? "keeps" : "keep")} the GP up for the collectables.";
+        if (e.FishWait >= TimeSpan.FromMinutes(1))
+            text += $" Fishing includes {Estimator.Describe(e.FishWait)} of waiting for fish to start biting; the run crafts in the meantime when it can.";
+        if (e.FishBeyondForecast is { Count: > 0 } far && Plans.Catalog is { } catalog)
+            text += $" {Names(far, catalog)} {(far.Count == 1 ? "doesn't" : "don't")} bite in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast; "
+                    + $"waiting for {(far.Count == 1 ? "it" : "them")} comes on top.";
         if (e.HasTimedNodes) text += " Waiting for timed nodes comes on top.";
         if (e.Approximate) text += Plans.Profile == null ? " Check your character for closer crafting times." : " Still working out some rotations.";
         Ui.Icon(FontAwesomeIcon.Clock, Palette.TextMuted, small: true);
         ImGui.SameLine(0, 8 * Ui.S);
         Ui.Wrapped(text, Palette.TextMuted);
-        Ui.Tooltip("Estimates follow your own runs: each craft and gathering session adjusts the timings.");
+        Ui.Tooltip("Estimates follow your own runs: each craft and gathering session adjusts the timings. Fish go by their bite times, "
+                   + "the casts a catch usually takes and when they bite.");
     }
+
+    /// <summary>"12 min", "1 h 05 min", "under a minute".</summary>
+    private static string Short(TimeSpan span) => Estimator.Describe(span).Replace("about ", "");
 
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
@@ -242,11 +256,13 @@ internal sealed class PlanPage : Page
             ImGui.EndGroup();
         }
         var gather = scripPlan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed && l.Remaining > 0).Sum(l => l.Remaining);
+        var fish = scripPlan.Lines.Where(l => l.Supply == Supply.Fish && l.Remaining > 0).Sum(l => l.Remaining);
         var buy = scripPlan.Lines.Where(l => l.Supply == Supply.Vendor && l.Remaining > 0).Sum(l => l.Remaining);
         var crafts = scripPlan.CraftSteps.Sum(l => l.Crafts);
         var timed = scripPlan.Lines.Count(l => l.Supply == Supply.GatherTimed && l.Remaining > 0);
         var parts = new List<string>();
         if (gather > 0) parts.Add($"{gather:N0} materials to gather" + (timed > 0 ? $" ({timed} from timed nodes)" : ""));
+        if (fish > 0) parts.Add($"{fish:N0} fish to catch");
         if (buy > 0) parts.Add($"{buy:N0} to buy");
         if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
         if (parts.Count > 0) using (Ui.F.Small.Push()) Ui.Muted("That takes " + string.Join(", ", parts) + ".");
@@ -275,7 +291,11 @@ internal sealed class PlanPage : Page
                 ImGui.SameLine(0, 10 * s);
                 ImGui.BeginGroup();
                 Ui.Text(catalog.ItemName(line.ItemId));
-                using (Ui.F.Small.Push()) Ui.Wrapped($"Need {line.Remaining} more. {line.ManualReason}.", Palette.TextMuted, width - 38 * s);
+                // Bait says which fish it's for, and that Versatile Lure could stand in when that's switched off.
+                var text = IsBait(line)
+                    ? $"Need {line.Remaining} more as bait for {Names(line.NeededFor, catalog)}. {line.ManualReason}." + StandInHint(catalog)
+                    : $"Need {line.Remaining} more. {line.ManualReason}.";
+                using (Ui.F.Small.Push()) Ui.Wrapped(text, Palette.TextMuted, width - 38 * s);
                 ImGui.EndGroup();
             });
         }
@@ -501,7 +521,7 @@ internal sealed class PlanPage : Page
         return crafts > 0 ? $"{crafts} {(crafts == 1 ? "craft" : "crafts")}" : null;
     }
 
-    private static void Section(string title, FontAwesomeIcon icon, Vector4 color, IEnumerable<PlanLine> source, GameCatalog catalog, string? extra)
+    private void Section(string title, FontAwesomeIcon icon, Vector4 color, IEnumerable<PlanLine> source, GameCatalog catalog, string? extra)
     {
         var lines = source
             .OrderByDescending(l => l.Remaining > 0)
@@ -532,7 +552,7 @@ internal sealed class PlanPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
     }
 
-    private static void MaterialRow(PlanLine line, GameCatalog catalog)
+    private void MaterialRow(PlanLine line, GameCatalog catalog)
     {
         var s = Ui.S;
         var width = Ui.CardInnerWidth;
@@ -550,53 +570,259 @@ internal sealed class PlanPage : Page
         dl.AddText(new Vector2(tx, textY), Palette.U32(line.Remaining == 0 ? Palette.TextMuted : Palette.Text), name);
         var chipX = tx + ImGui.CalcTextSize(name).X + 10 * s;
 
-        // Detail chip: how it is obtained when that needs saying.
-        (string Text, Vector4 Color)? chip = line.Supply switch
-        {
-            Supply.GatherTimed => (TimedChip(catalog.TimedMask(line.ItemId)), Palette.SupplyColor(Supply.GatherTimed)),
-            Supply.Vendor => ($"{line.VendorUnitPrice:N0} gil each" + VendorPlace(line.ItemId, catalog), Palette.SupplyColor(Supply.Vendor)),
-            Supply.Drop => (catalog.Mobs.For(line.ItemId).FirstOrDefault() is { } mob ? $"{mob.Name}, {mob.PlaceName} (level {mob.Level})" : "no known spawn", Palette.SupplyColor(Supply.Drop)),
-            Supply.Craft when line.Recipe != null => ($"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}" + CraftTime(line.Recipe), Palette.JobColor(line.Recipe.Job)),
-            _ => null,
-        };
-        if (chip is { } c && !(line.Supply == Supply.Craft && line.Crafts == 0))
-        {
-            ImGui.SetCursorScreenPos(new Vector2(chipX, start.Y + (h - 20 * s) / 2));
-            Ui.Chip(c.Text, c.Color);
-        }
-
-        // Right: still to get, then have/need with a bar.
+        // Right: still to get, then have/need with a bar. Laid out first, so the chips know how much room they have.
         var have = line.FromStock;
         var need = line.Needed;
         var done = line.Remaining == 0;
         var count = $"{have}/{need}";
         var cw = ImGui.CalcTextSize(count).X;
         var right = start.X + width;
-        dl.AddText(new Vector2(right - cw, textY), Palette.U32(done ? Palette.Accent : Palette.TextMuted), count);
         var barW = 110 * s;
         var barX = right - MathF.Max(cw, 52 * s) - 12 * s - barW;
+        var leftText = done ? "done" : $"{line.Remaining:N0} left";
+        float lw;
+        using (Ui.F.Strong.Push()) lw = ImGui.CalcTextSize(leftText).X;
+        var leftX = barX - 14 * s - lw;
+
+        // Detail chips: how it is obtained when that needs saying, as much of it as fits before the counts.
+        FitChips(Chips(line, catalog), chipX, start.Y + (h - 20 * s) / 2, leftX - 12 * s);
+
+        dl.AddText(new Vector2(right - cw, textY), Palette.U32(done ? Palette.Accent : Palette.TextMuted), count);
         var color = line.Supply == Supply.Craft && line.Recipe != null ? Palette.JobColor(line.Recipe.Job) : Palette.SupplyColor(line.Supply);
         ImGui.SetCursorScreenPos(new Vector2(barX, start.Y + (h - 6 * s) / 2));
         Ui.Bar("##bar" + line.ItemId, need == 0 ? 1f : have / (float)need, done ? Palette.Accent : color, barW);
-
         using (Ui.F.Strong.Push())
-        {
-            var left = done ? "done" : $"{line.Remaining:N0} left";
-            var lw = ImGui.CalcTextSize(left).X;
-            dl.AddText(new Vector2(barX - 14 * s - lw, textY), Palette.U32(done ? Palette.Accent : Palette.Text), left);
-        }
+            dl.AddText(new Vector2(leftX, textY), Palette.U32(done ? Palette.Accent : Palette.Text), leftText);
 
-        if (hovered)
-        {
-            var tip = $"The whole order needs {need:N0}; you have {have:N0}.";
-            if (line.Supply == Supply.Craft && line.Recipe is { } r && line.Crafts > 0)
-                tip += $" {line.Crafts} {(line.Crafts == 1 ? "craft makes" : "crafts make")} {line.Produced}.";
-            if (line.Supply == Supply.GatherTimed) tip += " Only on timed nodes; the run crafts while it waits for them.";
-            Ui.ShowTooltip(tip);
-        }
+        if (hovered) Ui.ShowTooltip(RowTooltip(line, catalog));
 
         ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
         ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    /// <summary>A detail chip: its text from the fullest form to the shortest, its colour, and the icon leading it.</summary>
+    private readonly record struct ChipText(string[] Forms, Vector4 Color, FontAwesomeIcon? Icon = null);
+
+    /// <summary>The detail chips of a material row, most important first.</summary>
+    private List<ChipText> Chips(PlanLine line, GameCatalog catalog)
+    {
+        var chips = new List<ChipText>(2);
+        switch (line.Supply)
+        {
+            case Supply.GatherTimed:
+                chips.Add(new ChipText(TimedChip(catalog.TimedMask(line.ItemId)), Palette.SupplyColor(Supply.GatherTimed)));
+                break;
+            case Supply.Fish:
+                FishChips(line, catalog, chips);
+                break;
+            case Supply.Vendor:
+                // Bait says what it's for first; its price follows like on any vendor row.
+                if (IsBait(line))
+                    chips.Add(new ChipText(new[] { "bait for " + FishList(line.NeededFor, catalog), "bait" }, Palette.SupplyColor(Supply.Fish), FontAwesomeIcon.Worm));
+                var price = $"{line.VendorUnitPrice:N0} gil each";
+                chips.Add(new ChipText(VendorPlace(line.ItemId, catalog) is { Length: > 0 } place ? new[] { price + place, price } : new[] { price },
+                    Palette.SupplyColor(Supply.Vendor)));
+                break;
+            case Supply.Drop:
+                chips.Add(catalog.Mobs.For(line.ItemId).FirstOrDefault() is { } mob
+                    ? new ChipText(new[] { $"{mob.Name}, {mob.PlaceName} (level {mob.Level})", mob.Name }, Palette.SupplyColor(Supply.Drop))
+                    : new ChipText(new[] { "no known spawn" }, Palette.SupplyColor(Supply.Drop)));
+                break;
+            case Supply.Craft when line.Recipe != null && line.Crafts > 0:
+                var crafts = $"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}";
+                chips.Add(new ChipText(new[] { crafts + CraftTime(line.Recipe), crafts }, Palette.JobColor(line.Recipe.Job)));
+                break;
+        }
+        return chips;
+    }
+
+    /// <summary>
+    /// A fish's window ("bites 18:00–06:00 ET in Fog, opens in 12 min"), live, and what it is cast with
+    /// (spearfishing needs no bait).
+    /// </summary>
+    private void FishChips(PlanLine line, GameCatalog catalog, List<ChipText> chips)
+    {
+        if (Plans.Outlook(line.ItemId) is not { } outlook) return;
+        var fish = outlook.Fish;
+        if (fish.Restricted)
+        {
+            var (status, brief) = WindowStatus(outlook, DateTimeOffset.UtcNow);
+            chips.Add(new ChipText(new[] { $"bites {BiteRule(fish)}, {status}", brief }, Palette.SupplyColor(Supply.Fish),
+                fish.Window != null ? FontAwesomeIcon.Clock : FontAwesomeIcon.CloudSun));
+        }
+        if (fish.Spear) chips.Add(new ChipText(new[] { "spearfishing" }, Palette.TextMuted, FontAwesomeIcon.Water));
+        else if (CastWith(line.ItemId, fish) is { } bait) chips.Add(new ChipText(new[] { catalog.ItemName(bait) }, Palette.TextMuted, FontAwesomeIcon.Worm));
+    }
+
+    /// <summary>"opens in 12 min", "9 min left" (and "biting, 9 min left" for the short chip), "biting now", or not in the forecast.</summary>
+    private static (string Status, string Brief) WindowStatus(FishOutlook outlook, DateTimeOffset now)
+    {
+        if (outlook.OpensIn(now) is not { } wait)
+        {
+            var none = $"not in the next {PlanService.FishHorizon.TotalDays:0} days";
+            return (none, none);
+        }
+        if (wait > TimeSpan.Zero) return ($"opens in {Short(wait)}", $"opens in {Short(wait)}");
+        var left = outlook.OpenFor(now);
+        return left >= TimeSpan.FromHours(2) ? ("biting now", "biting now") : ($"{Short(left)} left", $"biting, {Short(left)} left");
+    }
+
+    /// <summary>
+    /// The bait a fish is cast with first: its own tackle, or Versatile Lure when that stands in for all of it
+    /// (none in the bags and no vendor sells it under the cap). Null when there's no bait to show.
+    /// </summary>
+    private uint? CastWith(uint fishId, Core.Fishing.FishInfo fish)
+    {
+        if (fish.Bait == 0) return null;
+        var plan = Plans.Plan;
+        if (fish.Bait != FishAccess.VersatileLure && plan[FishAccess.VersatileLure] is { } lure && lure.NeededFor.Contains(fishId)
+            && plan[fish.Bait] is not { Needed: > 0 })
+            return FishAccess.VersatileLure;
+        return fish.Bait;
+    }
+
+    /// <summary>
+    /// Draws chips left to right from <paramref name="x"/>, each in the fullest form that keeps them all before
+    /// <paramref name="maxX"/>: the last chips shorten first, then drop. The row's tooltip carries the rest.
+    /// </summary>
+    private static void FitChips(IReadOnlyList<ChipText> chips, float x, float y, float maxX)
+    {
+        var gap = 6 * Ui.S;
+        for (var count = chips.Count; count > 0; count--)
+        {
+            var forms = new int[count];
+            while (true)
+            {
+                var total = -gap;
+                for (var i = 0; i < count; i++) total += Ui.ChipWidth(chips[i].Forms[forms[i]], chips[i].Icon) + gap;
+                if (x + total <= maxX)
+                {
+                    for (var i = 0; i < count; i++)
+                    {
+                        var text = chips[i].Forms[forms[i]];
+                        ImGui.SetCursorScreenPos(new Vector2(x, y));
+                        Ui.Chip(text, chips[i].Color, chips[i].Icon);
+                        x += Ui.ChipWidth(text, chips[i].Icon) + gap;
+                    }
+                    return;
+                }
+                // Shorten the last chip that still can; when none can, try one chip fewer.
+                var j = count - 1;
+                while (j >= 0 && forms[j] >= chips[j].Forms.Length - 1) j--;
+                if (j < 0) break;
+                forms[j]++;
+            }
+        }
+    }
+
+    /// <summary>The row's tooltip: have and need, then what's worth knowing about how it's got.</summary>
+    private string RowTooltip(PlanLine line, GameCatalog catalog)
+    {
+        var tip = $"The whole order needs {line.Needed:N0}; you have {line.FromStock:N0}.";
+        if (line.Supply == Supply.Craft && line.Recipe != null && line.Crafts > 0)
+            tip += $" {line.Crafts} {(line.Crafts == 1 ? "craft makes" : "crafts make")} {line.Produced}.";
+        if (line.Supply == Supply.GatherTimed) tip += " Only on timed nodes; the run crafts while it waits for them.";
+        if (line.Supply == Supply.Fish) tip += FishTip(line, catalog);
+        if (IsBait(line)) tip += BaitTip(line, catalog);
+        if (line.Supply == Supply.Vendor && catalog.Vendors.For(line.ItemId).OrderBy(o => o.Price).FirstOrDefault() is { } offer)
+            tip += $"\nSold by {offer.NpcName}, {offer.PlaceName}.";
+        return tip;
+    }
+
+    /// <summary>Where and when a fish bites, its bait and chain, what comes first, and about how long it takes.</summary>
+    private string FishTip(PlanLine line, GameCatalog catalog)
+    {
+        if (Plans.Outlook(line.ItemId) is not { } outlook) return "";
+        var fish = outlook.Fish;
+        var now = DateTimeOffset.UtcNow;
+        var parts = new List<string>();
+        var where = outlook.Spots.FirstOrDefault() is { } spot ? SpotName(spot) : null;
+        if (fish.Restricted)
+        {
+            var when = outlook.OpensIn(now) is not { } wait ? $"not in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast"
+                : wait > TimeSpan.Zero ? $"next in {Short(wait)}"
+                : outlook.OpenFor(now) >= TimeSpan.FromHours(2) ? "biting now" : $"biting now, for {Short(outlook.OpenFor(now))}";
+            parts.Add($"Bites {BiteRule(fish)}{(where != null ? " at " + where : "")}: {when}.");
+        }
+        else if (where != null) parts.Add($"{(fish.Spear ? "Spearfished" : "Fished")} at {where}, any time.");
+        if (!fish.Spear && fish.Bait != 0)
+        {
+            var chain = fish.Mooch.Count > 0 ? " Mooch chain: " + string.Join(", then ", fish.Mooch.Select(catalog.ItemName)) + ", then this fish." : "";
+            parts.Add($"Bait: {catalog.ItemName(fish.Bait)}.{chain}");
+            if (CastWith(line.ItemId, fish) == FishAccess.VersatileLure && fish.Bait != FishAccess.VersatileLure)
+                parts.Add($"{catalog.ItemName(fish.Bait)} can't be bought for gil, so the run casts Versatile Lure instead.");
+        }
+        if (fish.NeedsIntuition)
+            parts.Add((fish.Spear ? "Swimming shadows first: " : "Fisher's Intuition first: ")
+                      + string.Join(" and ", fish.Predators.Select(p => $"{p.Count}× {catalog.ItemName(p.ItemId)}")) + ".");
+        if (fish.Big) parts.Add("A big fish: expect many casts.");
+        var seconds = Plans.CatchSeconds(line.ItemId) * line.Remaining;
+        if (seconds > 0) parts.Add($"About {Short(TimeSpan.FromSeconds(seconds))} of fishing for {line.Remaining:N0}, from its bite time and the casts a catch usually takes.");
+        if (outlook.Blocker is { } why) parts.Add($"Can't be fished yet: {why}.");
+        return parts.Count == 0 ? "" : "\n" + string.Join("\n", parts);
+    }
+
+    /// <summary>Which fish the bait is for, how the amount comes about, and what doesn't count.</summary>
+    private string BaitTip(PlanLine line, GameCatalog catalog)
+    {
+        var parts = new List<string>();
+        var spare = Math.Max(0, Config.Fishing.SpareBait);
+        var fish = Names(line.NeededFor, catalog);
+        var they = line.NeededFor.Count == 1 ? "it usually takes" : "they usually take";
+        parts.Add(line.Supply == Supply.Vendor && !line.IsTarget && line.Needed > spare && spare > 0
+            ? $"Bait for {fish}: about {line.Needed - spare:N0} for the casts {they}, plus {spare:N0} spare (Settings)."
+            : $"Bait for {fish}, for the casts {they}.");
+        if (line.ItemId == FishAccess.VersatileLure)
+        {
+            var plan = Plans.Plan;
+            var replaced = line.NeededFor.SelectMany(Plans.BaitPerCatch).Select(b => b.Bait)
+                .Where(b => b != FishAccess.VersatileLure && plan[b] is not { Supply: Supply.Vendor }).Distinct().Select(catalog.ItemName).ToList();
+            if (replaced.Count > 0) parts.Add($"Stands in for {string.Join(" and ", replaced)}, which can't be bought for gil.");
+        }
+        var elsewhere = Plans.Owned.GetValueOrDefault(line.ItemId) - GameState.BagCount(line.ItemId);
+        if (elsewhere > 0) parts.Add($"{elsewhere:N0} more in your saddlebag or with retainers don't count: only bait in your bags can be cast.");
+        return "\n" + string.Join("\n", parts);
+    }
+
+    /// <summary>Bait lines list the fish they are cast for (books and tomes list their users too, but they're Learn lines).</summary>
+    private static bool IsBait(PlanLine line) => line.Supply != Supply.Learn && line.NeededFor.Count > 0;
+
+    /// <summary>"Goosefish", "Goosefish and 2 more".</summary>
+    private static string FishList(IReadOnlyList<uint> fish, GameCatalog catalog)
+        => fish.Count switch
+        {
+            0 => "fish",
+            1 => catalog.ItemName(fish[0]),
+            _ => $"{catalog.ItemName(fish[0])} and {fish.Count - 1} more",
+        };
+
+    /// <summary>"Mistbeard Cove, Western La Noscea" (the zone alone when the spot has no name of its own).</summary>
+    private static string SpotName(Core.Fishing.FishingSpotInfo spot)
+    {
+        var zone = FishAccess.Zone(spot.TerritoryId);
+        if (spot.Name.Length == 0 || spot.Name == zone) return zone.Length > 0 ? zone : "an unnamed spot";
+        return zone.Length > 0 ? $"{spot.Name}, {zone}" : spot.Name;
+    }
+
+    /// <summary>When a fish bites, in words; worked out once per fish (weather names come from the game data).</summary>
+    private string BiteRule(Core.Fishing.FishInfo fish)
+    {
+        if (biteRules.TryGetValue(fish.ItemId, out var rule)) return rule;
+        rule = PlanService.BiteRule(fish);
+        biteRules[fish.ItemId] = rule;
+        return rule;
+    }
+
+    private readonly Dictionary<uint, string> biteRules = new();
+
+    /// <summary>" Or let the run cast Versatile Lure instead (Settings)." while that stand-in is off and could be bought.</summary>
+    private string StandInHint(GameCatalog catalog)
+    {
+        if (Config.Fishing.VersatileLureFallback || !Config.Fishing.BuyBait) return "";
+        var src = catalog.Sources(FishAccess.VersatileLure);
+        var cap = Config.Buying.VendorMaxPrice;
+        if (!src.Has(Obtain.Vendor) || (cap != 0 && src.VendorPrice > cap)) return "";
+        return " Or let the run cast Versatile Lure instead (turn it on under Fishing in Settings).";
     }
 
     /// <summary>" at Material Supplier, Limsa Lominsa Lower Decks" for the cheapest reachable vendor.</summary>
@@ -606,14 +832,19 @@ internal sealed class PlanPage : Page
         return offer == null ? "" : $" at {offer.NpcName}, {offer.PlaceName}";
     }
 
-    /// <summary>"timed node, up now" / "timed node, opens in 12 min", from the node's Eorzea hours.</summary>
-    private static string TimedChip(uint mask)
+    /// <summary>"timed node, up for 12 min" / "timed node, opens in 12 min" (and the same without "timed node"), from the node's Eorzea hours.</summary>
+    private static string[] TimedChip(uint mask)
     {
         var now = DateTimeOffset.UtcNow;
-        if (mask == 0) return "timed node";
+        if (mask == 0) return new[] { "timed node" };
         if (Core.Timing.Eorzea.IsUp(mask, now))
-            return "timed node, up for " + Estimator.Describe(Core.Timing.Eorzea.UpFor(mask, now)).Replace("about ", "");
-        return Core.Timing.Eorzea.UntilOpen(mask, now) is { } wait ? "timed node, opens in " + Estimator.Describe(wait).Replace("about ", "") : "timed node";
+        {
+            var up = "up for " + Short(Core.Timing.Eorzea.UpFor(mask, now));
+            return new[] { "timed node, " + up, up };
+        }
+        if (Core.Timing.Eorzea.UntilOpen(mask, now) is not { } wait) return new[] { "timed node" };
+        var opens = "opens in " + Short(wait);
+        return new[] { "timed node, " + opens, opens };
     }
 
     private static void DrawCrystals(Plan plan, GameCatalog catalog)

@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
+using Provenance.Core.Estimating;
+using Provenance.Core.Fishing;
 using Provenance.Core.Planning;
+using Provenance.Integrations;
 
 namespace Provenance.Data;
 
@@ -14,13 +17,16 @@ internal sealed record ReadinessIssue(uint ItemId, uint ClassJobId, string Text,
 /// Can this character actually do the order? Compares every craft and every gathered item with the
 /// job levels, the stats of the best gearset from the last character check (plus the food and
 /// medicine picked on the Character page), and whether Raphael finds a rotation that finishes each
-/// craft. Blocking issues stop the run from starting, like missing items do.
+/// craft; for fish, whether a spot can be reached and fished (level, actions, known bait) and a Fisher
+/// gearset exists, with what to expect (big fish, weather and short windows, Fisher's Intuition).
+/// Blocking issues stop the run from starting, like missing items do.
 /// </summary>
 internal static class Readiness
 {
     /// <param name="rotationProblem">Raphael's answer for a recipe: null when it found a rotation (or hasn't answered yet).</param>
+    /// <param name="fishOutlook">Where and when a fish can be fished (<see cref="PlanService.Outlook"/>); null skips the fish checks.</param>
     public static List<ReadinessIssue> Check(Plan plan, GameCatalog catalog, CharacterProfile? profile, Configuration cfg,
-        Func<RecipeInfo, bool, string?> rotationProblem)
+        Func<RecipeInfo, bool, string?> rotationProblem, Func<uint, FishOutlook?>? fishOutlook = null)
     {
         var issues = new List<ReadinessIssue>();
         if (plan.Lines.Count == 0) return issues;
@@ -54,11 +60,17 @@ internal static class Readiness
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"{why} With your {abbr} stats no rotation finishes this craft{unsure}.", sure));
         }
 
-        // Gathering and fishing: job level and the Perception the item asks for.
+        // Gathering and fishing: job level and the Perception the item asks for; fish get their own checks.
         int Level(uint job) => PlanService.JobLevel(job);
+        var fishing = false;
         foreach (var line in plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed or Supply.Fish && l.Remaining > 0))
         {
-            if (catalog.GatherNeedsFor(line.ItemId, Level) is not { } needs) continue;
+            // Fish known only from their fishing log entry have no level here; their own checks cover it.
+            if (catalog.GatherNeedsFor(line.ItemId, Level) is not { } needs)
+            {
+                if (line.Supply == Supply.Fish) CheckFishLine(line);
+                continue;
+            }
             var abbr = ClassJobs.Abbreviation(needs.ClassJobId);
             var level = Level(needs.ClassJobId);
             if (level == 0)
@@ -71,6 +83,11 @@ internal static class Readiness
                 issues.Add(new ReadinessIssue(line.ItemId, needs.ClassJobId, $"Needs {abbr} level {needs.Level}; yours is {level}.", true));
                 continue;
             }
+            if (line.Supply == Supply.Fish)
+            {
+                CheckFishLine(line);
+                continue;
+            }
             if (needs.Perception <= 0 || profile?.Job(needs.ClassJobId) is not { Source: not StatSource.None } job) continue;
             var stats = WithConsumables(job.Stats, Discipline.Land, catalog, cfg);
             if (stats[1] < needs.Perception)
@@ -79,10 +96,106 @@ internal static class Readiness
                     : new ReadinessIssue(line.ItemId, needs.ClassJobId, $"Needs {needs.Perception:N0} Perception; your {abbr} gearset has {stats[1]:N0}. The item can't be gathered without it.", true));
         }
 
+        // The run changes into the Fisher gearset before it fishes.
+        if (fishing && Services.ClientState.IsLoggedIn && GameState.BestGearset(FishAccess.Fisher) < 0)
+            issues.Add(new ReadinessIssue(0, FishAccess.Fisher, "No gearset saved for FSH; save one so the run can change into it to fish.", true));
+
         if (profile == null)
             issues.Add(new ReadinessIssue(0, 0, "Check your character on the Character page so your gearsets' stats can be compared with what the order asks for.", false));
         return issues;
+
+        void CheckFishLine(PlanLine line)
+        {
+            if (fishOutlook == null) return;
+            fishing = true;
+            if (fishOutlook(line.ItemId) is { } outlook) CheckFish(issues, plan, line, outlook, catalog, cfg);
+            else
+                issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher,
+                    "Provenance has no fishing data for this fish (where and on what it bites), so a run can't catch it.", true));
+        }
     }
+
+    /// <summary>
+    /// One fish: blocking when this character can't fish it (spot level, reach, actions, no bait known) or,
+    /// with buying bait off, has none of its bait; otherwise one note on what to expect, when there's
+    /// anything worth knowing.
+    /// </summary>
+    private static void CheckFish(List<ReadinessIssue> issues, Plan plan, PlanLine line, FishOutlook outlook, GameCatalog catalog, Configuration cfg)
+    {
+        var fish = outlook.Fish;
+        if (outlook.Blocker is { } why)
+        {
+            issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, $"Can't fish this yet ({why}).", true));
+            return;
+        }
+
+        var notes = new List<string>(4);
+        if (!fish.Spear && !cfg.Fishing.BuyBait) CheckOwnBait(issues, notes, line, fish, catalog, cfg);
+
+        var now = DateTimeOffset.UtcNow;
+        if (fish.Big) notes.Add("A big fish: it can take many casts, sometimes more than one window.");
+        if (fish.Weather.Count > 0 || fish.PreviousWeather.Count > 0)
+        {
+            var rule = PlanService.BiteRule(fish);
+            notes.Add(outlook.OpensIn(now) == null
+                ? $"Only bites {rule}, which isn't in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast; the run would wait for it."
+                : $"Only bites {rule}; that weather can take hours to come round, and the run gathers or crafts in the meantime when it can.");
+        }
+        else if (fish.Window is { On: > 0, Off: > 0 } w)
+        {
+            // A short window may not fit the whole catch: say so when the fishing takes longer than one window.
+            var fishing = TimeSpan.FromSeconds(line.Remaining * BaitNeeds.SecondsPerCatch(fish, catalog.Gather.Fish));
+            var open = TimeSpan.FromMilliseconds(w.On);
+            if (fishing > open)
+                notes.Add($"Only bites {PlanService.BiteRule(fish)}, {Short(open)} at a time; catching {line.Remaining} likely takes several windows.");
+        }
+        if (fish.NeedsIntuition)
+        {
+            var first = string.Join(" and ", fish.Predators.Select(p => $"{p.Count}× {catalog.ItemName(p.ItemId)}"));
+            notes.Add(fish.Spear
+                ? $"Shows up in swimming shadows after gigging {first} (the run does that first)."
+                : $"Needs Fisher's Intuition first: the run catches {first}" + (fish.IntuitionSeconds > 0 ? $", then it bites for {Short(TimeSpan.FromSeconds(fish.IntuitionSeconds))}." : "."));
+        }
+        if (cfg.Fishing.BuyBait && StandInFor(plan, line.ItemId, fish, catalog) is { Length: > 0 } replaced)
+            notes.Add($"{replaced} can't be bought for gil, so the run casts Versatile Lure instead once your bags run out; bites may come slower.");
+        if (notes.Count > 0) issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, string.Join(" ", notes), false));
+    }
+
+    /// <summary>With buying bait off: blocking when the bags hold none of a bait (and no stand-in), a note when they hold less than the estimate.</summary>
+    private static void CheckOwnBait(List<ReadinessIssue> issues, List<string> notes, PlanLine line, FishInfo fish, GameCatalog catalog, Configuration cfg)
+    {
+        if (!Services.ClientState.IsLoggedIn) return;
+        var lure = cfg.Fishing.VersatileLureFallback ? GameState.BagCount(FishAccess.VersatileLure) : 0;
+        foreach (var (bait, perCatch) in BaitNeeds.PerCatch(fish, catalog.Gather.Fish))
+        {
+            var have = GameState.BagCount(bait);
+            var need = (int)Math.Ceiling(line.Remaining * perCatch - 1e-9);
+            var name = catalog.ItemName(bait);
+            if (have == 0 && lure == 0)
+                issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher,
+                    $"No {name} in your bags, and buying bait is off in Settings: bring about {need} (bait in the saddlebag can't be cast).", true));
+            else if (have == 0)
+                notes.Add($"No {name} in your bags; the run casts your Versatile Lure instead (buying bait is off).");
+            else if (have < need)
+                notes.Add($"About {need} {name} needed, your bags hold {have}; buying bait is off in Settings.");
+        }
+    }
+
+    /// <summary>
+    /// The fish's bait that Versatile Lure stands in for (no vendor sells it under the cap and the bags don't hold
+    /// enough), named ("Brute Leech"); "" when the fish casts its own bait.
+    /// </summary>
+    private static string StandInFor(Plan plan, uint fishId, FishInfo fish, GameCatalog catalog)
+    {
+        if (plan[FishAccess.VersatileLure] is not { } lure || !lure.NeededFor.Contains(fishId)) return "";
+        var replaced = BaitNeeds.PerCatch(fish, catalog.Gather.Fish)
+            .Where(b => b.Bait != FishAccess.VersatileLure && plan[b.Bait] is not { Supply: Supply.Vendor })
+            .Select(b => catalog.ItemName(b.Bait)).ToList();
+        return replaced.Count == 0 ? "" : string.Join(" and ", replaced);
+    }
+
+    /// <summary>"12 min", "1 h 05 min", "under a minute".</summary>
+    private static string Short(TimeSpan span) => Estimator.Describe(span).Replace("about ", "");
 
     /// <summary>Gearset stats plus the food and medicine picked for that discipline.</summary>
     private static int[] WithConsumables(int[] stats, Discipline discipline, GameCatalog catalog, Configuration cfg)

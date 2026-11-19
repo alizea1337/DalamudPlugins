@@ -8,7 +8,9 @@ namespace Provenance.Core.Planning;
 
 /// <summary>
 /// Expands an order into every material it needs, decides how each one is obtained and in which
-/// order the recipes run. Pure: game data comes through <see cref="IGameCatalog"/>, stock as a dictionary.
+/// order the recipes run. Fish lines bring the bait they are cast with (<see cref="PlannerOptions.FishBaits"/>):
+/// bought from a gil vendor before fishing, or a stand-in for bait no vendor sells under the cap, never crafted.
+/// Pure: game data comes through <see cref="IGameCatalog"/>, stock as a dictionary.
 /// </summary>
 public static class Planner
 {
@@ -24,6 +26,16 @@ public static class Planner
         var learn = new Dictionary<uint, List<uint>>(); // book or tome item -> items that need it
         var state = new Dictionary<uint, VisitState>();
 
+        // Bait: what each fish is cast with, the fish each bait is for (in the order they were met), and the
+        // stand-in for bait no vendor sells under the cap (only when the stand-in itself can be bought).
+        var fishBaits = new Dictionary<uint, IReadOnlyList<(uint Bait, double PerCatch)>>();
+        var fishMet = new List<uint>();
+        var baitUsers = new Dictionary<uint, List<uint>>();
+        var baitLines = new HashSet<uint>();
+        var fallback = options.FallbackBait != 0 && VendorOk(catalog.Sources(options.FallbackBait)) && catalog.RecipesFor(options.FallbackBait).Count == 0
+            ? options.FallbackBait
+            : 0u;
+
         // 1. Decide how every reachable item is supplied, and record a post-order (ingredients first).
         foreach (var t in targets)
         {
@@ -32,25 +44,20 @@ public static class Planner
         }
         foreach (var t in targets) Visit(t.ItemId);
 
-        // 2. Push demand from products down to ingredients (reverse post-order is a topological order).
+        // 2. Push demand from products down to ingredients and from fish to their bait (reverse post-order is
+        // a topological order). The stand-in bait goes last, once every bait it may stand in for is settled.
         var demand = new Dictionary<uint, int>();
         foreach (var t in targets) demand[t.ItemId] = demand.GetValueOrDefault(t.ItemId) + t.Quantity;
+        var baitDemand = new Dictionary<uint, double>(); // bait the fish still to catch use up, by bait
+        var spilled = new List<uint>();                  // fish whose bait the stand-in takes over (in part)
+        var handedOver = 0;                              // bait the stand-in takes over
 
         for (var i = postOrder.Count - 1; i >= 0; i--)
         {
-            var line = lines[postOrder[i]];
-            line.Needed = demand.GetValueOrDefault(line.ItemId);
-            // Order items are made or gathered on top of what's already owned ("2000 more"), unless the
-            // user asks to count them. Materials always use what's owned first.
-            var ignoreStock = line.IsTarget && !options.CountOwnedTargets;
-            var stock = ignoreStock ? 0 : owned.GetValueOrDefault(line.ItemId);
-            line.FromStock = Math.Min(Math.Max(0, stock), line.Needed);
-
-            if (line.Supply != Supply.Craft || line.Recipe == null) continue;
-            line.Crafts = (line.Remaining + line.Recipe.Yield - 1) / line.Recipe.Yield;
-            foreach (var ing in line.Recipe.Ingredients)
-                demand[ing.ItemId] = demand.GetValueOrDefault(ing.ItemId) + line.Crafts * ing.Amount;
+            if (postOrder[i] == fallback) continue;
+            Settle(lines[postOrder[i]]);
         }
+        if (fallback != 0 && lines.TryGetValue(fallback, out var standIn)) Settle(standIn);
 
         var craftSteps = postOrder.Select(id => lines[id]).Where(l => l.Supply == Supply.Craft && l.Crafts > 0).ToList();
         var tree = targets.Select(t => BuildTree(t.ItemId, t.Quantity, 0)).ToList();
@@ -58,6 +65,15 @@ public static class Planner
         // Materials below an intermediate that stock fully covers are not needed at all.
         foreach (var id in lines.Where(kv => kv.Value.Needed == 0 && !kv.Value.IsTarget).Select(kv => kv.Key).ToList())
             lines.Remove(id);
+
+        // Bait says which fish it is for (only fish still to catch), in the order the fish were met.
+        foreach (var (bait, users) in baitUsers)
+            if (lines.TryGetValue(bait, out var baitLine)) baitLine.NeededFor = users.Where(StillFished).ToList();
+        if (fallback != 0 && lines.TryGetValue(fallback, out var stand))
+        {
+            var direct = baitUsers.GetValueOrDefault(fallback);
+            stand.NeededFor = fishMet.Where(f => (direct?.Contains(f) == true || spilled.Contains(f)) && StillFished(f)).ToList();
+        }
 
         // Books and tomes to read first, but only for what is still made or gathered.
         foreach (var (book, users) in learn)
@@ -96,9 +112,74 @@ public static class Planner
                     Visit(ing.ItemId);
                 }
             }
+            else if (line.Supply == Supply.Fish && options.FishBaits?.Invoke(itemId) is { Count: > 0 } baits)
+            {
+                // A fish brings the bait it is cast with: its tackle and its predators' bait (never another fish
+                // the order catches, which has its own line).
+                var used = baits.Where(b => b.Bait != 0 && b.Bait != itemId && b.PerCatch > 0 && !double.IsNaN(b.PerCatch)
+                                            && !(lines.TryGetValue(b.Bait, out var known) && known.Supply == Supply.Fish)).ToList();
+                if (used.Count > 0)
+                {
+                    fishBaits[itemId] = used;
+                    fishMet.Add(itemId);
+                }
+                foreach (var (bait, _) in used)
+                {
+                    AddBait(bait, itemId);
+                    Visit(bait);
+                }
+            }
             state[itemId] = VisitState.Done;
             postOrder.Add(itemId);
         }
+
+        // How much of an item the order needs, what the stock covers, and (for recipes) the demand on the
+        // ingredients; fish add the bait their catches use up.
+        void Settle(PlanLine line)
+        {
+            var id = line.ItemId;
+            var other = demand.GetValueOrDefault(id); // as an order item or an ingredient
+            var isBait = baitLines.Contains(id);
+            // Order items are made or gathered on top of what's already owned ("2000 more"), unless the
+            // user asks to count them. Materials always use what's owned first. Bait only counts what the
+            // run can cast with.
+            var ignoreStock = line.IsTarget && !options.CountOwnedTargets;
+            var stock = ignoreStock ? 0
+                : Math.Max(0, isBait && options.BaitOnHand != null ? options.BaitOnHand(id) : owned.GetValueOrDefault(id));
+            var needed = other;
+            if (isBait)
+            {
+                var casts = (int)Math.Ceiling(baitDemand.GetValueOrDefault(id) - 1e-9);
+                var takenOver = id == fallback ? handedOver : 0;
+                if (casts > 0 && fallback != 0 && id != fallback && line.Supply == Supply.Manual)
+                {
+                    // No vendor sells it under the cap: what the bags hold is cast first, the stand-in does the rest.
+                    var covered = Math.Min(Math.Max(0, stock - other), casts);
+                    if (covered < casts)
+                    {
+                        handedOver += casts - covered;
+                        foreach (var fish in baitUsers[id].Where(StillFished))
+                            if (!spilled.Contains(fish)) spilled.Add(fish);
+                    }
+                    casts = covered;
+                }
+                else if (casts + takenOver > 0) casts += Math.Max(0, options.SpareBait);
+                needed += casts + takenOver;
+            }
+            line.Needed = needed;
+            line.FromStock = Math.Min(stock, line.Needed);
+
+            if (line.Supply == Supply.Fish && line.Remaining > 0 && fishBaits.TryGetValue(id, out var baits))
+                foreach (var (bait, perCatch) in baits)
+                    baitDemand[bait] = baitDemand.GetValueOrDefault(bait) + line.Remaining * perCatch;
+
+            if (line.Supply != Supply.Craft || line.Recipe == null) return;
+            line.Crafts = (line.Remaining + line.Recipe.Yield - 1) / line.Recipe.Yield;
+            foreach (var ing in line.Recipe.Ingredients)
+                demand[ing.ItemId] = demand.GetValueOrDefault(ing.ItemId) + line.Crafts * ing.Amount;
+        }
+
+        bool StillFished(uint fish) => lines.TryGetValue(fish, out var l) && l.Supply == Supply.Fish && l.Remaining > 0;
 
         PlanLine GetOrAddLine(uint itemId, bool isTarget, uint recipeId)
         {
@@ -121,6 +202,56 @@ public static class Planner
             }
             return line;
         }
+
+        // A bait line for a fish. Bait is bought before fishing (crafting comes after it), so a new bait line
+        // never picks a recipe; an item the order already has (ordered, or a recipe's ingredient) keeps its way.
+        void AddBait(uint bait, uint fish)
+        {
+            baitLines.Add(bait);
+            if (!baitUsers.TryGetValue(bait, out var users)) baitUsers[bait] = users = new List<uint>();
+            if (!users.Contains(fish)) users.Add(fish);
+            if (!lines.ContainsKey(bait))
+            {
+                var line = new PlanLine { ItemId = bait };
+                lines[bait] = line;
+                DecideBait(line);
+            }
+            // Bait no vendor sells under the cap: the stand-in may have to cover it.
+            if (fallback == 0 || bait == fallback || lines[bait].Supply != Supply.Manual) return;
+            baitLines.Add(fallback);
+            if (lines.ContainsKey(fallback)) return;
+            var stand = new PlanLine { ItemId = fallback };
+            lines[fallback] = stand;
+            DecideBait(stand);
+        }
+
+        void DecideBait(PlanLine line)
+        {
+            line.Recipe = null;
+            var src = catalog.Sources(line.ItemId);
+            line.VendorUnitPrice = src.VendorPrice;
+            if (VendorOk(src))
+            {
+                line.Supply = Supply.Vendor;
+                line.ManualReason = null;
+                return;
+            }
+            line.Supply = Supply.Manual;
+            line.ManualReason = BaitReason(line.ItemId, src);
+        }
+
+        // Why the run can't get a bait itself: the price cap, where it is sold instead, or that it is crafted.
+        string BaitReason(uint bait, ItemSources src)
+        {
+            if (src.Has(Obtain.Vendor))
+                return $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}";
+            if (options.BaitSource?.Invoke(bait) is { Length: > 0 } where) return where;
+            var recipes = catalog.RecipesFor(bait);
+            if (recipes.Count > 0) return $"Crafted ({recipes[0].Job.Abbreviation()}) and not sold for gil; a run buys bait but doesn't craft it";
+            return "Not sold by any gil vendor a run can reach";
+        }
+
+        bool VendorOk(ItemSources src) => src.Has(Obtain.Vendor) && (options.VendorMaxPrice == 0 || src.VendorPrice <= options.VendorMaxPrice);
 
         (RecipeInfo? Recipe, string? Blocked) PickRecipe(uint itemId, uint recipeId)
         {
@@ -154,7 +285,7 @@ public static class Planner
         {
             line.Recipe = null;
             var src = catalog.Sources(line.ItemId);
-            var vendorOk = src.Has(Obtain.Vendor) && (options.VendorMaxPrice == 0 || src.VendorPrice <= options.VendorMaxPrice);
+            var vendorOk = VendorOk(src);
             line.VendorUnitPrice = src.VendorPrice;
             line.ManualReason = null;
             var tomeOk = src.Tome == 0 || options.HasTome == null || options.HasTome(src.Tome);
@@ -182,6 +313,20 @@ public static class Planner
         {
             var line = lines[itemId];
             var node = new PlanTreeNode { ItemId = itemId, Quantity = quantity, Supply = line.Supply };
+            if (line.Supply == Supply.Fish && depth < MaxTreeDepth && fishBaits.TryGetValue(itemId, out var baits))
+            {
+                // The bait this branch's catches use up (before anything owned is subtracted), and the stand-in
+                // where it takes over.
+                foreach (var (bait, perCatch) in baits)
+                {
+                    var amount = (int)Math.Ceiling(quantity * perCatch - 1e-9);
+                    node.Children.Add(new PlanTreeNode { ItemId = bait, Quantity = amount, Supply = lines[bait].Supply });
+                    if (fallback != 0 && bait != fallback && spilled.Contains(itemId) && lines[bait].Supply == Supply.Manual
+                        && node.Children.All(c => c.ItemId != fallback))
+                        node.Children.Add(new PlanTreeNode { ItemId = fallback, Quantity = amount, Supply = lines[fallback].Supply });
+                }
+                return node;
+            }
             if (line.Supply != Supply.Craft || line.Recipe == null || line.Crafts == 0 || depth >= MaxTreeDepth) return node;
             var crafts = (quantity + line.Recipe.Yield - 1) / line.Recipe.Yield;
             foreach (var ing in line.Recipe.Ingredients)

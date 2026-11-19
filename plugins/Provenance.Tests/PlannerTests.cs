@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Provenance.Core.Catalog;
@@ -207,5 +208,241 @@ public class PlannerTests
         var plan = Build(new Order());
         Assert.False(plan.CanStart);
         Assert.Empty(plan.Lines);
+    }
+
+    // ------------------------------------------------------------------ bait
+
+    /// <summary>Fishing options: bait per catch by fish, spare bait, a stand-in and the bags' bait counts.</summary>
+    private static PlannerOptions Fishing(Dictionary<uint, (uint Bait, double PerCatch)[]> baits, int spare = 0, uint fallback = 0,
+        Dictionary<uint, int>? bags = null, uint cap = 2000, Func<uint, string?>? source = null, bool preferVendor = false)
+        => new()
+        {
+            PreferVendor = preferVendor,
+            VendorMaxPrice = cap,
+            FishBaits = id => baits.TryGetValue(id, out var b) ? b : Array.Empty<(uint, double)>(),
+            SpareBait = spare,
+            FallbackBait = fallback,
+            BaitOnHand = bags == null ? null : id => bags.GetValueOrDefault(id),
+            BaitSource = source,
+        };
+
+    [Fact]
+    public void Fish_lines_bring_their_bait_bought_from_a_vendor()
+    {
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (Lugworm, 1.5) } }, spare: 20));
+        Assert.Equal(Supply.Fish, plan[Trout]!.Supply);
+        var bait = plan[Lugworm]!;
+        Assert.Equal(Supply.Vendor, bait.Supply);
+        Assert.Equal(15 + 20, bait.Needed);
+        Assert.Equal(4u, bait.VendorUnitPrice);
+        Assert.False(bait.IsTarget);
+        Assert.Equal(new[] { Trout }, bait.NeededFor);
+        Assert.Equal(35 * 4, plan.VendorGil);
+        Assert.True(plan.CanStart);
+        Assert.Empty(plan.CraftSteps);
+    }
+
+    [Fact]
+    public void Bait_counts_only_what_the_bags_hold()
+    {
+        var baits = new Dictionary<uint, (uint, double)[]> { [Trout] = new[] { (Lugworm, 1.5) } };
+        // 100 in the saddlebag and with retainers, 10 in the bags: only the 10 count.
+        var owned = new Dictionary<uint, int> { [Lugworm] = 100 };
+        var bagsOnly = Build(OrderOf((Trout, 10)), owned, Fishing(baits, spare: 20, bags: new() { [Lugworm] = 10 }));
+        Assert.Equal(10, bagsOnly[Lugworm]!.FromStock);
+        Assert.Equal(25, bagsOnly[Lugworm]!.Remaining);
+
+        // Without a bag count, bait counts like anything owned.
+        var anyStock = Build(OrderOf((Trout, 10)), owned, Fishing(baits, spare: 20));
+        Assert.Equal(35, anyStock[Lugworm]!.FromStock);
+        Assert.Equal(0, anyStock[Lugworm]!.Remaining);
+    }
+
+    [Fact]
+    public void Bait_is_summed_over_the_fish_rounded_up_once_and_spare_comes_once()
+    {
+        var plan = Build(OrderOf((Trout, 3), (OldLord, 1)), options: Fishing(new()
+        {
+            [Trout] = new[] { (Lugworm, 1.5) },
+            [OldLord] = new[] { (Lugworm, 3.2) },
+        }, spare: 5));
+        var bait = plan[Lugworm]!;
+        Assert.Equal(8 + 5, bait.Needed); // 4.5 + 3.2 = 7.7 → 8, plus 5 spare
+        Assert.Equal(new[] { Trout, OldLord }, bait.NeededFor);
+    }
+
+    [Fact]
+    public void Bait_is_never_crafted()
+    {
+        var plan = Build(OrderOf((Trout, 5)), options: Fishing(new() { [Trout] = new[] { (Spinnerbait, 2.0) } }));
+        var lure = plan[Spinnerbait]!;
+        Assert.Equal(Supply.Manual, lure.Supply);
+        Assert.Null(lure.Recipe);
+        Assert.Contains("Crafted (GSM)", lure.ManualReason);
+        Assert.Null(plan[Ingot]);
+        Assert.Empty(plan.CraftSteps);
+        Assert.False(plan.CanStart);
+        Assert.Equal(new[] { Trout }, plan.TargetsNeeding(Spinnerbait));
+    }
+
+    [Fact]
+    public void Bait_sold_elsewhere_is_named_and_blocks_the_start()
+    {
+        const string where = "Sold for 2 White Gatherers' Scrips by the scrip exchange in Solution Nine";
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }, spare: 5,
+            bags: new() { [BruteLeech] = 7 }, source: id => id == BruteLeech ? where : null));
+        var leech = plan[BruteLeech]!;
+        Assert.Equal(Supply.Manual, leech.Supply);
+        Assert.Equal(where, leech.ManualReason);
+        Assert.Equal(20 + 5, leech.Needed);
+        Assert.Equal(7, leech.FromStock);
+        Assert.Contains(leech, plan.Missing);
+        Assert.False(plan.CanStart);
+
+        // Without a known source the reason still says why.
+        var unknown = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }));
+        Assert.Equal("Not sold by any gil vendor a run can reach", unknown[BruteLeech]!.ManualReason);
+    }
+
+    [Fact]
+    public void The_stand_in_covers_what_the_bags_lack()
+    {
+        // 20 Brute Leech for 10 trout, 8 in the bags: those are cast first, Versatile Lure takes the other 12 (plus spare).
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }, spare: 10,
+            fallback: VersatileLure, bags: new() { [BruteLeech] = 8, [VersatileLure] = 2 }));
+        var leech = plan[BruteLeech]!;
+        Assert.Equal(8, leech.Needed);
+        Assert.Equal(0, leech.Remaining);
+        var lure = plan[VersatileLure]!;
+        Assert.Equal(Supply.Vendor, lure.Supply);
+        Assert.Equal(12 + 10, lure.Needed);
+        Assert.Equal(2, lure.FromStock);
+        Assert.Equal(new[] { Trout }, lure.NeededFor);
+        Assert.True(plan.CanStart);
+        Assert.Empty(plan.Missing);
+        Assert.Equal(new[] { Trout }, plan.TargetsNeeding(VersatileLure));
+    }
+
+    [Fact]
+    public void Bags_that_cover_the_estimate_need_no_stand_in()
+    {
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }, spare: 10,
+            fallback: VersatileLure, bags: new() { [BruteLeech] = 25 }));
+        Assert.Equal(20, plan[BruteLeech]!.Needed);
+        Assert.Equal(0, plan[BruteLeech]!.Remaining);
+        Assert.Null(plan[VersatileLure]);
+        Assert.True(plan.CanStart);
+    }
+
+    [Fact]
+    public void Bait_over_the_cap_takes_the_stand_in_or_says_why()
+    {
+        var baits = new Dictionary<uint, (uint, double)[]> { [Trout] = new[] { (CactuarJig, 1.0) } };
+        var withStandIn = Build(OrderOf((Trout, 5)), options: Fishing(baits, fallback: VersatileLure, bags: new()));
+        Assert.Equal(5, withStandIn[VersatileLure]!.Needed);
+        Assert.Null(withStandIn[CactuarJig]);
+        Assert.True(withStandIn.CanStart);
+
+        var without = Build(OrderOf((Trout, 5)), options: Fishing(baits));
+        Assert.Equal(Supply.Manual, without[CactuarJig]!.Supply);
+        Assert.Contains("above your cap", without[CactuarJig]!.ManualReason);
+
+        var noCap = Build(OrderOf((Trout, 5)), options: Fishing(baits, cap: 0));
+        Assert.Equal(Supply.Vendor, noCap[CactuarJig]!.Supply);
+    }
+
+    [Fact]
+    public void A_stand_in_that_can_not_be_bought_is_no_stand_in()
+    {
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } },
+            fallback: VersatileLure, cap: 100)); // the lure costs 300
+        Assert.Equal(20, plan[BruteLeech]!.Needed);
+        Assert.Null(plan[VersatileLure]);
+        Assert.False(plan.CanStart);
+    }
+
+    [Fact]
+    public void Fish_cast_with_the_stand_in_itself_buy_it_like_any_bait()
+    {
+        var plan = Build(OrderOf((Trout, 10), (OldLord, 2)), options: Fishing(new()
+        {
+            [Trout] = new[] { (VersatileLure, 1.5) },
+            [OldLord] = new[] { (BruteLeech, 3.0) },
+        }, spare: 10, fallback: VersatileLure, bags: new()));
+        var lure = plan[VersatileLure]!;
+        Assert.Equal(15 + 6 + 10, lure.Needed); // its own 15, the 6 Brute Leech it stands in for, spare once
+        Assert.Equal(new[] { Trout, OldLord }, lure.NeededFor);
+        Assert.Null(plan[BruteLeech]);
+        Assert.True(plan.CanStart);
+    }
+
+    [Fact]
+    public void Predator_bait_comes_with_the_fish()
+    {
+        var plan = Build(OrderOf((OldLord, 1)), options: Fishing(new() { [OldLord] = new[] { (Lugworm, 3.0), (VersatileLure, 4.2) } }));
+        Assert.Equal(3, plan[Lugworm]!.Needed);
+        Assert.Equal(5, plan[VersatileLure]!.Needed);
+        Assert.Equal(new[] { OldLord }, plan[VersatileLure]!.NeededFor);
+    }
+
+    [Fact]
+    public void Fish_in_a_recipe_bring_bait_for_what_is_still_to_catch()
+    {
+        var baits = new Dictionary<uint, (uint, double)[]> { [Trout] = new[] { (Lugworm, 1.5) } };
+        var plan = Build(OrderOf((TroutStew, 3)), new Dictionary<uint, int> { [Trout] = 2 }, Fishing(baits, bags: new()));
+        Assert.Equal(4, plan[Trout]!.Remaining);           // 6 trout, 2 owned
+        Assert.Equal(6, plan[Lugworm]!.Needed);            // 4 × 1.5
+        Assert.Equal(new[] { TroutStew }, plan.TargetsNeeding(Lugworm));
+
+        // Trout already owned: no bait at all.
+        var covered = Build(OrderOf((TroutStew, 3)), new Dictionary<uint, int> { [Trout] = 6 }, Fishing(baits, spare: 20));
+        Assert.Null(covered[Lugworm]);
+    }
+
+    [Fact]
+    public void Bought_fish_bring_no_bait()
+    {
+        var plan = Build(OrderOf((Fish, 5)), options: Fishing(new() { [Fish] = new[] { (Lugworm, 1.0) } }, spare: 20, preferVendor: true));
+        Assert.Equal(Supply.Vendor, plan[Fish]!.Supply);
+        Assert.Null(plan[Lugworm]);
+    }
+
+    [Fact]
+    public void Several_baits_can_hand_over_to_the_stand_in()
+    {
+        var plan = Build(OrderOf((Trout, 10), (OldLord, 3)), options: Fishing(new()
+        {
+            [Trout] = new[] { (BruteLeech, 2.0) },
+            [OldLord] = new[] { (Spinnerbait, 1.0) },
+        }, spare: 10, fallback: VersatileLure, bags: new() { [BruteLeech] = 5 }));
+        var lure = plan[VersatileLure]!;
+        Assert.Equal(15 + 3 + 10, lure.Needed); // 20 - 5 Brute Leech, 3 Spinnerbait, spare once
+        Assert.Equal(new[] { Trout, OldLord }, lure.NeededFor);
+        Assert.Equal(5, plan[BruteLeech]!.Needed);
+        Assert.Null(plan[Spinnerbait]);
+        Assert.Empty(plan.CraftSteps);
+        Assert.Equal(new[] { Trout, OldLord }, plan.TargetsNeeding(VersatileLure));
+    }
+
+    [Fact]
+    public void Bait_that_is_also_ordered_adds_the_bait_on_top()
+    {
+        var plan = Build(OrderOf((Lugworm, 5), (Trout, 10)), options: Fishing(new() { [Trout] = new[] { (Lugworm, 1.5) } }, spare: 20,
+            bags: new() { [Lugworm] = 50 }));
+        var worm = plan[Lugworm]!;
+        Assert.True(worm.IsTarget);
+        Assert.Equal(Supply.Vendor, worm.Supply);
+        Assert.Equal(5 + 15 + 20, worm.Needed);
+        Assert.Equal(0, worm.FromStock); // ordered items come on top of what's owned
+        Assert.Equal(new[] { Trout }, worm.NeededFor);
+    }
+
+    [Fact]
+    public void Without_bait_options_fish_lines_stand_alone()
+    {
+        var plan = Build(OrderOf((Trout, 10)));
+        Assert.Equal(Supply.Fish, plan[Trout]!.Supply);
+        Assert.Single(plan.Lines);
+        Assert.Empty(Assert.Single(plan.Tree).Children);
     }
 }

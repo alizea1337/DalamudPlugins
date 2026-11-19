@@ -10,14 +10,54 @@ using Provenance.Core.Catalog;
 using Provenance.Core.Character;
 using Provenance.Core.Crafting;
 using Provenance.Core.Estimating;
+using Provenance.Core.Fishing;
 using Provenance.Integrations;
 using Provenance.Core.Planning;
 
 namespace Provenance.Data;
 
 /// <summary>
+/// What a run faces fishing one item, as of <see cref="At"/>: whether this character can at all
+/// (<see cref="Blocker"/>), the spots it would fish at, and when the fish bites there.
+/// </summary>
+/// <param name="Blocker">Why this character can't fish it (level, reach, actions, no bait known), or null.</param>
+/// <param name="Spots">
+/// The spots a run can use, lowest level first; when there are none, the open-world spots the fish lives at
+/// (so its window can still be shown).
+/// </param>
+/// <param name="Windows">When it bites from <see cref="At"/> on, over those spots; null when it bites any time.</param>
+internal sealed record FishOutlook(FishInfo Fish, string? Blocker, IReadOnlyList<FishingSpotInfo> Spots,
+    IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>? Windows, DateTimeOffset At)
+{
+    /// <summary>Time until it bites: zero when it bites now (or any time), null when not within the forecast.</summary>
+    public TimeSpan? OpensIn(DateTimeOffset now)
+    {
+        if (Windows == null) return TimeSpan.Zero;
+        foreach (var (start, end) in Windows)
+        {
+            if (end <= now) continue;
+            return start <= now ? TimeSpan.Zero : start - now;
+        }
+        return null;
+    }
+
+    /// <summary>Time left in the window it bites in now: zero when closed, <see cref="TimeSpan.MaxValue"/> for fish that always bite.</summary>
+    public TimeSpan OpenFor(DateTimeOffset now)
+    {
+        if (Windows == null) return TimeSpan.MaxValue;
+        foreach (var (start, end) in Windows)
+        {
+            if (end <= now) continue;
+            return start <= now ? end - now : TimeSpan.Zero;
+        }
+        return TimeSpan.Zero;
+    }
+}
+
+/// <summary>
 /// Owns the catalog (built in the background at load), the owned-item snapshot and the current plan.
-/// The plan is rebuilt when the order, the settings or the bags change.
+/// The plan is rebuilt when the order, the settings or the bags change. Fish in the plan come with their
+/// bait (<see cref="BaitPerCatch"/>) and an <see cref="Outlook"/>: where this character can fish them and when they bite.
 /// </summary>
 internal sealed class PlanService : IDisposable
 {
@@ -51,13 +91,14 @@ internal sealed class PlanService : IDisposable
     private void OnLevelChanged(uint classJobId, uint level) => autoCheckAt = DateTime.UtcNow.AddSeconds(2.5);
     private void OnLogin() => autoCheckAt = DateTime.UtcNow.AddSeconds(5);
 
-    /// <summary>The automatic check, quietly; it waits while crafting, gathering or between areas.</summary>
+    /// <summary>The automatic check, quietly; it waits while crafting, gathering, fishing or between areas.</summary>
     private void AutoCheck()
     {
         var c = Services.Condition;
         if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null
             || c[ConditionFlag.BetweenAreas] || c[ConditionFlag.BetweenAreas51] || c[ConditionFlag.OccupiedInCutSceneEvent]
-            || c[ConditionFlag.Crafting] || c[ConditionFlag.ExecutingCraftingAction] || c[ConditionFlag.Gathering] || c[ConditionFlag.ExecutingGatheringAction])
+            || c[ConditionFlag.Crafting] || c[ConditionFlag.ExecutingCraftingAction] || c[ConditionFlag.Gathering] || c[ConditionFlag.ExecutingGatheringAction]
+            || c[ConditionFlag.Fishing])
         {
             autoCheckAt = DateTime.UtcNow.AddSeconds(2);
             return;
@@ -106,13 +147,20 @@ internal sealed class PlanService : IDisposable
 
         // Levels and books change without touching the bags; rebuild now and then to pick them up.
         if (DateTime.UtcNow >= nextRebuild) dirty = true;
+        // Where bait no gil vendor sells is exchanged instead: once known, the plan's reasons can name it.
+        if (baitExchanges is { IsCompleted: true } && !baitExchangesSeen)
+        {
+            baitExchangesSeen = true;
+            if (baitExchanges.IsFaulted) Services.Log.Warning(baitExchanges.Exception!.GetBaseException(), "Couldn't index where bait is exchanged");
+            dirty = true;
+        }
         if (DateTime.UtcNow >= nextEstimate)
         {
             nextEstimate = DateTime.UtcNow.AddSeconds(1);
             var cfg = config();
             var hqItems = cfg.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
-            Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains, CollectableInputsFor(cfg));
-            Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem);
+            Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains, CollectableInputsFor(cfg), FishInputsFor());
+            Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem, Outlook);
         }
         if (!dirty) return;
         Rebuild();
@@ -158,13 +206,16 @@ internal sealed class PlanService : IDisposable
 
     /// <summary>
     /// Among the collectables that earn the scrips, the one whose materials are least work: each
-    /// candidate is planned like an order. Candidates needing monster drops, books or items to get
-    /// yourself are left out; crafts, gathering and especially timed nodes add to the effort.
+    /// candidate is planned like an order. Candidates needing monster drops, books, items to get
+    /// yourself or fish this character can't catch are left out; crafts, gathering, timed nodes and
+    /// fishing (by the time a catch takes and the wait for its window) add to the effort.
     /// </summary>
     private Core.Scrips.ScripTask? EasiestEarning(uint currency, int missing, GameCatalog catalog)
     {
         Core.Scrips.ScripTask? best = null;
         var bestEffort = double.MaxValue;
+        var now = DateTimeOffset.UtcNow;
+        var trip = config().Timings.SecondsPerFishingTrip;
         foreach (var task in Core.Scrips.ScripPlanner.Candidates(currency, missing, catalog.Collectables, JobLevel, o => CanEarnWith(o, catalog)).Take(40))
         {
             var order = new Core.Orders.Order { Name = "Scrips" };
@@ -172,11 +223,16 @@ internal sealed class PlanService : IDisposable
             var plan = BuildPlan(order, catalog);
             if (plan.Missing.Count > 0 || plan.Learn.Count > 0) continue;
             if (plan.Lines.Any(l => l.Supply == Supply.Drop && l.Remaining > 0)) continue;
+            // Fish the run can't catch for this character would leave the scrip phase waiting for ever.
+            var fish = plan.Lines.Where(l => l.Supply == Supply.Fish && l.Remaining > 0).ToList();
+            if (fish.Any(l => FishProblem(l.ItemId) != null || Outlook(l.ItemId)?.OpensIn(now) == null || BaitMissing(l.ItemId) != null)) continue;
+            // One effort point is about 5 seconds: a gathered item.
             var effort = plan.CraftSteps.Sum(l => l.Crafts) * 6.0
-                         + plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.Fish && !Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 1.0
+                         + plan.Lines.Where(l => l.Supply is Supply.Gather && !Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 1.0
                          + plan.Lines.Where(l => l.Supply == Supply.GatherTimed).Sum(l => 60.0 + l.Remaining)
                          + plan.Lines.Where(l => l.Supply == Supply.Vendor).Sum(l => 2.0)
-                         + plan.Lines.Where(l => l.Supply is Supply.Gather && Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 0.1;
+                         + plan.Lines.Where(l => l.Supply is Supply.Gather && Items.IsCrystal(l.ItemId)).Sum(l => l.Remaining) * 0.1
+                         + fish.Sum(l => (trip + l.Remaining * CatchSeconds(l.ItemId) + (Outlook(l.ItemId)?.OpensIn(now)?.TotalSeconds ?? 0)) / 5.0);
             if (effort < bestEffort) { best = task; bestEffort = effort; }
         }
         return best;
@@ -205,6 +261,9 @@ internal sealed class PlanService : IDisposable
     private Plan BuildPlan(Core.Orders.Order order, GameCatalog catalog)
     {
         var c = config();
+        // Bait is planned and bought before fishing; with buying bait off the player brings their own
+        // (the readiness check looks at the bags instead).
+        var buyBait = c.Fishing.BuyBait;
         return Planner.Build(order, catalog, owned, new PlannerOptions
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
@@ -215,7 +274,164 @@ internal sealed class PlanService : IDisposable
             MissingBook = r => MissingBook(r, catalog),
             HasTome = HasTome,
             BuyBook = BuyBook,
+            FishBaits = buyBait ? BaitPerCatch : null,
+            SpareBait = Math.Max(0, c.Fishing.SpareBait),
+            FallbackBait = buyBait ? LureStandIn(catalog, c) : 0,
+            BaitOnHand = id => GameState.BagCount(id),
+            BaitSource = id => BaitSource(catalog, id),
         });
+    }
+
+    // ------------------------------------------------------------------ fishing
+
+    /// <summary>How far ahead fish windows are looked for (the weather forecast is exact, a plan needs a limit).</summary>
+    public static readonly TimeSpan FishHorizon = TimeSpan.FromDays(3);
+
+    /// <summary>
+    /// How long a fish outlook is kept: reach and levels change now and then (checking reach reads the teleport
+    /// list, so not every frame). Its windows are absolute times, so countdowns from them stay right meanwhile.
+    /// </summary>
+    private static readonly TimeSpan OutlookFor = TimeSpan.FromSeconds(10);
+
+    private readonly Dictionary<uint, IReadOnlyList<(uint Bait, double PerCatch)>> baitPerCatch = new();
+    private readonly Dictionary<uint, double> catchSeconds = new();
+    private readonly Dictionary<uint, FishOutlook> outlooks = new();
+    private Task<ExchangeIndex>? baitExchanges;
+    private bool baitExchangesSeen;
+
+    /// <summary>
+    /// What a run faces fishing an item: whether this character can, where, and when it bites (worked out
+    /// every few seconds). Null for items Provenance has no fishing data for. Framework thread.
+    /// </summary>
+    public FishOutlook? Outlook(uint itemId)
+    {
+        if (Catalog is not { } catalog || catalog.Gather.Fish(itemId) is not { } fish) return null;
+        var now = DateTimeOffset.UtcNow;
+        if (outlooks.TryGetValue(itemId, out var known) && now - known.At < OutlookFor) return known;
+        var data = catalog.Gather;
+        string? blocker = null;
+        var spots = new List<FishingSpotInfo>();
+        if (Services.ClientState.IsLoggedIn && Services.PlayerState.IsLoaded)
+        {
+            var level = JobLevel(FishAccess.Fisher);
+            blocker = FishAccess.Blocker(data, fish, level);
+            if (level > 0) spots = FishAccess.UsableSpots(data, fish, level);
+        }
+        // None usable: the window is still worth showing, from every open-world spot it lives at.
+        if (spots.Count == 0)
+            spots = fish.Spots.Select(data.Spot).OfType<FishingSpotInfo>()
+                .Where(s => s.Spear == fish.Spear && FishAccess.OpenWorld(s.TerritoryId))
+                .OrderBy(s => s.Level).ThenBy(s => s.Id).ToList();
+        var windows = fish.Restricted
+            ? FishSchedule.Windows(fish, spots.Select(s => s.TerritoryId).Distinct().Select(data.WeatherTable), now, FishHorizon)
+            : null;
+        var outlook = new FishOutlook(fish, blocker, spots, windows, now);
+        outlooks[itemId] = outlook;
+        return outlook;
+    }
+
+    /// <summary>
+    /// Why a run can't fish an item for this character now (no fishing data, level, reach, actions, no
+    /// Fisher gearset), or null when it can. Framework thread.
+    /// </summary>
+    public string? FishProblem(uint itemId)
+    {
+        if (Outlook(itemId) is not { } o) return "Provenance has no fishing data for it";
+        if (o.Blocker != null) return o.Blocker;
+        if (Services.ClientState.IsLoggedIn && GameState.BestGearset(FishAccess.Fisher) < 0) return "no gearset saved for Fisher";
+        return null;
+    }
+
+    /// <summary>The bait one catch of a fish uses up, by bait (worked out once per fish).</summary>
+    public IReadOnlyList<(uint Bait, double PerCatch)> BaitPerCatch(uint fishId)
+    {
+        if (baitPerCatch.TryGetValue(fishId, out var known)) return known;
+        if (Catalog is not { } catalog) return Array.Empty<(uint, double)>();
+        var list = catalog.Gather.Fish(fishId) is { } fish ? BaitNeeds.PerCatch(fish, catalog.Gather.Fish) : Array.Empty<(uint, double)>();
+        baitPerCatch[fishId] = list;
+        return list;
+    }
+
+    /// <summary>Fishing time one catch of a fish takes, in seconds (worked out once per fish; 0 without fish data).</summary>
+    public double CatchSeconds(uint fishId)
+    {
+        if (catchSeconds.TryGetValue(fishId, out var known)) return known;
+        if (Catalog is not { } catalog) return 0;
+        var seconds = catalog.Gather.Fish(fishId) is { } fish ? BaitNeeds.SecondsPerCatch(fish, catalog.Gather.Fish) : 0;
+        catchSeconds[fishId] = seconds;
+        return seconds;
+    }
+
+    /// <summary>
+    /// With buying bait off: a bait a fish needs that the bags hold none of (Versatile Lure in the bags counts
+    /// when it may stand in), or null. With buying on, the plan's bait lines take care of it.
+    /// </summary>
+    public uint? BaitMissing(uint fishId)
+    {
+        var c = config();
+        if (c.Fishing.BuyBait || !Services.ClientState.IsLoggedIn) return null;
+        if (c.Fishing.VersatileLureFallback && GameState.BagCount(FishAccess.VersatileLure) > 0) return null;
+        foreach (var (bait, _) in BaitPerCatch(fishId))
+            if (GameState.BagCount(bait) == 0) return bait;
+        return null;
+    }
+
+    /// <summary>Versatile Lure as the stand-in for bait no vendor sells, when the setting is on and it can be bought under the cap.</summary>
+    private static uint LureStandIn(GameCatalog catalog, Configuration c)
+    {
+        if (!c.Fishing.VersatileLureFallback) return 0;
+        var src = catalog.Sources(FishAccess.VersatileLure);
+        var cap = c.Buying.VendorMaxPrice;
+        return src.Has(Obtain.Vendor) && (cap == 0 || src.VendorPrice <= cap) ? FishAccess.VersatileLure : 0;
+    }
+
+    /// <summary>
+    /// Where a bait no gil vendor sells is exchanged instead ("Sold for 2 White Gatherers' Scrips by the scrip
+    /// exchange in Solution Nine, not for gil"), for the plan's reason; null until that is known, or when nowhere.
+    /// </summary>
+    private string? BaitSource(GameCatalog catalog, uint bait)
+    {
+        if (baitExchanges == null)
+        {
+            // Read once, in the background: the special shop sheets are big.
+            var baits = catalog.Gather.AllFish.Select(f => f.Bait).Where(b => b != 0 && catalog.Vendors.For(b).Count == 0).ToHashSet();
+            baitExchanges = Task.Run(() => ExchangeIndex.Build(baits, VendorIndex.LoadPositions()));
+        }
+        if (!baitExchanges.IsCompletedSuccessfully) return null;
+        var offers = baitExchanges.Result.For(bait);
+        if (offers.Count == 0) return null;
+        var offer = offers.Where(o => CanReach(o.TerritoryId)).OrderBy(o => o.Cost).FirstOrDefault() ?? offers.OrderBy(o => o.Cost).First();
+        return $"Sold for {offer.Cost:N0} {offer.CurrencyName} by {offer.Who} in {offer.PlaceName}, not for gil";
+    }
+
+    /// <summary>The estimate's view of fish: catch time from the fish data, windows from the outlook.</summary>
+    private FishInputs FishInputsFor()
+        => new(id => Outlook(id) is { } o ? new FishTime(CatchSeconds(id), o.Windows) : null, DateTimeOffset.UtcNow);
+
+    /// <summary>"18:00–06:00 ET in Fog or Rain after Clear Skies": when a fish bites; "" for fish that bite any time.</summary>
+    public static string BiteRule(FishInfo fish)
+    {
+        var parts = new List<string>(3);
+        if (fish.Window is { On: > 0, Off: > 0 } w) parts.Add($"{EorzeaClock(w.Shift)}–{EorzeaClock(w.Shift + w.On)} ET");
+        if (fish.Weather.Count > 0) parts.Add("in " + WeatherNames(fish.Weather));
+        if (fish.PreviousWeather.Count > 0) parts.Add("after " + WeatherNames(fish.PreviousWeather));
+        return string.Join(" ", parts);
+    }
+
+    /// <summary>Eorzea time of day for a moment given in real milliseconds since the epoch ("18:00").</summary>
+    private static string EorzeaClock(long realMs)
+    {
+        const long day = 4_200_000; // one Eorzea day in real milliseconds
+        var minutes = (long)Math.Round((realMs % day + day) % day / (day / 1440.0)) % 1440;
+        return $"{minutes / 60:00}:{minutes % 60:00}";
+    }
+
+    /// <summary>"Fog", "Fog or Rain", "Fog, Rain or Showers" in the client's language.</summary>
+    public static string WeatherNames(IReadOnlyList<uint> weathers)
+    {
+        var sheet = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Weather>();
+        var names = weathers.Select(id => sheet.GetRowOrDefault(id)?.Name.ExtractText() is { Length: > 0 } n ? n : $"weather {id}").Distinct().ToList();
+        return names.Count <= 1 ? string.Join("", names) : string.Join(", ", names.Take(names.Count - 1)) + " or " + names[^1];
     }
 
     private readonly Dictionary<uint, bool> reachable = new();

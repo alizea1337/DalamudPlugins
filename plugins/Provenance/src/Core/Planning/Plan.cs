@@ -69,6 +69,13 @@ public sealed class PlannerOptions
     /// Null: bait counts like any owned item.
     /// </summary>
     public System.Func<uint, int>? BaitOnHand { get; init; }
+
+    /// <summary>
+    /// Where the player can get a bait that no gil vendor sells ("Sold for 2 White Gatherers' Scrips by the
+    /// scrip exchange in Solution Nine"), for the plan's reason. Null or null result: the plan says it
+    /// in general terms (crafted, or not sold for gil).
+    /// </summary>
+    public System.Func<uint, string?>? BaitSource { get; init; }
 }
 
 /// <summary>A book or tome sold at a scrip or token exchange.</summary>
@@ -99,7 +106,7 @@ public sealed class PlanLine
     public uint VendorUnitPrice { get; internal set; }
     public string? ManualReason { get; internal set; }
 
-    /// <summary>For books and tomes to learn: the items that need it.</summary>
+    /// <summary>For books and tomes to learn: the items that need it. For bait: the fish it is cast for.</summary>
     public IReadOnlyList<uint> NeededFor { get; internal set; } = System.Array.Empty<uint>();
 
     /// <summary>For books and tomes not in the bags: where the run can buy it, if anywhere.</summary>
