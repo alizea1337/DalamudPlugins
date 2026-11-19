@@ -116,9 +116,9 @@ internal static class Readiness
     }
 
     /// <summary>
-    /// One fish: blocking when this character can't fish it (spot level, reach, actions, no bait known) or,
-    /// with buying bait off, has none of its bait; otherwise one note on what to expect, when there's
-    /// anything worth knowing.
+    /// One fish: blocking when this character can't fish it (spot level, reach, actions, no bait known), when it
+    /// doesn't bite within the weather forecast at any spot it can use, or, with buying bait off, when the bags
+    /// hold none of its bait; otherwise one note on what to expect, when there's anything worth knowing.
     /// </summary>
     private static void CheckFish(List<ReadinessIssue> issues, Plan plan, PlanLine line, FishOutlook outlook, GameCatalog catalog, Configuration cfg)
     {
@@ -132,15 +132,17 @@ internal static class Readiness
         var notes = new List<string>(4);
         if (!fish.Spear && !cfg.Fishing.BuyBait) CheckOwnBait(issues, notes, line, fish, catalog, cfg);
 
+        // A run waits for a window within the forecast; with none, the fisher gives the fish up and the run stops
+        // before crafting. This clears by itself once a window comes into the forecast.
         var now = DateTimeOffset.UtcNow;
+        if (fish.Restricted && outlook.OpensIn(now) == null)
+        {
+            issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, NoWindow(fish), true));
+            return;
+        }
         if (fish.Big) notes.Add("A big fish: it can take many casts, sometimes more than one window.");
         if (fish.Weather.Count > 0 || fish.PreviousWeather.Count > 0)
-        {
-            var rule = PlanService.BiteRule(fish);
-            notes.Add(outlook.OpensIn(now) == null
-                ? $"Only bites {rule}, which isn't in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast; the run would wait for it."
-                : $"Only bites {rule}; that weather can take hours to come round, and the run gathers or crafts in the meantime when it can.");
-        }
+            notes.Add($"Only bites {PlanService.BiteRule(fish)}; that weather can take hours to come round, and the run gathers or crafts in the meantime when it can.");
         else if (fish.Window is { On: > 0, Off: > 0 } w)
         {
             // A short window may not fit the whole catch: say so when the fishing takes longer than one window.
@@ -159,6 +161,19 @@ internal static class Readiness
         if (cfg.Fishing.BuyBait && StandInFor(plan, line.ItemId, fish, catalog) is { Length: > 0 } replaced)
             notes.Add($"{replaced} can't be bought for gil, so the run casts Versatile Lure instead once your bags run out; bites may come slower.");
         if (notes.Count > 0) issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, string.Join(" ", notes), false));
+    }
+
+    /// <summary>
+    /// Why a fish without a window within the forecast (at the spots this character can use) blocks the start:
+    /// "Only bites in Fog after Rain; not in the next 7 days of the weather forecast, so a run can't catch it yet. …"
+    /// </summary>
+    private static string NoWindow(FishInfo fish)
+    {
+        var days = PlanService.FishHorizon.TotalDays;
+        return fish.Weather.Count > 0 || fish.PreviousWeather.Count > 0
+            ? $"Only bites {PlanService.BiteRule(fish)}; not in the next {days:0} days of the weather forecast, so a run can't catch it yet. "
+              + "Get it yourself, or start the run once that weather is in the forecast."
+            : $"Doesn't bite in the next {days:0} days at any spot you can use, so a run can't catch it. Get it yourself.";
     }
 
     /// <summary>With buying bait off: blocking when the bags hold none of a bait (and no stand-in), a note when they hold less than the estimate.</summary>

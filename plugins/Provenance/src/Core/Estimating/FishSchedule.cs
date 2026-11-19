@@ -28,8 +28,9 @@ public readonly record struct WindowedWork(uint ItemId, double Seconds, IReadOnl
 /// <param name="Total">From the start to the last catch, waits included.</param>
 /// <param name="Waiting">Part of the total spent waiting for a window with nothing else to do.</param>
 /// <param name="Unscheduled">
-/// Fish whose windows ran out before their fishing was done (no window within the forecast): their fishing
-/// time is in the total, waiting for them isn't.
+/// Fish whose windows ran out before their fishing was done: no window within the forecast at all, or windows
+/// too short (or taken by another fish) for all of it. Their fishing time is in the total, waiting for later
+/// windows isn't.
 /// </param>
 public sealed record ScheduleResult(TimeSpan Total, TimeSpan Waiting, IReadOnlyList<uint> Unscheduled);
 

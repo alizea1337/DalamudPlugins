@@ -174,8 +174,26 @@ public class EstimatorTests
     {
         var e = Fished(PlanOf((OldLord, 2)), _ => new FishTime(300, Array.Empty<(DateTimeOffset, DateTimeOffset)>()));
         Assert.Equal(new[] { OldLord }, e.FishBeyondForecast);
+        Assert.Null(e.FishShortOfWindows);
         Assert.Equal(Flat.SecondsPerFishingTrip + 600, e.Gathering.TotalSeconds, 3);
         Assert.Equal(TimeSpan.Zero, e.FishWait);
+    }
+
+    [Fact]
+    public void Fish_that_need_more_windows_are_told_apart_from_fish_with_none()
+    {
+        // Trout: a trip and 2 × 720 s, but its three 3-minute windows (from 6 h on) hold 9 minutes of it. The Old
+        // Lord's only window is over. Both are counted in full; only the Old Lord doesn't bite within the forecast.
+        var trout = new[]
+        {
+            (Now.AddHours(6), Now.AddHours(6).AddMinutes(3)), (Now.AddHours(30), Now.AddHours(30).AddMinutes(3)),
+            (Now.AddHours(54), Now.AddHours(54).AddMinutes(3)),
+        };
+        var e = Fished(PlanOf((Trout, 2), (OldLord, 1)), id => id == Trout ? new FishTime(720, trout) : new FishTime(300, Window(-30, -10)));
+        Assert.Equal(new[] { Trout }, e.FishShortOfWindows);
+        Assert.Equal(new[] { OldLord }, e.FishBeyondForecast);
+        // The windows' 540 s, then the rest of both: (90 + 1440 - 540) + (90 + 300) after the last window.
+        Assert.Equal(TimeSpan.FromHours(54) + TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(990 + 390), e.Gathering);
     }
 
     [Fact]

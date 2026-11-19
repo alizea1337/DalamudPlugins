@@ -55,7 +55,10 @@ public sealed class PlannerOptions
     /// </summary>
     public System.Func<uint, IReadOnlyList<(uint Bait, double PerCatch)>>? FishBaits { get; init; }
 
-    /// <summary>Bait planned on top of the estimate, per kind of bait.</summary>
+    /// <summary>
+    /// Bait bought on top of the estimate, per kind of bait the run buys from a vendor. Bait it can't buy only
+    /// needs the estimate in the bags.
+    /// </summary>
     public int SpareBait { get; init; }
 
     /// <summary>
@@ -104,10 +107,18 @@ public sealed class PlanLine
     public int Produced => Recipe == null ? 0 : Crafts * Recipe.Yield;
 
     public uint VendorUnitPrice { get; internal set; }
+    /// <summary>Why the run can't get it (Manual and Learn lines), or the bait part of it (<see cref="MissingBait"/>).</summary>
     public string? ManualReason { get; internal set; }
 
     /// <summary>For books and tomes to learn: the items that need it. For bait: the fish it is cast for.</summary>
     public IReadOnlyList<uint> NeededFor { get; internal set; } = System.Array.Empty<uint>();
+
+    /// <summary>
+    /// For a bait the run only crafts after the fishing (it's on the order or in a recipe): casts that neither the
+    /// bags nor a stand-in bait cover. Above 0 the bait is missing (<see cref="Plan.Missing"/>); the crafted amount
+    /// stays in <see cref="Needed"/>.
+    /// </summary>
+    public int MissingBait { get; internal set; }
 
     /// <summary>For books and tomes not in the bags: where the run can buy it, if anywhere.</summary>
     public BookPurchase? Purchase { get; internal set; }
@@ -137,7 +148,7 @@ public sealed class Plan
         this.lines = lines;
         CraftSteps = craftSteps;
         Tree = tree;
-        Missing = lines.Values.Where(l => l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0 && !l.WillBuy).ToList();
+        Missing = lines.Values.Where(l => (l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0 && !l.WillBuy) || l.MissingBait > 0).ToList();
         Learn = lines.Values.Where(l => l.Supply == Supply.Learn).ToList();
         VendorGil = lines.Values.Where(l => l.Supply == Supply.Vendor).Sum(l => (long)l.Remaining * l.VendorUnitPrice);
     }
@@ -149,7 +160,10 @@ public sealed class Plan
 
     public IReadOnlyList<PlanTreeNode> Tree { get; }
 
-    /// <summary>Items the run cannot get by itself (including books not in the bags). Non-empty blocks the start.</summary>
+    /// <summary>
+    /// Items the run cannot get by itself (including books not in the bags, and bait it only crafts after the
+    /// fishing). Non-empty blocks the start.
+    /// </summary>
     public IReadOnlyList<PlanLine> Missing { get; }
 
     /// <summary>Master books and folklore tomes to read before anything else.</summary>

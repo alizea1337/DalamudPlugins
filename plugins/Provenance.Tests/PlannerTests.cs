@@ -294,7 +294,7 @@ public class PlannerTests
         var leech = plan[BruteLeech]!;
         Assert.Equal(Supply.Manual, leech.Supply);
         Assert.Equal(where, leech.ManualReason);
-        Assert.Equal(20 + 5, leech.Needed);
+        Assert.Equal(20, leech.Needed); // the estimate only: spare is for bait the run buys
         Assert.Equal(7, leech.FromStock);
         Assert.Contains(leech, plan.Missing);
         Assert.False(plan.CanStart);
@@ -302,6 +302,58 @@ public class PlannerTests
         // Without a known source the reason still says why.
         var unknown = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }));
         Assert.Equal("Not sold by any gil vendor a run can reach", unknown[BruteLeech]!.ManualReason);
+    }
+
+    [Fact]
+    public void Bait_the_run_can_not_buy_needs_no_spare()
+    {
+        // 20 Brute Leech for 10 trout and 30 in the bags: enough, although 20 spare are set for bought bait.
+        var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (BruteLeech, 2.0) } }, spare: 20,
+            bags: new() { [BruteLeech] = 30 }));
+        Assert.Equal(20, plan[BruteLeech]!.Needed);
+        Assert.Equal(0, plan[BruteLeech]!.Remaining);
+        Assert.Empty(plan.Missing);
+        Assert.True(plan.CanStart);
+    }
+
+    [Fact]
+    public void An_ordered_crafted_bait_is_cast_from_the_bags_or_the_stand_in_never_from_its_crafts()
+    {
+        // 3 Spinnerbait ordered (one craft makes 3) and 10 trout cast with it (14 casts). Crafting comes after the
+        // fishing, so Versatile Lure is bought for the casts; the line keeps the 3 ordered.
+        var baits = new Dictionary<uint, (uint, double)[]> { [Trout] = new[] { (Spinnerbait, 1.4) } };
+        var order = OrderOf((Spinnerbait, 3), (Trout, 10));
+        var plan = Build(order, options: Fishing(baits, spare: 20, fallback: VersatileLure, bags: new()));
+        var spinner = plan[Spinnerbait]!;
+        Assert.Equal(Supply.Craft, spinner.Supply);
+        Assert.Equal(3, spinner.Needed);
+        Assert.Equal(1, spinner.Crafts);
+        Assert.Equal(0, spinner.MissingBait);
+        Assert.Equal(new[] { Trout }, spinner.NeededFor);
+        var lure = plan[VersatileLure]!;
+        Assert.Equal(14 + 20, lure.Needed);
+        Assert.Equal(new[] { Trout }, lure.NeededFor);
+        Assert.Contains(lure.ItemId, Assert.Single(plan.Tree, n => n.ItemId == Trout).Children.Select(c => c.ItemId));
+        Assert.True(plan.CanStart);
+
+        // What the bags hold is cast first; the ordered ones are still crafted on top.
+        var some = Build(order, options: Fishing(baits, spare: 20, fallback: VersatileLure, bags: new() { [Spinnerbait] = 5 }));
+        Assert.Equal(3, some[Spinnerbait]!.Remaining);
+        Assert.Equal(9 + 20, some[VersatileLure]!.Needed);
+
+        // No stand-in: the casts the bags don't cover are missing.
+        var none = Build(order, options: Fishing(baits, spare: 20, bags: new() { [Spinnerbait] = 5 }));
+        Assert.Equal(9, none[Spinnerbait]!.MissingBait);
+        Assert.Equal(3, none[Spinnerbait]!.Needed);
+        Assert.Contains("only after the fishing", none[Spinnerbait]!.ManualReason);
+        Assert.Contains(none[Spinnerbait], none.Missing);
+        Assert.False(none.CanStart);
+        Assert.Null(none[VersatileLure]);
+
+        // Bags that cover the casts: nothing missing.
+        var covered = Build(order, options: Fishing(baits, spare: 20, bags: new() { [Spinnerbait] = 14 }));
+        Assert.Equal(0, covered[Spinnerbait]!.MissingBait);
+        Assert.True(covered.CanStart);
     }
 
     [Fact]

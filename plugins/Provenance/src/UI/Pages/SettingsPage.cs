@@ -191,7 +191,8 @@ internal sealed class SettingsPage : Page
         v = f.VersatileLureFallback;
         if (Ui.Checkbox("Versatile Lure when the bait can't be bought", ref v, "Some bait is only sold for scrips or has to be crafted. With this on, those fish are caught with Versatile Lure from Limsa Lominsa Lower Decks instead; bites can come more slowly. Off: that bait has to be in your bags.")) { f.VersatileLureFallback = v; Changed(); }
         v = f.UseBuffs;
-        if (Ui.Checkbox("Use fishing buffs", ref v, "Patience, Chum, Surface Slap, Identical Cast and the lures, when the catch needs them and there's GP.")) { f.UseBuffs = v; Config.Save(); }
+        if (Ui.Checkbox("Use fishing buffs", ref v, "Patience, Prize Catch, Makeshift Bait, Chum, Surface Slap and Identical Cast, when the catch needs them and there's GP. "
+                + "Lures are always used for fish that only come to a lure, and Mooch II and Thaliak's Favor whenever a catch needs them.")) { f.UseBuffs = v; Config.Save(); }
         v = f.UseCordials;
         if (Ui.Checkbox("Drink cordials for GP", ref v, "Uses a Hi-Cordial, Cordial or Watered Cordial from your bags when a buff the catch needs is short of GP. Never buys any.")) { f.UseCordials = v; Config.Save(); }
         Ui.Text("Be at the fishing hole");
@@ -199,7 +200,8 @@ internal sealed class SettingsPage : Page
         var lead = f.WindowLeadMinutes;
         ImGui.SetNextItemWidth(160 * s);
         if (ImGui.SliderInt("##fishlead", ref lead, 0, 30, "%d min before")) { f.WindowLeadMinutes = lead; Config.Save(); }
-        Ui.Wrapped("Real minutes before a fish's time or weather window opens. Catching the fish for Fisher's Intuition comes on top.", Palette.TextMuted);
+        Ui.Wrapped("Real minutes before a fish's time or weather window opens. Catching the fish for Fisher's Intuition comes on top. "
+                   + "Crafting while waiting stops at the longer of this and \"Back to gathering\" under Gathering.", Palette.TextMuted);
         ImGui.Dummy(new Vector2(0, 4 * s));
         v = f.DiscardByCatch;
         if (Ui.Checkbox("Throw away fish caught on the side", ref v, "Fish the order doesn't need are kept while fishing and thrown away once gathering is done: main bags only, never anything the order uses, never what you had before.")) { f.DiscardByCatch = v; Config.Save(); }
@@ -283,11 +285,12 @@ internal sealed class SettingsPage : Page
         // Run
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Gathering");
-        Ui.Wrapped("When only timed nodes are left and none is up, the run goes to where the next one spawns, crafts what it already has materials for, and hands back to gathering shortly before the window opens.");
+        Ui.Wrapped("When only timed nodes and fish with time or weather windows are left and none is open, the run crafts what it already has materials for "
+                   + "and hands back to gathering or fishing shortly before the next window opens. For a timed node it first goes to where the node spawns.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         var rs = Config.Run;
         v = rs.CraftWhileWaiting;
-        if (Ui.Checkbox("Craft while waiting for timed nodes", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
+        if (Ui.Checkbox("Craft while waiting for timed nodes and fish windows", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
         v = rs.TravelAhead;
         if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits or crafts there.")) { rs.TravelAhead = v; Config.Save(); }
         Ui.Text("Back to gathering");
@@ -295,7 +298,8 @@ internal sealed class SettingsPage : Page
         var lead = rs.TimedLeadMinutes;
         ImGui.SetNextItemWidth(160 * s);
         if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
-        Ui.Wrapped("Real minutes before a window opens; enough for the craft under way and the trip to the node.", Palette.TextMuted);
+        Ui.Wrapped("Real minutes before a timed node or fish window opens; enough for the craft under way and the trip there. "
+                   + "For fish, \"Be at the fishing hole\" under Fishing counts instead when it is longer.", Palette.TextMuted);
         ImGui.Dummy(new Vector2(0, 4 * s));
         v = rs.DiscardExtras;
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }

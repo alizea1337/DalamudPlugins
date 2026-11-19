@@ -114,6 +114,13 @@ internal sealed class PlanService : IDisposable
     public Plan ScripPlan { get; private set; } = Plan.Empty;
     /// <summary>What the scrip plan earns, per scrip.</summary>
     public IReadOnlyList<Core.Scrips.ScripTask> ScripTasks { get; private set; } = Array.Empty<Core.Scrips.ScripTask>();
+
+    /// <summary>
+    /// Asked on every rebuild: true while a run is earning scrips with the current <see cref="ScripTasks"/> (its scrip
+    /// phase). Rebuilds then keep those collectables, still planned from the bags, instead of choosing again: another
+    /// pick halfway through a round would send the run to the appraiser with collectables it never made. Null: always choose.
+    /// </summary>
+    public Func<bool>? KeepScripTasks { get; set; }
     /// <summary>Scrips the scrip plan is expected to bring in, by scrip item.</summary>
     private readonly Dictionary<uint, Core.Scrips.ScripTask> earning = new();
     /// <summary>How long the order takes, refreshed every second.</summary>
@@ -176,26 +183,28 @@ internal sealed class PlanService : IDisposable
         var c = config();
         reachable.Clear();
         earning.Clear();
+        // A run in the middle of earning scrips keeps its collectables (see KeepScripTasks).
+        var held = KeepScripTasks?.Invoke() == true ? ScripTasks : Array.Empty<Core.Scrips.ScripTask>();
         Plan = BuildPlan(c.Order, catalog);
         ScripTasks = Array.Empty<Core.Scrips.ScripTask>();
         ScripPlan = Plan.Empty;
-        if (!c.Run.EarnScrips || !Services.ClientState.IsLoggedIn) return;
-
-        // Scrips the books still need, per scrip, beyond what you have.
-        var cost = new Dictionary<uint, int>();
-        foreach (var line in Plan.Learn.Where(l => l.Remaining > 0 && !l.WillBuy))
-            if (BookOffer(line.ItemId) is { } offer)
-                cost[offer.CurrencyItemId] = cost.GetValueOrDefault(offer.CurrencyItemId) + offer.Cost;
-        var tasks = new List<Core.Scrips.ScripTask>();
-        foreach (var (currency, total) in cost)
+        var tasks = held.ToList();
+        if (tasks.Count == 0)
         {
-            var missing = total - GameState.CurrencyCount(currency);
-            if (EasiestEarning(currency, missing, catalog) is { } task)
+            if (!c.Run.EarnScrips || !Services.ClientState.IsLoggedIn) return;
+
+            // Scrips the books still need, per scrip, beyond what you have.
+            var cost = new Dictionary<uint, int>();
+            foreach (var line in Plan.Learn.Where(l => l.Remaining > 0 && !l.WillBuy))
+                if (BookOffer(line.ItemId) is { } offer)
+                    cost[offer.CurrencyItemId] = cost.GetValueOrDefault(offer.CurrencyItemId) + offer.Cost;
+            foreach (var (currency, total) in cost)
             {
-                tasks.Add(task);
-                earning[currency] = task;
+                var missing = total - GameState.CurrencyCount(currency);
+                if (EasiestEarning(currency, missing, catalog) is { } task) tasks.Add(task);
             }
         }
+        foreach (var task in tasks) earning[task.Option.Currency] = task;
         if (tasks.Count == 0) return;
         ScripTasks = tasks;
         var scripOrder = new Core.Orders.Order { Name = "Scrips" };
@@ -314,8 +323,11 @@ internal sealed class PlanService : IDisposable
         if (Services.ClientState.IsLoggedIn && Services.PlayerState.IsLoaded)
         {
             var level = JobLevel(FishAccess.Fisher);
-            blocker = FishAccess.Blocker(data, fish, level);
-            if (level > 0) spots = FishAccess.UsableSpots(data, fish, level);
+            if (level > 0)
+                spots = fish.Spots.Select(data.Spot).OfType<FishingSpotInfo>()
+                    .Where(s => s.Spear == fish.Spear && SpotBlocker(data, s, level) == null)
+                    .OrderBy(s => s.Level).ThenBy(s => s.Id).ToList();
+            blocker = FishBlocker(data, fish, level, spots);
         }
         // None usable: the window is still worth showing, from every open-world spot it lives at.
         if (spots.Count == 0)
@@ -328,6 +340,43 @@ internal sealed class PlanService : IDisposable
         var outlook = new FishOutlook(fish, blocker, spots, windows, now);
         outlooks[itemId] = outlook;
         return outlook;
+    }
+
+    /// <summary>
+    /// <see cref="FishAccess.SpotBlocker"/> with the reach check kept until the next rebuild: reading the teleport
+    /// list is slow, and every fish of the plan asks about each of its spots when its outlook is refreshed.
+    /// </summary>
+    private string? SpotBlocker(GatherData data, FishingSpotInfo spot, int fisherLevel)
+    {
+        if (!FishAccess.OpenWorld(spot.TerritoryId)) return "not in the open world";
+        if (spot.Level > fisherLevel) return $"needs Fisher level {spot.Level}";
+        if (!CanReach(spot.TerritoryId))
+            return FishAccess.Zone(spot.TerritoryId) is { Length: > 0 } z ? $"{z} can't be reached (no aetheryte or house there)" : "can't be reached";
+        if (!FishAccess.HasPlaces(data, spot)) return spot.Spear ? "no known node position" : "no known place to stand";
+        return null;
+    }
+
+    /// <summary>
+    /// <see cref="FishAccess.Blocker"/> with the same checks in the same order, from the spots already found usable
+    /// (<paramref name="usable"/>, with the kept reach check) instead of checking every spot's reach again.
+    /// </summary>
+    private string? FishBlocker(GatherData data, FishInfo fish, int fisherLevel, IReadOnlyList<FishingSpotInfo> usable)
+    {
+        if (fisherLevel <= 0) return "Fisher isn't unlocked";
+        if (!fish.Spear && fish.Bait == 0) return "no known bait for it";
+        if (fish.Ocean) return "only caught on ocean fishing voyages";
+        if (usable.Count == 0)
+        {
+            var spots = fish.Spots.Select(data.Spot).OfType<FishingSpotInfo>().Where(s => s.Spear == fish.Spear).ToList();
+            if (spots.Count == 0) return "no known fishing spot";
+            // The easiest spot's reason says the most ("needs Fisher level 50" over "can't be reached").
+            var best = spots.OrderBy(s => s.Level).First();
+            var why = SpotBlocker(data, best, fisherLevel);
+            var name = best.Name.Length > 0 ? best.Name : FishAccess.Zone(best.TerritoryId);
+            return name.Length > 0 ? $"{name}: {why}" : why;
+        }
+        var missing = FishAccess.MissingActions(fish, fisherLevel);
+        return missing.Count > 0 ? "needs " + string.Join(" and ", missing) : null;
     }
 
     /// <summary>

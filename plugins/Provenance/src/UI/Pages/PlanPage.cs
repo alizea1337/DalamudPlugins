@@ -102,8 +102,9 @@ internal sealed class PlanPage : Page
         DrawReadiness(catalog);
         DrawTargets(plan, catalog);
 
-        // Ordered items that aren't crafted (gathered, fished, bought) also show up with their progress.
-        var materials = plan.Lines.Where(l => (!l.IsTarget || l.Supply != Supply.Craft) && !Items.IsCrystal(l.ItemId)).ToList();
+        // Ordered items that aren't crafted (gathered, fished, bought) also show up with their progress. A line with
+        // nothing to make is only there for bait still missing, which the card above lists.
+        var materials = plan.Lines.Where(l => (!l.IsTarget || l.Supply != Supply.Craft) && !Items.IsCrystal(l.ItemId) && (l.IsTarget || l.Needed > 0)).ToList();
         Section("To gather", FontAwesomeIcon.Leaf, Palette.SupplyColor(Supply.Gather),
             materials.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed), catalog, null);
         Section("To fish", FontAwesomeIcon.Fish, Palette.SupplyColor(Supply.Fish),
@@ -148,9 +149,16 @@ internal sealed class PlanPage : Page
             text += $" {Capitalize(CordialCount(e.GpWait.Cordials))} {(e.GpWait.Cordials == 1 ? "keeps" : "keep")} the GP up for the collectables.";
         if (e.FishWait >= TimeSpan.FromMinutes(1))
             text += $" Fishing includes {Estimator.Describe(e.FishWait)} of waiting for fish to start biting; the run crafts in the meantime when it can.";
-        if (e.FishBeyondForecast is { Count: > 0 } far && Plans.Catalog is { } catalog)
-            text += $" {Names(far, catalog)} {(far.Count == 1 ? "doesn't" : "don't")} bite in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast; "
-                    + $"waiting for {(far.Count == 1 ? "it" : "them")} comes on top.";
+        // Fish with no window in the forecast block the start (the readiness card says so); fish whose windows there
+        // don't hold all their catches are fished window by window as the forecast moves on.
+        var days = PlanService.FishHorizon.TotalDays;
+        var catalog = Plans.Catalog;
+        if (catalog != null && e.FishBeyondForecast is { Count: > 0 } none)
+            text += $" {Names(none, catalog)} {(none.Count == 1 ? "doesn't" : "don't")} bite in the next {days:0} days of the weather forecast, "
+                    + $"so a run can't catch {(none.Count == 1 ? "it" : "them")} yet.";
+        if (catalog != null && e.FishShortOfWindows is { Count: > 0 } tight)
+            text += $" {Names(tight, catalog)} {(tight.Count == 1 ? "takes" : "take")} more windows than the next {days:0} days of the forecast hold; "
+                    + "waiting for the later ones comes on top.";
         if (e.HasTimedNodes) text += " Waiting for timed nodes comes on top.";
         if (e.Approximate) text += Plans.Profile == null ? " Check your character for closer crafting times." : " Still working out some rotations.";
         Ui.Icon(FontAwesomeIcon.Clock, Palette.TextMuted, small: true);
@@ -267,7 +275,7 @@ internal sealed class PlanPage : Page
         if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
         if (parts.Count > 0) using (Ui.F.Small.Push()) Ui.Muted("That takes " + string.Join(", ", parts) + ".");
         foreach (var line in scripPlan.Missing)
-            using (Ui.F.Small.Push()) Ui.Wrapped($"Get yourself: {line.Remaining}× {catalog.ItemName(line.ItemId)} ({line.ManualReason}).", Palette.Danger);
+            using (Ui.F.Small.Push()) Ui.Wrapped($"Get yourself: {ToGet(line)}× {catalog.ItemName(line.ItemId)} ({line.ManualReason}).", Palette.Danger);
         Ui.EndCard();
     }
 
@@ -279,7 +287,9 @@ internal sealed class PlanPage : Page
         Ui.BeginCard(Palette.WithAlpha(Palette.Danger, 0.08f));
         CardTitle(FontAwesomeIcon.HandPaper, "Get these yourself before starting", Palette.Danger,
             missing.SelectMany(l => plan.TargetsNeeding(l.ItemId)).Distinct().ToList(), catalog, "missing");
-        Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
+        // Bait only counts in the main inventory: that's where the game casts it from.
+        Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own"
+                   + (missing.Any(IsBait) ? "; bait only counts in your inventory, where it can be cast." : "."));
         ImGui.Dummy(new Vector2(0, 6 * s));
         foreach (var line in missing)
         {
@@ -291,15 +301,25 @@ internal sealed class PlanPage : Page
                 ImGui.SameLine(0, 10 * s);
                 ImGui.BeginGroup();
                 Ui.Text(catalog.ItemName(line.ItemId));
-                // Bait says which fish it's for, and that Versatile Lure could stand in when that's switched off.
+                // Bait says which fish it's for, what of it is elsewhere, and that Versatile Lure could stand in when that's switched off.
                 var text = IsBait(line)
-                    ? $"Need {line.Remaining} more as bait for {Names(line.NeededFor, catalog)}. {line.ManualReason}." + StandInHint(catalog)
-                    : $"Need {line.Remaining} more. {line.ManualReason}.";
+                    ? $"Need {ToGet(line)} more as bait for {Names(line.NeededFor, catalog)}. {line.ManualReason}." + BaitElsewhere(line) + StandInHint(catalog)
+                    : $"Need {ToGet(line)} more. {line.ManualReason}.";
                 using (Ui.F.Small.Push()) Ui.Wrapped(text, Palette.TextMuted, width - 38 * s);
                 ImGui.EndGroup();
             });
         }
         Ui.EndCard();
+    }
+
+    /// <summary>How many to get yourself: what's missing, or for bait the run only crafts after the fishing, the casts it lacks.</summary>
+    private static int ToGet(PlanLine line) => line.MissingBait > 0 ? line.MissingBait : line.Remaining;
+
+    /// <summary>" You have 99 more in your saddlebag or with retainers; …" when bait the run needs is there, where it can't be cast.</summary>
+    private string BaitElsewhere(PlanLine line)
+    {
+        var elsewhere = Plans.Owned.GetValueOrDefault(line.ItemId) - GameState.BagCount(line.ItemId);
+        return elsewhere > 0 ? $" You have {elsewhere:N0} more in your saddlebag or with retainers; move them into your inventory to cast them." : "";
     }
 
     /// <summary>Crafts and gathering the character can't do with its levels and stats, or should double-check.</summary>
@@ -676,10 +696,17 @@ internal sealed class PlanPage : Page
         if (fish.Bait == 0) return null;
         var plan = Plans.Plan;
         if (fish.Bait != FishAccess.VersatileLure && plan[FishAccess.VersatileLure] is { } lure && lure.NeededFor.Contains(fishId)
-            && plan[fish.Bait] is not { Needed: > 0 })
+            && !CastsOwn(plan[fish.Bait]))
             return FishAccess.VersatileLure;
         return fish.Bait;
     }
+
+    /// <summary>
+    /// Some of a fish's own bait gets cast: the plan has it, or for bait crafted only after the fishing (its line
+    /// counts the crafts), the bags hold some.
+    /// </summary>
+    private static bool CastsOwn(PlanLine? bait)
+        => bait is { Supply: Supply.Craft } ? GameState.BagCount(bait.ItemId) > 0 : bait is { Needed: > 0 };
 
     /// <summary>
     /// Draws chips left to right from <paramref name="x"/>, each in the fullest form that keeps them all before
@@ -769,9 +796,12 @@ internal sealed class PlanPage : Page
         var spare = Math.Max(0, Config.Fishing.SpareBait);
         var fish = Names(line.NeededFor, catalog);
         var they = line.NeededFor.Count == 1 ? "it usually takes" : "they usually take";
-        parts.Add(line.Supply == Supply.Vendor && !line.IsTarget && line.Needed > spare && spare > 0
-            ? $"Bait for {fish}: about {line.Needed - spare:N0} for the casts {they}, plus {spare:N0} spare (Settings)."
-            : $"Bait for {fish}, for the casts {they}.");
+        parts.Add(line.Supply == Supply.Craft
+            ? $"Also bait for {fish}, but the run crafts it only after the fishing, so it casts what's in your bags"
+              + (Plans.Plan[FishAccess.VersatileLure] is { } stand && line.NeededFor.Any(f => stand.NeededFor.Contains(f)) ? ", then Versatile Lure." : ".")
+            : line.Supply == Supply.Vendor && !line.IsTarget && line.Needed > spare && spare > 0
+                ? $"Bait for {fish}: about {line.Needed - spare:N0} for the casts {they}, plus {spare:N0} spare (Settings)."
+                : $"Bait for {fish}, for the casts {they}.");
         if (line.ItemId == FishAccess.VersatileLure)
         {
             var plan = Plans.Plan;

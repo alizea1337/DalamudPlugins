@@ -246,16 +246,23 @@ internal sealed class RunPage : Page
     private static string Clock(TimeSpan t)
         => t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{(int)t.TotalMinutes}:{t.Seconds:00}";
 
-    /// <summary>"fish", "fish, bites in 12 min", "spearfish, biting now": what the run knows about when a fish target bites.</summary>
+    /// <summary>
+    /// "fish", "fish, bites in 12 min", "spearfish, biting now", "fish, can't be caught now": what the run knows
+    /// about when a fish target bites, or that the fisher gave it up (the run log says why).
+    /// </summary>
     private string FishChip(uint itemId, int remaining)
     {
-        var label = Plans.Catalog?.Gather.Fish(itemId)?.Spear == true ? "spearfish" : "fish";
+        var fish = Plans.Catalog?.Gather.Fish(itemId);
+        var label = fish?.Spear == true ? "spearfish" : "fish";
         if (remaining == 0) return label;
+        if (Runs.Fish.Unreachable.Contains(itemId)) return label + ", can't be caught now";
         return Runs.FishWait(itemId) switch
         {
             null => label,
             { } w when w == TimeSpan.Zero => label + ", biting now",
-            { } w when w == TimeSpan.MaxValue => label + ", waiting for its weather",
+            // No window to count down to yet (its spot is resting, say): weather only when the fish has a weather rule.
+            { } w when w == TimeSpan.MaxValue => label + (fish is { } f && (f.Weather.Count > 0 || f.PreviousWeather.Count > 0)
+                ? ", waiting for its weather" : ", waiting for its window"),
             { } w => label + ", bites in " + Core.Estimating.Estimator.Describe(w).Replace("about ", ""),
         };
     }
@@ -293,7 +300,9 @@ internal sealed class RunPage : Page
             if (t.Supply != Supply.Gather)
             {
                 ImGui.SetCursorScreenPos(new Vector2(start.X + 44 * s + ImGui.CalcTextSize(name).X, start.Y + (h - 20 * s) / 2));
-                Ui.Chip(t.Supply == Supply.Fish ? FishChip(t.ItemId, remaining) : Palette.SupplyLabel(t.Supply), Palette.SupplyColor(t.Supply));
+                // A fish the fisher gave up on reads as a problem, like its line in the log.
+                var givenUp = t.Supply == Supply.Fish && remaining > 0 && Runs.Fish.Unreachable.Contains(t.ItemId);
+                Ui.Chip(t.Supply == Supply.Fish ? FishChip(t.ItemId, remaining) : Palette.SupplyLabel(t.Supply), givenUp ? Palette.Warn : Palette.SupplyColor(t.Supply));
             }
             var label = remaining == 0 ? "done" : $"{remaining:N0} left";
             using (Ui.F.Strong.Push())
@@ -423,7 +432,7 @@ internal sealed class RunPage : Page
         var fish = plan.Count(Supply.Fish);
         var gatherParts = new List<string>();
         if (land > 0) gatherParts.Add(land == 1 ? "1 material to gather" : $"{land} materials to gather");
-        if (fish > 0) gatherParts.Add(fish == 1 ? "1 fish to catch" : $"{fish} kinds of fish to catch");
+        if (fish > 0) gatherParts.Add(fish == 1 ? "1 kind of fish to catch" : $"{fish} kinds of fish to catch");
         var gatherDetail = gatherParts.Count == 0 ? "Nothing to gather." : string.Join(" and ", gatherParts) + ".";
         if (fish > 0) gatherDetail += " Fish are caught with your Fisher gearset and the bait from the plan.";
         var crafts = plan.CraftSteps.Sum(l => l.Crafts);

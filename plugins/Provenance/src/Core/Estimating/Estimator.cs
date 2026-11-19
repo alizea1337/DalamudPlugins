@@ -62,8 +62,16 @@ public sealed record OrderEstimate(
     TimeSpan Fishing = default,
     /// <summary>Part of <see cref="Fishing"/>: waiting for a fish to start biting with nothing else left to do.</summary>
     TimeSpan FishWait = default,
-    /// <summary>Fish that don't bite within the weather forecast: their fishing is counted, the wait for them isn't.</summary>
-    IReadOnlyList<uint>? FishBeyondForecast = null)
+    /// <summary>
+    /// Fish with no window at all within the weather forecast, so a run can't catch them yet: their fishing is
+    /// counted, no wait for them.
+    /// </summary>
+    IReadOnlyList<uint>? FishBeyondForecast = null,
+    /// <summary>
+    /// Fish whose windows within the forecast don't hold all their fishing: a run keeps fishing them window by
+    /// window. All their fishing is counted, the wait for the later windows isn't.
+    /// </summary>
+    IReadOnlyList<uint>? FishShortOfWindows = null)
 {
     public TimeSpan Crafting => Crafts.Aggregate(TimeSpan.Zero, (t, c) => t + c.Duration);
     public TimeSpan Total => Gathering + Crafting;
@@ -100,7 +108,7 @@ public static class Estimator
         var collectTime = TimeSpan.FromSeconds(collectLines.Sum(l => Visits(l.Remaining, t)) * t.SecondsPerCollectableVisit);
         TimeSpan gathering, fishing;
         var fishWait = TimeSpan.Zero;
-        IReadOnlyList<uint>? beyond = null;
+        IReadOnlyList<uint>? beyond = null, tight = null;
         if (fish == null)
         {
             gathering = TimeSpan.FromMinutes(gathered / Math.Max(0.1, t.GatheredPerMinute) + fished / Math.Max(0.05, t.FishPerMinute))
@@ -128,7 +136,11 @@ public static class Estimator
             gathering = schedule.Total;
             fishWait = schedule.Waiting;
             fishing = TimeSpan.FromSeconds(steady + windowed.Sum(w => w.Seconds)) + schedule.Waiting;
-            if (schedule.Unscheduled.Count > 0) beyond = schedule.Unscheduled;
+            // Fishing left over: the fish doesn't bite within the forecast at all, or its windows there are too few.
+            var none = schedule.Unscheduled.Where(id => windowed.First(w => w.ItemId == id).Windows.All(x => x.End <= fish.Now)).ToList();
+            var rest = schedule.Unscheduled.Except(none).ToList();
+            if (none.Count > 0) beyond = none;
+            if (rest.Count > 0) tight = rest;
         }
         var timed = plan.Lines.Any(l => l.Supply == Supply.GatherTimed && l.Remaining > 0);
 
@@ -155,7 +167,7 @@ public static class Estimator
         foreach (var line in plan.Lines.Where(l => l.IsTarget && l.Supply != Supply.Craft))
             ready.TryAdd(line.ItemId, gathering);
 
-        return new OrderEstimate(gathering, timed, crafts, ready, approximate, gpWait, fishing, fishWait, beyond);
+        return new OrderEstimate(gathering, timed, crafts, ready, approximate, gpWait, fishing, fishWait, beyond, tight);
     }
 
     /// <summary>Collectable node visits for an amount of collectables.</summary>
