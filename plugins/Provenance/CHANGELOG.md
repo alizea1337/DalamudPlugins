@@ -12,6 +12,9 @@ Gathering without GatherBuddy Reborn.
   Reborn (King's Yield, Bountiful, Gift of the Land, Tidings, Solid Reason, Wise to the World,
   Twelve's Bounty, The Giving Land; best yield on timed nodes, best yield per GP on regular ones)
   or the collectable rotation (Scour, Brazen, Meticulous, Scrutiny), always to the end of the node.
+- Settings: "Throw away extra gathered items" has a new option under it, "Also from timed nodes"
+  (on by default). Switch it off to keep the extras that unspoiled, legendary and ephemeral nodes
+  bring in.
 - Between nodes: materia extraction from fully spiritbonded gear, and aetherial reduction of spare
   collectables when the bags run low (never while a collectable the order needs is in the bags).
   Both in Settings.

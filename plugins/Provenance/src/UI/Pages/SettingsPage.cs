@@ -292,6 +292,12 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 4 * s));
         v = rs.DiscardExtras;
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
+        if (rs.DiscardExtras)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            v = rs.DiscardTimedExtras;
+            if (Ui.Checkbox("Also from timed nodes", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
+        }
         v = rs.ExtractMateria;
         if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
         v = rs.ReduceCollectables;

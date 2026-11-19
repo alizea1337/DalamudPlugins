@@ -113,6 +113,8 @@ public sealed class RunSettings
     public bool TravelAhead { get; set; } = true;
     /// <summary>After gathering, throw away what came in over the order's amount (normal quality, main bags).</summary>
     public bool DiscardExtras { get; set; } = true;
+    /// <summary>With <see cref="DiscardExtras"/>: also throw away extras of items that only grow on timed nodes.</summary>
+    public bool DiscardTimedExtras { get; set; } = true;
     /// <summary>When a needed master book or folklore tome costs more scrips than you have, earn them first with collectables.</summary>
     public bool EarnScrips { get; set; } = true;
     /// <summary>Extract materia from fully spiritbonded gear between nodes.</summary>

@@ -906,7 +906,7 @@ internal sealed class RunEngine : IDisposable
             // While earning scrips the extras stay: they become more collectables.
             if (Settings.DiscardExtras && !scripPhase)
             {
-                cleanup.Begin(Targets.Where(t => !Items.IsCrystal(t.ItemId))
+                cleanup.Begin(Targets.Where(t => !Items.IsCrystal(t.ItemId) && (Settings.DiscardTimedExtras || t.Supply != Supply.GatherTimed))
                     .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))));
                 if (!cleanup.Done)
                 {
