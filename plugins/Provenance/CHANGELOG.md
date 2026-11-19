@@ -23,7 +23,8 @@ Fishing and spearfishing without AutoHook.
   "Versatile Lure when the bait can't be bought" is on (the default): those fish are then caught
   with Versatile Lure, bought in Limsa Lominsa Lower Decks.
 - Spearfishing: the run goes from node to node at the spot (never straight back to the last two)
-  and gigs only the wanted fish.
+  and gigs only the wanted fish. It leaves a node when none of the wanted fish can show up there any
+  more (their window has closed).
 - Gathering and fishing share the run: a fish whose window is open comes first, then nodes, then fish
   that always bite, and a switch waits for the node or catch under way. While only closed windows are
   left, the run crafts in the meantime, as it does for timed nodes, and is back at the water in time
@@ -48,8 +49,9 @@ Fishing and spearfishing without AutoHook.
   side.
 - Time left counts the waits for fish windows, and how fast you fish is learned from your own runs.
 - A run with fish only starts when every fish can be caught, and otherwise says which one and why:
-  Fisher level, a fishing hole you can't reach, a missing action such as Mooch or Snagging, or no
-  Fisher gearset. Fish that only live in a housing district need a house or apartment there in your
+  Fisher level, a fishing hole you can't reach, a missing action such as Mooch or Snagging, no
+  Fisher gearset, or a fish (or the fish it needs for Fisher's Intuition) that doesn't bite in the
+  next 7 days of the weather forecast. Within those 7 days the run waits for the window. Fish that only live in a housing district need a house or apartment there in your
   teleport list (yours, your free company's or a shared one); Provenance doesn't travel between
   wards. Ocean Fishing and the Diadem stay "get it yourself".
 - Earning scrips no longer waits forever when a collectable's materials include fish.
