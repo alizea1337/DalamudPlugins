@@ -21,6 +21,8 @@ internal sealed class BrowsePage : Page
 
     private string query = "";
     private List<BrowseEntry> results = new();
+    /// <summary>Jobs left out by the job filter that would have items with the other filters (bit per job, like JobMask).</summary>
+    private int otherJobs;
     private (string Query, int Jobs, int Places, int Lo, int Hi, int Count) filterKey;
     private readonly Dictionary<string, int> quantities = new();
     private readonly Dictionary<string, bool> hqChoice = new();
@@ -102,7 +104,14 @@ internal sealed class BrowsePage : Page
         if (results.Count == 0)
         {
             ImGui.Dummy(new Vector2(0, 8 * s));
-            Ui.Wrapped("Nothing matches. Widen the level range, or pick other jobs or content.", Palette.TextMuted);
+            if (otherJobs != 0)
+            {
+                // The picked jobs have nothing here but others do, like Ocean Fishing with MIN and BTN.
+                Ui.Wrapped($"Nothing for {JobList(b.JobMask)} here. {JobList(otherJobs)} {(JobCount(otherJobs) == 1 ? "has" : "have")} items.", Palette.TextMuted);
+                ImGui.Dummy(new Vector2(0, 4 * s));
+                if (Ui.Button("Show all jobs", Ui.Kind.Secondary, id: "##show_all_jobs")) { b.JobMask = 0; Config.Save(); }
+            }
+            else Ui.Wrapped("Nothing matches. Widen the level range, try another name, or pick other content.", Palette.TextMuted);
             return;
         }
 
@@ -115,7 +124,8 @@ internal sealed class BrowsePage : Page
         clipper.Destroy();
     }
 
-    private static readonly Place[] PlaceOrder = { Place.OpenWorld, Place.Diadem, Place.CosmicExploration, Place.OceanFishing, Place.Other };
+    /// <summary>The browser's content, in chip order. Quest nodes and content that's gone aren't listed at all.</summary>
+    private static readonly Place[] PlaceOrder = { Place.OpenWorld, Place.Diadem, Place.CosmicExploration, Place.OceanFishing };
 
     /// <summary>The same words on the filter chips and on the rows' hints.</summary>
     private static string PlaceLabel(Place place) => place switch
@@ -123,8 +133,7 @@ internal sealed class BrowsePage : Page
         Place.OpenWorld => "Open world",
         Place.Diadem => "The Diadem",
         Place.CosmicExploration => "Cosmic Exploration",
-        Place.OceanFishing => "Ocean Fishing",
-        _ => "Quests & other",
+        _ => "Ocean Fishing",
     };
 
     /// <summary>Amber marks content a run can't go to, on the filter and on the rows.</summary>
@@ -135,8 +144,7 @@ internal sealed class BrowsePage : Page
         Place.OpenWorld => "What a run can get: gathering and fishing in field zones, cities and housing districts, and regular recipes.",
         Place.Diadem => "Only gathered or fished in the Diadem.",
         Place.CosmicExploration => "Only gathered, fished or crafted in Cosmic Exploration.",
-        Place.OceanFishing => "Only fished on Ocean Fishing voyages.",
-        _ => "Only gathered or fished during quests, events or content that's no longer in the game.",
+        _ => "Only fished on Ocean Fishing voyages (Fisher).",
     };
 
     private void JobChip(uint job, BrowseSettings b)
@@ -199,9 +207,9 @@ internal sealed class BrowsePage : Page
         if (e.Places != Place.OpenWorld)
         {
             var how = e.Kind switch { BrowseKind.Recipe => "Crafted", BrowseKind.Fish => "Fished", _ => "Gathered" };
-            foreach (var place in Places.Special)
+            foreach (var place in PlaceOrder)
             {
-                if ((e.Places & place) == 0) continue;
+                if (place == Place.OpenWorld || (e.Places & place) == 0) continue;
                 ImGui.SameLine(0, 6 * s);
                 Ui.Chip(PlaceLabel(place), PlaceColor(place), FontAwesomeIcon.MapMarkerAlt);
                 Ui.Tooltip($"{how} only in {Places.Describe(e.Places)}. A run can't get it there: added to the order, it's listed under things to get yourself.");
@@ -253,11 +261,25 @@ internal sealed class BrowsePage : Page
         if (key == filterKey) return;
         filterKey = key;
         var q = key.Item1;
-        results = catalog.Browse
-            .Where(e => (b.JobMask == 0 || (b.JobMask & (1 << (int)(e.ClassJobId - 8))) != 0)
-                        && (b.PlaceMask == 0 || (b.PlaceMask & (int)e.Places) != 0)
-                        && e.Level >= b.MinLevel && e.Level <= b.MaxLevel
-                        && (q.Length == 0 || e.NameLower.Contains(q, StringComparison.Ordinal)))
-            .ToList();
+        results = new List<BrowseEntry>();
+        otherJobs = 0;
+        foreach (var e in catalog.Browse)
+        {
+            if (e.Level < b.MinLevel || e.Level > b.MaxLevel) continue;
+            if (b.PlaceMask != 0 && (b.PlaceMask & (int)e.Places) == 0) continue;
+            if (q.Length > 0 && !e.NameLower.Contains(q, StringComparison.Ordinal)) continue;
+            var job = 1 << (int)(e.ClassJobId - 8);
+            if (b.JobMask == 0 || (b.JobMask & job) != 0) results.Add(e);
+            else otherJobs |= job;
+        }
     }
+
+    /// <summary>"MIN", "MIN and BTN", "CRP, BSM and ARM".</summary>
+    private static string JobList(int mask)
+    {
+        var names = ClassJobs.Crafters.Concat(ClassJobs.Gatherers).Where(j => (mask & (1 << (int)(j - 8))) != 0).Select(ClassJobs.Abbreviation).ToList();
+        return names.Count <= 1 ? string.Concat(names) : string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1];
+    }
+
+    private static int JobCount(int mask) => System.Numerics.BitOperations.PopCount((uint)mask);
 }

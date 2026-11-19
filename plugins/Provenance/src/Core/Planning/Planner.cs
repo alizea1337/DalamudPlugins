@@ -197,10 +197,17 @@ public static class Planner
         if (src.Has(Obtain.GatherElsewhere)) ways.Add("gathered");
         if (src.Has(Obtain.FishElsewhere)) ways.Add("fished");
         if (src.Has(Obtain.CraftElsewhere)) ways.Add("crafted");
-        var where = Places.Describe(src.Places & ~Place.OpenWorld);
+        var how = string.Join(" or ", ways);
+        // Quest nodes and content that's gone only count when nothing else is left.
+        var where = src.Places & ~Place.OpenWorld;
+        if (where != Place.Other) where &= ~Place.Other;
+        if (where == Place.Other)
+            return ways.Count == 0
+                ? "Only from quests or content that's no longer in the game"
+                : $"Only {how} during quests or in content that's no longer in the game";
         return ways.Count == 0
-            ? $"Only from {where}, which a run can't go to"
-            : $"Only {string.Join(" or ", ways)} in {where}, which a run can't go to";
+            ? $"Only from {Places.Describe(where)}, which a run can't go to"
+            : $"Only {how} in {Places.Describe(where)}, which a run can't go to";
     }
 
     private enum VisitState { Open, Done }

@@ -91,23 +91,20 @@ public enum Place : byte
     Diadem = 1 << 1,
     CosmicExploration = 1 << 2,
     OceanFishing = 1 << 3,
-    /// <summary>Quests, events and content that is no longer in the game.</summary>
+    /// <summary>Quest nodes and content that is no longer in the game (older versions of the Diadem).</summary>
     Other = 1 << 4,
 }
 
 public static class Places
 {
-    /// <summary>The content other than the open world, in the order the browser lists it.</summary>
-    public static readonly Place[] Special = { Place.Diadem, Place.CosmicExploration, Place.OceanFishing, Place.Other };
-
-    /// <summary>"the Diadem", "Cosmic Exploration", "quests and other special content".</summary>
+    /// <summary>"the Diadem", "Cosmic Exploration", "Ocean Fishing".</summary>
     public static string Name(Place place) => place switch
     {
         Place.OpenWorld => "the open world",
         Place.Diadem => "the Diadem",
         Place.CosmicExploration => "Cosmic Exploration",
         Place.OceanFishing => "Ocean Fishing",
-        Place.Other => "quests and other special content",
+        Place.Other => "quests or content that's no longer in the game",
         _ => "special content",
     };
 

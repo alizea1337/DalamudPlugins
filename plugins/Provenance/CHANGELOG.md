@@ -20,10 +20,14 @@ Gathering without GatherBuddy Reborn.
   lists them under "Get these yourself" and names the content, for example "Only gathered in Cosmic
   Exploration" or "Only fished in Ocean Fishing", instead of the run stopping halfway. This covers
   the Diadem, Cosmic Exploration (its gathering, fishing and mission recipes), Ocean Fishing, and
-  quests and other special content.
-- Browse: a new row of content filters (Open world, The Diadem, Cosmic Exploration, Ocean Fishing,
-  Quests & other). Toggle one or more to show only those; "All content" shows everything. Items a
-  run can't get carry an amber tag naming where they come from.
+  quest-only or removed content.
+- Browse: a new row of content filters (Open world, The Diadem, Cosmic Exploration, Ocean Fishing).
+  Toggle one or more to show only those; "All content" shows everything. Items a run can't get
+  carry an amber tag naming where they come from.
+- Browse no longer lists what can't be got any more: items only gathered or fished during quests
+  or in removed content (the older versions of the Diadem), and quest-only recipes.
+- Browse: when the jobs you picked have nothing (Ocean Fishing with only Miner and Botanist on, for
+  example), it says which jobs do and offers "Show all jobs".
 - Gathering finds more nodes: items the game links to single nodes (Mythrite Ore in Coerthas
   Western Highlands, for one) are now known.
 - Groundwork for gathering and fishing without GatherBuddy Reborn and AutoHook: exact node

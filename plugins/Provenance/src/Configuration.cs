@@ -43,6 +43,8 @@ public sealed class Configuration : IPluginConfiguration
         c.Buying ??= new();
         c.Import ??= new();
         c.Browse ??= new();
+        // "Quests & other" is no longer a filter; a saved pick of it would hide everything.
+        c.Browse.PlaceMask &= (int)(Core.Catalog.Place.OpenWorld | Core.Catalog.Place.Diadem | Core.Catalog.Place.CosmicExploration | Core.Catalog.Place.OceanFishing);
         c.Window ??= new();
         c.Characters ??= new();
         c.Consumables ??= new();

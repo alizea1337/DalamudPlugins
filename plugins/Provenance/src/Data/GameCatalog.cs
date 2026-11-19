@@ -85,7 +85,7 @@ internal sealed class GameCatalog : IGameCatalog
         var sw = Stopwatch.StartNew();
         var c = new GameCatalog();
         c.Gather = GatherData.Load();
-        c.IndexCosmic();
+        c.IndexContent();
         c.IndexRecipes();
         c.IndexGathering();
         c.IndexFishing();
@@ -176,7 +176,8 @@ internal sealed class GameCatalog : IGameCatalog
             }
             else Add(result, Obtain.CraftElsewhere, place);
 
-            if (items.GetRowOrDefault(result) is { } item)
+            // Quest recipes only open during their quest: planned when ordered, but not listed.
+            if (r.Quest.RowId == 0 && items.GetRowOrDefault(result) is { } item)
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
@@ -269,10 +270,15 @@ internal sealed class GameCatalog : IGameCatalog
     /// <summary>Every item a gatherer can collect somewhere (GatheringItem rows).</summary>
     private readonly HashSet<uint> gatheredItems = new();
 
-    private void IndexCosmic()
+    /// <summary>The Diadem the game sends players to today: the newest of its zones. The older ones are gone.</summary>
+    private uint currentDiadem;
+
+    private void IndexContent()
     {
         foreach (var row in Services.Data.GetExcelSheet<WKSItemInfo>())
             if (row.Item.RowId != 0) cosmic.Add(row.Item.RowId);
+        foreach (var zone in Services.Data.GetExcelSheet<TerritoryType>())
+            if (zone.TerritoryIntendedUse.RowId == 47) currentDiadem = Math.Max(currentDiadem, zone.RowId);
     }
 
     /// <summary>
@@ -290,17 +296,18 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     /// <summary>
-    /// Where a zone is. Runs go to field zones (intended use 1), cities (0) and housing districts (13);
-    /// zone 1 is the placeholder that quest and instanced content's points sit in.
+    /// Where a zone is. Runs go to field zones (intended use 1), cities (0) and housing districts (13).
+    /// Zone 1 is the placeholder that quest nodes sit in; it and older versions of the Diadem are
+    /// <see cref="Place.Other"/>.
     /// </summary>
-    private static Place PlaceOf(TerritoryType? zone)
+    private Place PlaceOf(TerritoryType? zone)
     {
         if (zone is not { } t || t.RowId <= 1) return Place.Other;
         return t.TerritoryIntendedUse.RowId switch
         {
             0 or 1 or 13 => Place.OpenWorld,
             46 => Place.OceanFishing,
-            47 => Place.Diadem,
+            47 => t.RowId == currentDiadem ? Place.Diadem : Place.Other,
             60 => Place.CosmicExploration,
             _ => Place.Other,
         };
@@ -736,9 +743,11 @@ internal sealed class GameCatalog : IGameCatalog
     {
         var items = Services.Data.GetExcelSheet<Item>();
         var all = new List<BrowseEntry>(recipeBrowse);
-        foreach (var ((itemId, job), (level, normal, kind, places)) in gatherBrowse)
+        foreach (var ((itemId, job), (level, normal, kind, found)) in gatherBrowse)
         {
-            if (items.GetRowOrDefault(itemId) is not { } item) continue;
+            // Quest nodes and content that's gone aren't listed: nothing there can be got any more.
+            var places = found & ~Place.Other;
+            if (places == Place.None || items.GetRowOrDefault(itemId) is not { } item) continue;
             var name = item.Name.ExtractText();
             if (name.Length == 0) continue;
             all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places));

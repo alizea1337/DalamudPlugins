@@ -72,7 +72,10 @@ public class PlannerTests
     [InlineData(Obtain.FishElsewhere, Place.OceanFishing, "Only fished in Ocean Fishing, which a run can't go to")]
     [InlineData(Obtain.CraftElsewhere, Place.CosmicExploration, "Only crafted in Cosmic Exploration, which a run can't go to")]
     [InlineData(Obtain.GatherElsewhere | Obtain.FishElsewhere, Place.Diadem | Place.Other,
-        "Only gathered or fished in the Diadem or quests and other special content, which a run can't go to")]
+        "Only gathered or fished in the Diadem, which a run can't go to")]
+    [InlineData(Obtain.GatherElsewhere, Place.Other, "Only gathered during quests or in content that's no longer in the game")]
+    [InlineData(Obtain.GatherElsewhere, Place.Diadem | Place.CosmicExploration,
+        "Only gathered in the Diadem or Cosmic Exploration, which a run can't go to")]
     [InlineData(Obtain.None, Place.CosmicExploration, "Only from Cosmic Exploration, which a run can't go to")]
     public void Special_content_is_named_in_the_reason(Obtain how, Place where, string reason)
     {
