@@ -206,6 +206,50 @@ internal static class Ui
     }
 
     /// <summary>A round icon-only button. Always carries a tooltip naming the action.</summary>
+    /// <summary>
+    /// A quiet text action for card headers and inline lines: small coloured text with an optional
+    /// small icon, no fill until hovered (then a soft tinted pill). For secondary or destructive
+    /// actions that shouldn't compete with the content.
+    /// </summary>
+    public static bool LinkButton(string label, Vector4 color, FontAwesomeIcon? icon = null, string? tooltip = null, string? id = null)
+    {
+        var size = LinkButtonSize(label, icon);
+        var s = S;
+        var pos = ImGui.GetCursorScreenPos();
+        var pressed = ImGui.InvisibleButton(id ?? "##link" + label, size);
+        var hovered = ImGui.IsItemHovered();
+        if (tooltip != null) Tooltip(tooltip);
+        var dl = ImGui.GetWindowDrawList();
+        if (hovered)
+        {
+            dl.AddRectFilled(pos, pos + size, Palette.U32(Palette.WithAlpha(color, ImGui.IsItemActive() ? 0.2f : 0.12f)), size.Y / 2);
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        }
+        var fg = Palette.U32(hovered ? color : Palette.WithAlpha(color, 0.82f));
+        var x = pos.X + 10 * s;
+        if (icon is { } ic)
+        {
+            var isz = IconSize(ic, small: true);
+            using (F.IconSmall.Push()) dl.AddText(new Vector2(x, pos.Y + (size.Y - isz.Y) / 2), fg, ic.ToIconString());
+            x += isz.X + 6 * s;
+        }
+        using (F.Small.Push())
+        {
+            var th = ImGui.GetTextLineHeight();
+            dl.AddText(new Vector2(x, pos.Y + (size.Y - th) / 2), fg, label);
+        }
+        return pressed;
+    }
+
+    public static Vector2 LinkButtonSize(string label, FontAwesomeIcon? icon = null)
+    {
+        var s = S;
+        float tw, th;
+        using (F.Small.Push()) { tw = ImGui.CalcTextSize(label).X; th = ImGui.GetTextLineHeight(); }
+        var iw = icon is { } ic ? IconSize(ic, small: true).X + 6 * s : 0;
+        return new Vector2(tw + iw + 20 * s, th + 10 * s);
+    }
+
     public static bool IconButton(string id, FontAwesomeIcon icon, string tooltip, Kind kind = Kind.Ghost, float size = 30, bool enabled = true)
     {
         var s = S;

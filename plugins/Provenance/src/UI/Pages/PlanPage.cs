@@ -254,32 +254,22 @@ internal sealed class PlanPage : Page
         if (missing.Count == 0) return;
         var s = Ui.S;
         Ui.BeginCard(Palette.WithAlpha(Palette.Danger, 0.08f));
-        Ui.Icon(FontAwesomeIcon.HandPaper, Palette.Danger);
-        ImGui.SameLine(0, 10 * s);
-        using (Ui.F.Strong.Push()) Ui.Text("Get these yourself before starting", Palette.Danger);
+        CardTitle(FontAwesomeIcon.HandPaper, "Get these yourself before starting", Palette.Danger,
+            missing.SelectMany(l => plan.TargetsNeeding(l.ItemId)).Distinct().ToList(), catalog, "missing");
         Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
-        ImGui.Dummy(new Vector2(0, 2 * s));
-        var row = 0;
+        ImGui.Dummy(new Vector2(0, 6 * s));
         foreach (var line in missing)
         {
             var targets = plan.TargetsNeeding(line.ItemId);
-            if (targets.Count > 0)
+            RemovableRow("missing" + line.ItemId, targets, line.ItemId, catalog, width =>
             {
-                var bw = Ui.ButtonWidth("Remove", FontAwesomeIcon.Times);
-                var rowY = ImGui.GetCursorPosY();
-                ImGui.SetCursorPosX(ImGui.GetContentRegionMax().X - bw);
-                if (Ui.Button("Remove", Ui.Kind.Ghost, FontAwesomeIcon.Times,
-                        tooltip: $"Takes {Names(targets, catalog)} out of the order" + (targets.Contains(line.ItemId) ? "." : $" (they need {catalog.ItemName(line.ItemId)})."),
-                        id: "##missingremove" + row++))
-                    RemoveFromOrder(targets, catalog);
-                ImGui.SetCursorPosY(rowY);
-            }
-            Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
-            ImGui.SameLine(0, 10 * s);
-            ImGui.BeginGroup();
-            Ui.Text(catalog.ItemName(line.ItemId));
-            using (Ui.F.Small.Push()) Ui.Muted($"Need {line.Remaining} more. {line.ManualReason}.");
-            ImGui.EndGroup();
+                Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
+                ImGui.SameLine(0, 10 * s);
+                ImGui.BeginGroup();
+                Ui.Text(catalog.ItemName(line.ItemId));
+                using (Ui.F.Small.Push()) Ui.Wrapped($"Need {line.Remaining} more. {line.ManualReason}.", Palette.TextMuted, width - 38 * s);
+                ImGui.EndGroup();
+            });
         }
         Ui.EndCard();
     }
@@ -290,72 +280,112 @@ internal sealed class PlanPage : Page
         var issues = Plans.Readiness;
         if (issues.Count == 0) return;
         var s = Ui.S;
+        var plan = Plans.Plan;
         var blocking = issues.Any(i => i.Blocking);
         var color = blocking ? Palette.Danger : Palette.Warn;
         Ui.BeginCard(Palette.WithAlpha(color, blocking ? 0.08f : 0.07f));
-        Ui.Icon(blocking ? FontAwesomeIcon.UserTimes : FontAwesomeIcon.UserCheck, color);
-        ImGui.SameLine(0, 10 * s);
-        using (Ui.F.Strong.Push()) Ui.Text(blocking ? "Your character can't do this yet" : "Worth a look", color);
-        var checkedAt = Plans.Profile?.CheckedAtUtc;
+        CardTitle(blocking ? FontAwesomeIcon.UserTimes : FontAwesomeIcon.UserCheck, blocking ? "Your character can't do this yet" : "Worth a look", color,
+            issues.Where(i => i.Blocking && i.ItemId != 0).SelectMany(i => plan.TargetsNeeding(i.ItemId)).Distinct().ToList(), catalog, "ready");
         Ui.Wrapped(blocking
             ? "Levels are live; stats come from your best gearset for each job at the last character check, with the food and medicine you picked. The run starts once these are sorted."
             : "These won't stop the run, but the numbers might not be the whole story.");
-        if (checkedAt is { } at && at > DateTime.MinValue)
-        {
-            using (Ui.F.Small.Push()) Ui.Muted($"Stats checked {at.ToLocalTime():d MMM, HH:mm}.");
-            ImGui.SameLine(0, 10 * s);
-        }
-        if (Ui.Button("Check character", Ui.Kind.Ghost, FontAwesomeIcon.Sync, id: "##readycheck")) Plans.CheckCharacter();
 
-        // Remove what the character can't do: the ordered items that need it.
-        var plan = Plans.Plan;
-        var allBlocked = issues.Where(i => i.Blocking && i.ItemId != 0).SelectMany(i => plan.TargetsNeeding(i.ItemId)).Distinct().ToList();
-        if (allBlocked.Count > 0)
-        {
-            ImGui.SameLine(0, 10 * s);
-            if (Ui.Button($"Remove all ({allBlocked.Count})", Ui.Kind.Danger, FontAwesomeIcon.TrashAlt,
-                    tooltip: "Takes these out of the order: " + Names(allBlocked, catalog) + ".", id: "##readyremoveall"))
-                RemoveFromOrder(allBlocked, catalog);
-        }
+        // When the stats were read, with a quiet way to read them again, on one centred line.
         ImGui.Dummy(new Vector2(0, 2 * s));
-        var index = 0;
+        var checkedAt = Plans.Profile?.CheckedAtUtc;
+        var label = checkedAt is { } at && at > DateTime.MinValue ? $"Stats checked {at.ToLocalTime():d MMM, HH:mm}." : "Stats not checked yet.";
+        var linkH = Ui.LinkButtonSize("Check again", FontAwesomeIcon.Sync).Y;
+        var lineY = ImGui.GetCursorPosY();
+        using (Ui.F.Small.Push())
+        {
+            ImGui.SetCursorPosY(lineY + (linkH - ImGui.GetTextLineHeight()) / 2);
+            Ui.Muted(label);
+        }
+        ImGui.SameLine(0, 6 * s);
+        ImGui.SetCursorPosY(lineY);
+        if (Ui.LinkButton("Check again", Palette.Accent, FontAwesomeIcon.Sync, "Reads gearsets, stats, books and tomes again.", "##readycheck")) Plans.CheckCharacter();
+        ImGui.Dummy(new Vector2(0, 4 * s));
+
         foreach (var issue in issues.OrderByDescending(i => i.Blocking))
         {
-            index++;
             var targets = issue.ItemId != 0 ? plan.TargetsNeeding(issue.ItemId) : Array.Empty<uint>();
-            if (targets.Count > 0)
+            RemovableRow($"ready{issue.ItemId}_{issue.ClassJobId}_{issue.Text.GetHashCode()}", targets, issue.ItemId, catalog, width =>
             {
-                // The remove button sits at the right end of the row.
-                var label = "Remove";
-                var bw = Ui.ButtonWidth(label, FontAwesomeIcon.Times);
-                var rowY = ImGui.GetCursorPosY();
-                ImGui.SetCursorPosX(ImGui.GetContentRegionMax().X - bw);
-                var tip = targets.Count == 1 && targets[0] == issue.ItemId
-                    ? $"Takes {catalog.ItemName(issue.ItemId)} out of the order."
-                    : $"Takes {Names(targets, catalog)} out of the order (they need {catalog.ItemName(issue.ItemId)}).";
-                if (Ui.Button(label, Ui.Kind.Ghost, FontAwesomeIcon.Times, tooltip: tip, id: "##readyremove" + index))
-                    RemoveFromOrder(targets, catalog);
-                ImGui.SetCursorPosY(rowY);
-            }
-            if (issue.ItemId != 0)
-            {
-                Ui.ItemIcon(catalog.ItemIcon(issue.ItemId), 28);
-                ImGui.SameLine(0, 10 * s);
-            }
-            ImGui.BeginGroup();
-            if (issue.ItemId != 0)
-            {
-                Ui.Text(catalog.ItemName(issue.ItemId));
-                if (issue.ClassJobId != 0)
+                if (issue.ItemId != 0)
                 {
-                    ImGui.SameLine(0, 8 * s);
-                    Ui.Chip(Core.Character.ClassJobs.Abbreviation(issue.ClassJobId), Palette.ClassJobColor(issue.ClassJobId));
+                    Ui.ItemIcon(catalog.ItemIcon(issue.ItemId), 28);
+                    ImGui.SameLine(0, 10 * s);
                 }
-            }
-            using (Ui.F.Small.Push()) Ui.Wrapped(issue.Text, issue.Blocking ? Palette.Text : Palette.TextMuted);
-            ImGui.EndGroup();
+                ImGui.BeginGroup();
+                if (issue.ItemId != 0)
+                {
+                    Ui.Text(catalog.ItemName(issue.ItemId));
+                    if (issue.ClassJobId != 0)
+                    {
+                        ImGui.SameLine(0, 8 * s);
+                        Ui.Chip(Core.Character.ClassJobs.Abbreviation(issue.ClassJobId), Palette.ClassJobColor(issue.ClassJobId));
+                    }
+                }
+                using (Ui.F.Small.Push()) Ui.Wrapped(issue.Text, issue.Blocking ? Palette.Text : Palette.TextMuted, width - (issue.ItemId != 0 ? 38 * s : 0));
+                ImGui.EndGroup();
+            });
         }
         Ui.EndCard();
+    }
+
+    /// <summary>A card's icon and title, with a quiet "Remove all" on the right when there is anything to remove.</summary>
+    private void CardTitle(FontAwesomeIcon icon, string title, Vector4 color, IReadOnlyList<uint> removable, GameCatalog catalog, string id)
+    {
+        var s = Ui.S;
+        var lineY = ImGui.GetCursorPosY();
+        Ui.Icon(icon, color);
+        ImGui.SameLine(0, 10 * s);
+        using (Ui.F.Strong.Push()) Ui.Text(title, color);
+        if (removable.Count == 0) return;
+        var label = removable.Count == 1 ? "Remove it" : $"Remove all {removable.Count}";
+        var size = Ui.LinkButtonSize(label, FontAwesomeIcon.TrashAlt);
+        ImGui.SameLine(ImGui.GetContentRegionMax().X - size.X);
+        ImGui.SetCursorPosY(lineY + (ImGui.GetTextLineHeight() - size.Y) / 2);
+        if (Ui.LinkButton(label, Palette.Danger, FontAwesomeIcon.TrashAlt, "Takes these out of the order: " + Names(removable, catalog) + ".", "##removeall" + id))
+            RemoveFromOrder(removable, catalog);
+    }
+
+    /// <summary>Last frame's height of each removable row, so the hover highlight can be drawn behind this frame's content.</summary>
+    private readonly Dictionary<string, float> rowHeights = new();
+
+    /// <summary>
+    /// One list row with a quiet round remove button centred on its right edge. The button stays muted
+    /// until hovered (then soft red); hovering the row lightly highlights it so the button reads as
+    /// belonging to that row. The content gets the row width minus the button column.
+    /// </summary>
+    private void RemovableRow(string id, IReadOnlyList<uint> targets, uint itemId, GameCatalog catalog, Action<float> content)
+    {
+        var s = Ui.S;
+        var start = ImGui.GetCursorScreenPos();
+        var avail = ImGui.GetContentRegionAvail().X;
+        var button = 28 * s;
+        var canRemove = targets.Count > 0;
+        rowHeights.TryGetValue(id, out var height);
+
+        var min = start - new Vector2(8 * s, 5 * s);
+        var max = start + new Vector2(avail + 8 * s, height + 5 * s);
+        if (canRemove && height > 0 && ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows) && ImGui.IsMouseHoveringRect(min, max))
+            ImGui.GetWindowDrawList().AddRectFilled(min, max, Palette.U32(Palette.WithAlpha(Palette.Raised, 0.6f)), 10 * s);
+
+        content(canRemove ? avail - button - 12 * s : avail);
+        var end = ImGui.GetCursorScreenPos();
+        height = end.Y - start.Y - ImGui.GetStyle().ItemSpacing.Y;
+        rowHeights[id] = height;
+        if (canRemove)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(start.X + avail - button, start.Y + (height - button) / 2));
+            var tip = targets.Count == 1 && targets[0] == itemId
+                ? $"Remove {catalog.ItemName(itemId)} from the order"
+                : $"Remove {Names(targets, catalog)} from the order (they need {catalog.ItemName(itemId)})";
+            if (Ui.IconButton("##rm" + id, FontAwesomeIcon.TrashAlt, tip, Ui.Kind.Danger, 28)) RemoveFromOrder(targets, catalog);
+            ImGui.SetCursorScreenPos(end);
+        }
+        ImGui.Dummy(new Vector2(0, 4 * s));
     }
 
     private static string Names(IReadOnlyList<uint> items, GameCatalog catalog)
