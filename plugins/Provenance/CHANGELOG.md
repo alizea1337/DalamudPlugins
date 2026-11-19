@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Groundwork for gathering and fishing without GatherBuddy Reborn and AutoHook: exact node
+  positions, the fish database (bait, mooch chains, intuition, time and weather windows, hooks,
+  bite times) and fishing spots with places to stand ship with the plugin (tools/GbrExport), plus
+  Eorzea weather forecasting and fish uptime windows.
+
 ## 0.6.2
 
 - Plan page: quieter remove actions. Each row in "Get these yourself" and "Your character can't do

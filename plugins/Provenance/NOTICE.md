@@ -23,7 +23,21 @@ Adapted files:
 - `tools/VendorTable`: corrected positions of two collectable appraisers, from
   `GatherBuddy/Vulcan/Vendors/VendorNpcLocationCache.cs`.
 
+Bundled data, built by `tools/GbrExport` from GatherBuddy Reborn's data (Apache License 2.0):
+
+- `Resources/nodes.json`: exact world positions of gathering points (from `world_locations.json`)
+  and stand spots for awkward nodes (from `node_offsets.json`).
+- `Resources/fish.json`: the fish database (bait, mooch chains, predators and intuition, uptime
+  windows, weather, hooksets and tugs, snagging, lures, spearfishing size and speed, fishing spots).
+- `Resources/fishspots.json`: fishing spots with recorded places to stand (from `fish_records.json`).
+
 A copy of the Apache License 2.0 is at <https://www.apache.org/licenses/LICENSE-2.0>.
+
+## AutoHook
+
+<https://github.com/PunishXIV/AutoHook>, BSD 3-Clause License, Copyright (c) 2024, Puni.sh.
+Per-fish bite times in `Resources/fish.json` come from AutoHook's `fish_list.json`, which is built
+from Teamcraft's fishing data (MIT).
 
 ## Vulcan / Artisan (crafting)
 

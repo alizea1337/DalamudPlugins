@@ -76,12 +76,14 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexBells();
         c.IndexDrops();
         c.IndexCollectables();
+        c.Gather = GatherData.Load();
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
         c.BuildBrowse();
         c.ApplyTomes();
-        Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items in {Ms} ms", c.recipesById.Count, c.sources.Count, sw.ElapsedMilliseconds);
+        Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
+            c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
         return c;
     }
 
@@ -445,6 +447,9 @@ internal sealed class GameCatalog : IGameCatalog
         Mobs = MobIndex.Load();
         foreach (var item in Mobs.Items) Add(item, Obtain.Drop);
     }
+
+    /// <summary>Node positions, the fish database and fishing spots (shipped data, see <see cref="GatherData"/>).</summary>
+    public GatherData Gather { get; private set; } = new();
 
     /// <summary>Monsters that drop items, and where they spawn.</summary>
     public MobIndex Mobs { get; private set; } = new();

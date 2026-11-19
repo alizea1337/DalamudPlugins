@@ -31,6 +31,9 @@
     </Content>
     <EmbeddedResource Include="Resources/vendors.json" LogicalName="Provenance.Resources.vendors.json" />
     <EmbeddedResource Include="Resources/mobs.json" LogicalName="Provenance.Resources.mobs.json" />
+    <EmbeddedResource Include="Resources/nodes.json" LogicalName="Provenance.Resources.nodes.json" />
+    <EmbeddedResource Include="Resources/fish.json" LogicalName="Provenance.Resources.fish.json" />
+    <EmbeddedResource Include="Resources/fishspots.json" LogicalName="Provenance.Resources.fishspots.json" />
     <Content Include="NOTICE.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Offline tool: builds Provenance's gathering and fishing data (Resources/nodes.json, fish.json,
+    fishspots.json) from a local GatherBuddy Reborn clone (Apache-2.0) and AutoHook's bite times
+    (BSD-3, built from Teamcraft's data, MIT). Not part of the plugin build.
+    Usage (see Program.cs): dotnet run with -p:GbrRoot set to the GatherBuddyReborn clone, then sqpack, GBR clone, AutoHook clone, out dir.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <DalamudLib>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLib>
+    <GbrRoot Condition="'$(GbrRoot)' == ''">..\..\..\GatherBuddyReborn</GbrRoot>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Dalamud"><HintPath>$(DalamudLib)Dalamud.dll</HintPath></Reference>
+    <Reference Include="Lumina"><HintPath>$(DalamudLib)Lumina.dll</HintPath></Reference>
+    <Reference Include="Lumina.Excel"><HintPath>$(DalamudLib)Lumina.Excel.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(DalamudLib)Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="Serilog"><HintPath>$(DalamudLib)Serilog.dll</HintPath></Reference>
+    <ProjectReference Include="$(GbrRoot)\GatherBuddy.GameData\GatherBuddy.GameData.csproj" />
+  </ItemGroup>
+</Project>
