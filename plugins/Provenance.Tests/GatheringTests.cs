@@ -79,6 +79,30 @@ public class GatheringTests
     }
 
     [Fact]
+    public void Collectors_standard_alone_does_not_make_brazen_sure()
+    {
+        // Only High Standard makes Brazen's gain sure; with Collector's Standard alone the 600-of-1000
+        // case from above still wants Scrutiny, not a Meticulous that settles at 825.
+        var s = new CollectableState(Collectability: 600, Integrity: 2, MaxIntegrity: 4, ScourGain: 300, MeticulousGain: 225, BrazenGainMax: 450,
+            LowThreshold: 400, MidThreshold: 700, HighThreshold: 1000, Gp: 500, Level: 100, SolidAgeActive: false, ScrutinyActive: false,
+            HighStandard: false, Standard: true, ItemsLeft: 1);
+        Assert.Equal(GatherAction.Scrutiny, CollectableRotation.Next(s, Acts, fullRotation: true));
+    }
+
+    [Fact]
+    public void High_standard_with_brazen_short_of_the_target_still_uses_scrutiny()
+    {
+        // 400 of 1000: even a sure Brazen (+300) only reaches 700, so Scrutiny first, then Brazen under it.
+        var s = new CollectableState(Collectability: 400, Integrity: 2, MaxIntegrity: 4, ScourGain: 200, MeticulousGain: 150, BrazenGainMax: 300,
+            LowThreshold: 400, MidThreshold: 700, HighThreshold: 1000, Gp: 500, Level: 100, SolidAgeActive: false, ScrutinyActive: false,
+            HighStandard: true, Standard: false, ItemsLeft: 1);
+        Assert.Equal(GatherAction.Scrutiny, CollectableRotation.Next(s, Acts, fullRotation: true));
+        Assert.Equal(GatherAction.Brazen, CollectableRotation.Next(s with { ScrutinyActive = true }, Acts, true));
+        // Without High Standard and without GP for Scrutiny: the sure Meticulous.
+        Assert.Equal(GatherAction.Meticulous, CollectableRotation.Next(s with { HighStandard = false, Gp = 150 }, Acts, true));
+    }
+
+    [Fact]
     public void Collectables_reach_the_top_tier_then_collect()
     {
         var s = new CollectableState(Collectability: 0, Integrity: 4, MaxIntegrity: 4, ScourGain: 150, MeticulousGain: 100, BrazenGainMax: 200,

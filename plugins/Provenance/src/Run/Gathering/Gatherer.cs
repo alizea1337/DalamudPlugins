@@ -57,6 +57,11 @@ internal sealed unsafe class Gatherer
     /// <summary>Node groups (bases) given up on for a while: no landing next to the node, or it won't open.</summary>
     private readonly Dictionary<uint, DateTime> givenUp = new();
     private static readonly TimeSpan GiveUpFor = TimeSpan.FromMinutes(10);
+    /// <summary>Give-ups in a row per node group; at <see cref="MaxGiveUps"/> the group is dropped for the run.</summary>
+    private readonly Dictionary<uint, int> giveUps = new();
+    private const int MaxGiveUps = 3;
+    /// <summary>Node groups dropped for the rest of the run: they couldn't be landed at or opened again and again.</summary>
+    private readonly HashSet<uint> abandoned = new();
     private Vector3 spot;
     private int interactTries;
     private int approachWalks;
@@ -90,6 +95,8 @@ internal sealed unsafe class Gatherer
     public string? Failure { get; private set; }
     /// <summary>Nothing can be gathered right now (only closed timed nodes, or nothing reachable).</summary>
     public bool Waiting { get; private set; }
+    /// <summary>Waiting only because the nodes left were given up on for a while (not a timed window).</summary>
+    public bool WaitingToRetry { get; private set; }
     public bool Running => step is not (Step.Idle or Step.Paused);
     public bool OnNode => Services.Condition[ConditionFlag.Gathering];
     /// <summary>Items the gatherer can't get anywhere (no known nodes, level, folklore, zone).</summary>
@@ -105,6 +112,8 @@ internal sealed unsafe class Gatherer
         neededCollectables = collectablesNeeded;
         visited.Clear();
         givenUp.Clear();
+        giveUps.Clear();
+        abandoned.Clear();
         unreachable.Clear();
         lastVisitEnd = null;
         visitStart = null;
@@ -112,6 +121,7 @@ internal sealed unsafe class Gatherer
         gpWaitSince = null;
         gpWaitedThisCycle = 0;
         Waiting = false;
+        WaitingToRetry = false;
         Failure = null;
         Go(Step.Choose);
     }
@@ -212,11 +222,13 @@ internal sealed unsafe class Gatherer
         {
             if (left(t) <= 0) continue;
             var any = false;
+            var dropped = false;
             foreach (var p in Catalog.GatherPoints(t.ItemId))
             {
                 if (PlanService.JobLevel(p.ClassJobId) < p.Level) continue;
                 if (p.Tome != 0 && !ItemUnlocks.IsLearned(p.Tome)) continue;
                 if (BasePositions(t.ItemId, p.BaseId).Count == 0 || !CanReach(p.TerritoryId)) continue;
+                if (abandoned.Contains(p.BaseId)) { dropped = true; continue; }
                 any = true;
                 if (p.Timed && !Eorzea.IsUp(p.Mask, now)) continue;
                 if (givenUp.TryGetValue(p.BaseId, out var until) && DateTime.UtcNow < until) { skipped = true; continue; }
@@ -226,25 +238,29 @@ internal sealed unsafe class Gatherer
                 if (best is not { } b || score < b.Score) best = (t, p, score);
             }
             if (!any && unreachable.Add(t.ItemId))
-                log($"No node you can reach and gather {Catalog.ItemName(t.ItemId)} at (level, folklore tome, zone, or no known position).", true);
+                log(dropped
+                    ? $"Stopped trying to gather {Catalog.ItemName(t.ItemId)}: its node couldn't be landed at or opened {MaxGiveUps} times in a row."
+                    : $"No node you can reach and gather {Catalog.ItemName(t.ItemId)} at (level, folklore tome, zone, or no known position).", true);
         }
 
         // Every item still needed has no node the character can get to: nothing to wait for.
         var stillNeeded = targets.Where(t => left(t) > 0).ToList();
         if (stillNeeded.Count > 0 && stillNeeded.All(t => unreachable.Contains(t.ItemId)))
         {
-            Fail($"Can't gather {string.Join(", ", stillNeeded.Select(t => Catalog.ItemName(t.ItemId)))}: no node you can reach (level, folklore tome, zone, or no known position). Get them yourself.");
+            Fail($"Can't gather {string.Join(", ", stillNeeded.Select(t => Catalog.ItemName(t.ItemId)))}: no node you can reach (level, folklore tome, zone, no known position, or a node that couldn't be landed at or opened). Get them yourself.");
             return;
         }
         if (best is not { } pick)
         {
             Waiting = true;
+            WaitingToRetry = skipped;
             lastVisitEnd = null;
             Status = skipped ? "Gave up on a node for a while; trying it again soon" : "No node is up right now";
             Wait(3);
             return;
         }
         Waiting = false;
+        WaitingToRetry = false;
         current = pick.Target;
         node = pick.Point;
         nodePoints = Catalog.GatherPoints(pick.Target.ItemId).Where(p => p.BaseId == pick.Point.BaseId).Select(p => p.PointId).ToHashSet();
@@ -466,9 +482,20 @@ internal sealed unsafe class Gatherer
     private void GiveUp(IGameObject live, string why)
     {
         Vnav.Stop();
-        log($"{why} Trying other nodes; this one again in {(int)GiveUpFor.TotalMinutes} min.", false);
         MarkVisitedAt(live.Position);
-        givenUp[node!.BaseId] = DateTime.UtcNow + GiveUpFor;
+        var group = node!.BaseId;
+        var times = giveUps[group] = giveUps.GetValueOrDefault(group) + 1;
+        if (times >= MaxGiveUps)
+        {
+            // The same failure again and again: retrying every 10 minutes would never end.
+            abandoned.Add(group);
+            log($"{why} Not trying this node again in this run.", true);
+        }
+        else
+        {
+            log($"{why} Trying other nodes; this one again in {(int)GiveUpFor.TotalMinutes} min.", false);
+            givenUp[group] = DateTime.UtcNow + GiveUpFor;
+        }
         mustLand = false;
         Go(Step.Choose, 1);
     }
@@ -558,6 +585,7 @@ internal sealed unsafe class Gatherer
     private void OnVisitStart()
     {
         EndGpWait();
+        if (node != null) giveUps.Remove(node.BaseId); // it opened: the give-ups weren't in a row
         visitStart = current is { } cur && GameState.GatheredAsCollectable(cur.ItemId) && Services.Objects.LocalPlayer is { } p
             ? (cur.ItemId, p.CurrentGp, GameState.GatheredInBags(cur.ItemId), DateTime.UtcNow)
             : null;
