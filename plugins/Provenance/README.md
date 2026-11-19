@@ -88,7 +88,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
 | M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
 | Scrips | Buying books at exchanges, earning scrips with collectables (done) |
-| Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (testing in 0.8) |
+| Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 
 ### To do
 

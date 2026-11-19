@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (testing)
+## 0.8.0
 
 Fishing and spearfishing without AutoHook.
 
@@ -60,7 +60,7 @@ Fishing and spearfishing without AutoHook.
   wards. Ocean Fishing and the Diadem stay "get it yourself".
 - Earning scrips no longer waits forever when a collectable's materials include fish.
 
-## 0.7.0 (testing)
+## 0.7.0
 
 Gathering without GatherBuddy Reborn.
 
