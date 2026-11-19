@@ -341,20 +341,26 @@ internal sealed class PlanPage : Page
     private void CardTitle(FontAwesomeIcon icon, string title, Vector4 color, IReadOnlyList<uint> removable, GameCatalog catalog, string id)
     {
         var s = Ui.S;
-        var lineY = ImGui.GetCursorPosY();
-        // The card's own width (not the window's), so the action lines up with the rows' remove buttons.
-        var startX = ImGui.GetCursorPosX();
+        // Placed in screen space against the card's own width, like the rows' remove buttons, so both
+        // right edges line up (SameLine offsets count from the window and add the card's indent again).
+        var start = ImGui.GetCursorScreenPos();
         var avail = ImGui.GetContentRegionAvail().X;
         Ui.Icon(icon, color);
         ImGui.SameLine(0, 10 * s);
-        using (Ui.F.Strong.Push()) Ui.Text(title, color);
+        float titleH;
+        using (Ui.F.Strong.Push())
+        {
+            Ui.Text(title, color);
+            titleH = ImGui.GetTextLineHeight();
+        }
         if (removable.Count == 0) return;
+        var after = ImGui.GetCursorScreenPos();
         var label = removable.Count == 1 ? "Remove it" : $"Remove all {removable.Count}";
         var size = Ui.LinkButtonSize(label, FontAwesomeIcon.TrashAlt);
-        ImGui.SameLine(startX + avail - size.X);
-        ImGui.SetCursorPosY(lineY + (ImGui.GetTextLineHeight() - size.Y) / 2);
+        ImGui.SetCursorScreenPos(new Vector2(start.X + avail - size.X, start.Y + (titleH - size.Y) / 2));
         if (Ui.LinkButton(label, Palette.Danger, FontAwesomeIcon.TrashAlt, "Takes these out of the order: " + Names(removable, catalog) + ".", "##removeall" + id))
             RemoveFromOrder(removable, catalog);
+        ImGui.SetCursorScreenPos(after);
     }
 
     /// <summary>Last frame's height of each removable row, so the hover highlight can be drawn behind this frame's content.</summary>
