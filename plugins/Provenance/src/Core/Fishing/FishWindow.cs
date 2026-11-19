@@ -14,6 +14,12 @@ public static class FishWindow
 {
     private static readonly TimeSpan Period = TimeSpan.FromSeconds(Weather.PeriodSeconds);
 
+    /// <summary>
+    /// How far ahead the plan and the run look for a fish's next window. The run waits for any window within
+    /// it; a fish with none (in every spot it can use) can't be fished by a run, and the plan says so.
+    /// </summary>
+    public static readonly TimeSpan Forecast = TimeSpan.FromDays(7);
+
     /// <summary>The fish bites at this moment (always true for fish without a window or weather).</summary>
     public static bool IsOpen(FishInfo fish, IReadOnlyList<(uint Weather, int Rate)> table, DateTimeOffset at)
     {

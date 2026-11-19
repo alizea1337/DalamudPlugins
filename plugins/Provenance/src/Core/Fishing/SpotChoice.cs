@@ -29,7 +29,7 @@ public readonly record struct SpotCandidate(uint ItemId, uint SpotId, bool Restr
 public static class SpotChoice
 {
     /// <summary>How far ahead the weather forecast is searched for a fish's next window.</summary>
-    public static readonly TimeSpan Horizon = TimeSpan.FromDays(3);
+    public static readonly TimeSpan Horizon = FishWindow.Forecast;
 
     /// <summary>A window must stay open this long to be worth the way: in this zone (walk to a stand) and from another zone (teleport too).</summary>
     public static readonly TimeSpan MinUsefulHere = TimeSpan.FromSeconds(60);

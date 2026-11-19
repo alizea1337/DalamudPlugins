@@ -285,7 +285,7 @@ internal sealed class PlanService : IDisposable
     // ------------------------------------------------------------------ fishing
 
     /// <summary>How far ahead fish windows are looked for (the weather forecast is exact, a plan needs a limit).</summary>
-    public static readonly TimeSpan FishHorizon = TimeSpan.FromDays(3);
+    public static readonly TimeSpan FishHorizon = Core.Fishing.FishWindow.Forecast;
 
     /// <summary>
     /// How long a fish outlook is kept: reach and levels change now and then (checking reach reads the teleport
