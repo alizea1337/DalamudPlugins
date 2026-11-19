@@ -40,6 +40,8 @@ public sealed class Plugin : IDalamudPlugin
 
         Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);
+        // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
+        Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
         Main = new MainWindow(this, new Page[]
         {
