@@ -1877,6 +1877,8 @@ internal sealed class RunEngine : IDisposable
             return $"Waiting for {ItemName(fish.ItemId)}" + (fish.Wait > TimeSpan.Zero ? $" (bites in {Short(fish.Wait)})" : "");
         if (land is { } next)
             return "Waiting for a timed node" + (next > TimeSpan.Zero ? $" (opens in {Short(next)})" : "");
+        // A node that couldn't be landed at or opened, given up on for a few minutes.
+        if (Gather.WaitingToRetry) return "Waiting to try a node again";
         // Only fish whose weather isn't in the forecast yet.
         foreach (var (id, wait) in fishWaits)
             if (wait == TimeSpan.MaxValue) return $"Waiting for {ItemName(id)}'s weather";

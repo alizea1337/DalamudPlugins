@@ -378,7 +378,13 @@ internal sealed unsafe partial class Fisher
         var t = current!.Value;
         var s = spot!;
         CountSession();
-        angler.Begin(new AnglerJob(fish!, s, Data.WeatherTable(s.TerritoryId), bait, Data.Fish, () => left(t), Settings.UseBuffs, Settings.UseCordials));
+        angler.Begin(new AnglerJob(fish!, s, Data.WeatherTable(s.TerritoryId), bait, Data.Fish, () => left(t), Settings.UseBuffs, Settings.UseCordials)
+        {
+            // The fish living here let the angler tell a missing predator apart and hook a tug only the target has.
+            SpotFish = Data.FishAt(s.Id),
+            // A predator whose own bait isn't in the bags may be fished with Versatile Lure only when the setting allows it.
+            FallbackBait = Settings.VersatileLureFallback ? FishAccess.VersatileLure : 0,
+        });
         sessionCounted = false;
         standLearned = false;
         switching = false;
@@ -428,10 +434,12 @@ internal sealed unsafe partial class Fisher
                 Amiss();
                 return;
             case AnglerSignal.NoBait:
+                // The bait that ran out can be a predator's (caught first for Fisher's Intuition), not the target's.
+                var missing = angler.MissingBait != 0 ? angler.MissingBait : bait;
                 // The game says there's no bait while the bags hold it (it can't be selected): retrying won't help.
-                if (GameState.BagCount(bait) > 0 && ++noBaitStreak >= 3)
+                if (GameState.BagCount(missing) > 0 && ++noBaitStreak >= 3)
                 {
-                    Fail($"The game keeps saying there's no bait, though {Name(bait)} is in your bags. Select it once by hand, then start again.");
+                    Fail($"The game keeps saying there's no bait, though {Name(missing)} is in your bags. Select it once by hand, then start again.");
                     return;
                 }
                 // Reel in, then buy more (or fall back to Versatile Lure), then come back.

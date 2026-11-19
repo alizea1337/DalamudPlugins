@@ -80,7 +80,7 @@ Gathering without GatherBuddy Reborn.
   the plan says how much of the gathering time is waiting. What a collectable visit gives, spends
   and takes is learned from your own runs.
 - Between nodes: materia extraction from fully spiritbonded gear, and aetherial reduction of spare
-  collectables when the bags run low (never while a collectable the order needs is in the bags).
+  collectables when the bags run low (never while a reducible collectable the order needs is in the bags).
   Both in Settings.
 - Node positions seen during runs are remembered on this PC (never uploaded).
 - Fishing isn't in this testing build yet; orders with fish can't start until it arrives.

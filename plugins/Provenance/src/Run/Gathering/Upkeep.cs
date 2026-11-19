@@ -53,10 +53,10 @@ internal sealed unsafe class Upkeep
         return n;
     }
 
-    /// <summary>Collectables the order needs (scrip collectables, ordered collectables): reduction is off while any are in the bags.</summary>
+    /// <summary>Collectables the order needs (scrip collectables, ordered collectables): reduction is off while a reducible one is in the bags.</summary>
     private IReadOnlySet<uint> needed = new HashSet<uint>();
 
-    /// <summary>Reducible collectables in the bags (base item ids), and whether any collectable in the bags is needed.</summary>
+    /// <summary>Reducible collectables in the bags (base item ids), and whether any reducible collectable in the bags is needed.</summary>
     private (List<uint> Spare, bool AnyNeeded) Reducible()
     {
         var items = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>();
@@ -97,7 +97,7 @@ internal sealed unsafe class Upkeep
             Status = "Extracting materia";
             return true;
         }
-        // The game's reduction window reduces whatever it lists, so it only runs while no needed collectable is in the bags.
+        // The game's reduction window reduces whatever it lists, so it only runs while no needed reducible collectable is in the bags.
         if (s.ReduceCollectables && Data.Stock.FreeSlots() < ReduceBelowFreeSlots && QuestDone(ReductionQuest)
             && Reducible() is { Spare.Count: > 0, AnyNeeded: false })
         {

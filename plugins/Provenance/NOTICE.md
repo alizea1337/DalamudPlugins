@@ -32,16 +32,18 @@ Adapted files:
   scrip-cap prompt) and reading its item list, from `GatherBuddy/AutoGather/Collectables/`.
 - `tools/VendorTable`: corrected positions of two collectable appraisers, from
   `GatherBuddy/Vulcan/Vendors/VendorNpcLocationCache.cs`.
-- `src/Run/Fishing/` (the fishing driver) and the stand and spot helpers in `src/Core/Fishing/`:
-  choosing the fish and its spot by time and weather window, the Fisher gearset, bait in the bags and
-  buying more, travel to a recorded place to stand, landing, facing the water and checking that a
-  cast works, moving on when the fish turn wary or sense something amiss, cordials, and going from
-  node to node when spearfishing, from `GatherBuddy/AutoGather/` (`AutoGather.cs`,
-  `AutoGather.Movement.cs`, `AutoGather.Actions.cs`, `AutoGather.FishingBuffs.cs`,
-  `AutoGather.FishingCollectable.cs`, `AutoGather.Spearfishing.cs`) and the uptime rules in
+- `src/Run/Fishing/Fisher.cs`, `Fisher.Choose.cs`, `Fisher.Rod.cs` and `Fisher.Spear.cs` (the fishing
+  driver), with `src/Core/Fishing/SpotChoice.cs`, `SpotStands.cs` and `SpotNodes.cs`: choosing the
+  fish and its spot, the Fisher gearset, bait in the bags, travel to a recorded place to stand,
+  landing, facing the water and checking that a cast works, moving on when the fish turn wary or
+  sense something amiss, and going from node to node when spearfishing, from
+  `GatherBuddy/AutoGather/` (`AutoGather.cs`, `AutoGather.Movement.cs`, `AutoGather.Actions.cs`,
+  `AutoGather.FishingBuffs.cs`, `AutoGather.FishingCollectable.cs`, `AutoGather.Spearfishing.cs`).
+- `src/Core/Fishing/FishWindow.cs`: when a fish bites, from the time and weather rules in
   `GatherBuddy/Plugin/UptimeManager.cs`.
-- `src/Integrations/Fishing/`: finding, opening and recognising spearfishing nodes, from
-  `GatherBuddy/AutoGather/AutoGather.Spearfishing.cs` and `GatherBuddy/Spearfishing/`.
+- `src/Integrations/Fishing/SpearGame.cs`: finding and recognising spearfishing nodes, from
+  `GatherBuddy/AutoGather/AutoGather.Spearfishing.cs`; and `src/Integrations/Fishing/RodMessages.cs`:
+  matching the wary and amiss warnings, from `GatherBuddy/AutoGather/AutoGather.cs`.
 
 Bundled data, built by `tools/GbrExport` from GatherBuddy Reborn's data (Apache License 2.0):
 
@@ -59,20 +61,23 @@ A copy of the Apache License 2.0 is at <https://www.apache.org/licenses/LICENSE-
 
 Ported logic:
 
-- `src/Integrations/Fishing/` (the rod engine): the fishing state the game keeps, the hooks on
-  casting, the bite and the catch, the one-action-per-tick executor and its delays, changing bait,
-  hooking by tug and bite time with the right hookset and resting on the rest, mooching, the buffs
-  (Patience, Chum, Surface Slap, Identical Cast, the lures and others), cordials between casts, the
-  warnings when the fish turn wary or sense something amiss or the bait runs out, the collectable
-  prompt, and AutoGig (gigging in the spearfishing window), from `AutoHook/Modules/Rod/`,
+- `src/Integrations/Fishing/Angler.cs`, `RodHooks.cs`, `RodGame.cs` and `RodMessages.cs` (the rod
+  engine): the fishing state the game keeps, the hooks on casting, the bite and the catch, the
+  one-action-per-tick executor and its delays, changing bait, hooking by tug and bite time with the
+  right hookset and resting on the rest, mooching, the buffs (Patience, Chum, Surface Slap, Identical
+  Cast, the lures and others), cordials between casts, the warnings when the fish turn wary or sense
+  something amiss or the bait runs out, and the collectable prompt, from `AutoHook/Modules/Rod/`,
   `AutoHook/Modules/FishingSessionManager.cs`, `AutoHook/Modules/AutoCollectables.cs`,
-  `AutoHook/World/UpdateModules/` (`HooksUpdateModule.cs`, `FishingUpdateModule.cs`,
-  `SpearfishingUpdateModule.cs`), `AutoHook/Actions/`, `AutoHook/Spearfishing/AutoGig.cs` and
-  `AutoHook/Modules/Gig/`.
-- `src/Core/Fishing/` (the catch planner and per-cast decisions): bait and mooch chains, the fish
-  caught first for Fisher's Intuition, which tug and bite window to hook in each cast, and when the
-  buffs pay off; recognising spearfish by size and speed and timing the gig, from
-  `AutoHook.FishSolver/` and `AutoHook/FishSolverIntegration/`.
+  `AutoHook/World/UpdateModules/` (`HooksUpdateModule.cs`, `FishingUpdateModule.cs`) and
+  `AutoHook/Actions/`.
+- `src/Core/Fishing/FishingIds.cs`, `CatchPlan.cs`, `CatchPlanner.cs` and `CatchDecider.cs` (the catch
+  planner and per-cast decisions): bait and mooch chains, the fish caught first for Fisher's
+  Intuition, which tug and bite window to hook in each cast, and when the buffs pay off, from
+  `AutoHook.FishSolver/`, `AutoHook/FishSolverIntegration/` and `AutoHook/Data/IDs.cs`.
+- `src/Integrations/Fishing/SpearGame.cs` with `src/Core/Fishing/SpearFish.cs`, `SpearAim.cs` and
+  `SpearCatches.cs` (AutoGig): recognising spearfish by size and speed, timing the gig and counting
+  the catches, from `AutoHook/Spearfishing/AutoGig.cs`, `AutoHook/Modules/Gig/` and
+  `AutoHook/World/UpdateModules/SpearfishingUpdateModule.cs`.
 
 Per-fish bite times in `Resources/fish.json` come from AutoHook's `fish_list.json`, which is built
 from Teamcraft's fishing data (MIT).
