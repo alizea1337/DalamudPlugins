@@ -91,14 +91,23 @@ internal static unsafe class GameState
         return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
     }
 
-    private static readonly Dictionary<uint, bool> AlwaysCollectableCache = new();
+    private static readonly Dictionary<uint, bool> OnlyCollectableCache = new();
 
-    /// <summary>Items that only ever come as collectables (the "Rarefied" ones): the game's item count skips them.</summary>
-    public static bool AlwaysCollectable(uint itemId)
+    /// <summary>
+    /// Items that only ever come as collectables (the "Rarefied" ones); the game's item count skips
+    /// them. The sheet's AlwaysCollectable flag is missing on most (all of Dawntrail's), but such an
+    /// item never stacks, while one that also comes normally (Fire Moraine, fish) stacks to 999.
+    /// Gear never stacks either, so it only counts with the flag.
+    /// </summary>
+    public static bool OnlyCollectable(uint itemId)
     {
-        if (!AlwaysCollectableCache.TryGetValue(itemId, out var always))
-            AlwaysCollectableCache[itemId] = always = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId)?.AlwaysCollectable == true;
-        return always;
+        if (!OnlyCollectableCache.TryGetValue(itemId, out var only))
+        {
+            var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId);
+            only = row is { IsCollectable: true } r && (r.AlwaysCollectable || (r.StackSize <= 1 && r.EquipSlotCategory.RowId == 0));
+            OnlyCollectableCache[itemId] = only;
+        }
+        return only;
     }
 
     /// <summary>
@@ -106,7 +115,7 @@ internal static unsafe class GameState
     /// come as collectables, the collectables (any collectability).
     /// </summary>
     public static int GatheredInBags(uint itemId)
-        => BagCount(itemId, false) + (AlwaysCollectable(itemId) ? Collectables(itemId).Count : 0);
+        => BagCount(itemId, false) + (OnlyCollectable(itemId) ? Collectables(itemId).Count : 0);
 
     /// <summary>Collectability of each collectable of an item in the main bags (collectables don't count as normal items).</summary>
     public static List<int> Collectables(uint itemId)
