@@ -15,11 +15,22 @@ namespace Provenance.Run.Fishing;
 // Spearfishing: the spot's nodes are gathering points (the GatheringPoint rows of its PointBase), up at one
 // point at a time. Go to the nearest one in view (never back to the last two points emptied), otherwise look
 // at the known positions one by one; get within reach (3.5 yalms across, 3 up or down), off the mount, open
-// it, and let the SpearGame gig the wanted fish until the window closes. A fish behind swimming shadows needs
-// its first predator gigged at that predator's own spot first (the shadows' parent spot). Follows GatherBuddy
-// Reborn's spearfishing movement (AutoGather.cs DoNodeMovement, AutoGather.Spearfishing.cs; Apache-2.0).
+// it (once a wanted fish bites), and let the SpearGame gig the wanted fish until the window closes and the last
+// catch is counted. A node is left when none of its wanted fish can come by any more, or after a long while
+// without a gig. A fish behind swimming shadows needs its first predator gigged at that predator's own spot
+// first (the shadows' parent spot), inside the predator's window. Follows GatherBuddy Reborn's spearfishing
+// movement (AutoGather.cs DoNodeMovement, AutoGather.Spearfishing.cs; Apache-2.0).
 internal sealed unsafe partial class Fisher
 {
+    /// <summary>Closing a node's window (and answering the game's question) never takes longer.</summary>
+    private static readonly TimeSpan LeaveLimit = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// No gig at all for this long: no wanted fish is coming (one that can't be told by size and speed, say), so the
+    /// node is left. Long on purpose: leaving makes the node vanish, and a swimming-shadows node costs its
+    /// predators again.
+    /// </summary>
+    private static readonly TimeSpan NoGigLimit = TimeSpan.FromMinutes(5);
+
     /// <summary>The spot whose nodes are worked now: the target's own, or the parent spot of its swimming shadows.</summary>
     private FishingSpotInfo? pool;
     /// <summary>The fish to gig at <see cref="pool"/>.</summary>
@@ -41,10 +52,16 @@ internal sealed unsafe partial class Fisher
     private (uint Predator, int Need, int Start)? shadowPrep;
     private DateTime? shadowSearchUntil;
     private static readonly Dictionary<uint, bool> ShadowSpots = new();
+    /// <summary>Leaving the open spearfishing node (or a window nobody works on) since then.</summary>
+    private DateTime? leaveSince;
+    /// <summary>Gigs seen at this node, and when the last one went out (or the node opened).</summary>
+    private int nodeGigs;
+    private DateTime lastGigAt;
 
     private void ResetSpear()
     {
         recentPoints.Clear();
+        leaveSince = null;
         ResetSpearSpot();
     }
 
@@ -86,21 +103,23 @@ internal sealed unsafe partial class Fisher
     /// Which spot's nodes to work and what to gig there. Normally the target's spot. For a fish behind swimming
     /// shadows (GBR's ParentNode rule): the shadows' spot while its node is in view (gig the other predators and
     /// the fish), otherwise the first predator's own spot until enough of it is gigged, then a look around the
-    /// shadows' spot for two minutes (and back to the predator when they don't show).
+    /// shadows' spot for two minutes (and back to the predator when they don't show). False when that predator
+    /// only bites at some hours or in some weather and doesn't within the lead: choosing again then waits for its
+    /// window (the shadows' spot counts it, see <see cref="ShadowPredator"/>).
     /// </summary>
-    private void ChoosePool()
+    private bool ChoosePool()
     {
         var s = spot!;
         var f = fish!;
         pool = s;
         wanted = WantedAt(s, new[] { f });
-        if (f.Predators.Count == 0 || !IsShadow(s)) return;
+        if (f.Predators.Count == 0 || !IsShadow(s)) return true;
 
         var others = f.Predators.Skip(1).Select(p => Data.Fish(p.ItemId)).OfType<FishInfo>().Append(f).ToList();
         if (Services.ClientState.TerritoryType == s.TerritoryId && SpearGame.NearestNode(Data.PointsOfBase(s.PointBase), skipNodes) != null)
         {
             wanted = WantedAt(s, others);
-            return;
+            return true;
         }
         var (predator, need) = f.Predators[0];
         shadowPrep ??= (predator, need, caught.GetValueOrDefault(predator));
@@ -111,7 +130,7 @@ internal sealed unsafe partial class Fisher
             if (DateTime.UtcNow < shadowSearchUntil)
             {
                 wanted = WantedAt(s, others);
-                return;
+                return true;
             }
             log($"No swimming shadows showed up at {SpotName(s)}; gigging more {Name(predator)} first.", false);
             shadowPrep = (predator, need, caught.GetValueOrDefault(predator));
@@ -121,10 +140,19 @@ internal sealed unsafe partial class Fisher
         {
             // Nowhere to gig the predator: look at the shadows' spot anyway (they may be up already).
             wanted = WantedAt(s, others);
-            return;
+            return true;
+        }
+        // The predator is gigged inside its own window, judged at its spot (not as if the shadows were worked).
+        pool = null;
+        if (!PredatorDue(f, s))
+        {
+            ranked = null;
+            log($"{Name(predator)} doesn't bite at {SpotName(parent)} yet; waiting for it before gigging it for the swimming shadows.", false);
+            return false;
         }
         pool = parent;
         wanted = WantedAt(parent, Data.Fish(predator) is { } p ? new[] { p } : Array.Empty<FishInfo>());
+        return true;
     }
 
     /// <summary>The predator's own spot (not a shadows' one), the shadows' zone first.</summary>
@@ -134,14 +162,35 @@ internal sealed unsafe partial class Fisher
                 .OrderByDescending(x => x.TerritoryId == shadow.TerritoryId).FirstOrDefault()
             : null;
 
+    /// <summary>
+    /// For a fish behind swimming shadows whose first predator only bites at some hours or in some weather: that
+    /// predator and its own spot, where it's gigged first. The predator's window there bounds the shadows' spot
+    /// (GBR's IntersectPredatorUptime). Null for every other fish and spot.
+    /// </summary>
+    private (FishInfo Fish, FishingSpotInfo Parent)? ShadowPredator(FishInfo f, FishingSpotInfo s)
+    {
+        if (!f.Spear || f.Predators.Count == 0 || !IsShadow(s)) return null;
+        var id = f.Predators[0].ItemId;
+        return Data.Fish(id) is { Restricted: true } p && ParentSpot(id, s) is { } parent ? (p, parent) : null;
+    }
+
+    /// <summary>The predator a shadows' spot waits for bites within the lead (judged as if there, like a trip under way).</summary>
+    private bool PredatorDue(FishInfo f, FishingSpotInfo s)
+    {
+        if (Places(f.ItemId).Spots.FirstOrDefault(x => x.Spot.Id == s.Id) is not { Predator: not 0 } place) return true;
+        var c = Candidate(f.ItemId, f, place, DateTimeOffset.UtcNow, s.TerritoryId) with { Resting = false };
+        return SpotChoice.Workable(c, Lead(f) + TimeSpan.FromMinutes(1));
+    }
+
     /// <summary>The points of the pool a node may be up at now.</summary>
     private List<uint> AllowedPoints(FishingSpotInfo p) => SpotNodes.Allowed(Data.PointsOfBase(p.PointBase), Recent(p.Id));
 
     private void SpearFind(IGameObject me)
     {
         if (current is not { } t || fish == null || spot == null || left(t) <= 0) { Go(Step.Choose); return; }
-        ChoosePool();
+        var due = ChoosePool();
         if (SpearGame.WindowOpen) { StartSpear(); return; }
+        if (!due) { Go(Step.Choose); return; }
         var p = pool!;
         var here = Services.ClientState.TerritoryType == p.TerritoryId;
         var allowed = AllowedPoints(p);
@@ -278,6 +327,7 @@ internal sealed unsafe partial class Fisher
                 Wait(1.2);
                 return;
             }
+            if (HoldForBite()) return;
             Go(Step.SpearOpen);
             return;
         }
@@ -286,6 +336,7 @@ internal sealed unsafe partial class Fisher
         if (approachWalks >= 3)
         {
             // As close as it gets: try opening from here.
+            if (HoldForBite()) return;
             Go(Step.SpearOpen);
             return;
         }
@@ -307,6 +358,8 @@ internal sealed unsafe partial class Fisher
         if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted]) { Go(Step.SpearApproach); return; }
         if (!SpotNodes.InReach(live.Position, me.Position) && approachWalks < 3) { Go(Step.SpearApproach); return; }
         if (GameState.CurrentJob != FishAccess.Fisher) { Go(Step.Gear); return; }
+        // A pause asked for before this node was opened: it isn't opened at all.
+        if (pausing && openTries == 0) { PauseOnceIn(); return; }
         if (CollectOff()) return;
         if (++openTries > 4) { GiveUpNode(live, "Couldn't open the spearfishing node"); return; }
         Status = "Opening the node";
@@ -322,23 +375,75 @@ internal sealed unsafe partial class Fisher
         Go(Step.SpearFind, 1);
     }
 
+    /// <summary>
+    /// At the node before any wanted fish bites (the fisher comes early by the lead): opening it now would only
+    /// mean leaving it again, so wait next to it. True while waiting (or when the wait isn't worth it any more).
+    /// </summary>
+    private bool HoldForBite()
+    {
+        if (pool is not { } p) return false;
+        var table = Data.WeatherTable(p.TerritoryId);
+        var now = DateTimeOffset.UtcNow;
+        if (!SpotNodes.NoneBite(wanted, table, now)) return false;
+        if (DateTime.UtcNow >= nextCheck)
+        {
+            nextCheck = DateTime.UtcNow.AddSeconds(5);
+            // The window went by meanwhile, or another fish's window needs the fisher first.
+            if (!StillWorkable() || MoreUrgent() != null)
+            {
+                Go(Step.Choose);
+                return true;
+            }
+        }
+        var soonest = wanted.Select(f => FishWindow.UntilOpen(f, table, now, SpotChoice.Horizon)).OfType<TimeSpan>().DefaultIfEmpty(TimeSpan.Zero).Min();
+        Status = $"Waiting at the node for {Name(wanted[0].ItemId)} to bite{(soonest > TimeSpan.Zero ? $" (in {Span(soonest)})" : "")}";
+        Wait(1);
+        return true;
+    }
+
     private void StartSpear()
     {
         if (wanted.Count == 0 && fish != null) wanted = new List<FishInfo> { fish };
         spear.Begin(wanted);
+        nodeGigs = 0;
+        lastGigAt = DateTime.UtcNow;
+        leaveSince = null;
         Status = $"Spearfishing for {Name(fish!.ItemId)}";
         Go(Step.Spear);
     }
 
-    /// <summary>Every frame while the window is open; once it closes (the node is used up), on to the next node.</summary>
+    /// <summary>
+    /// Every frame from the node's opening until the spearfishing game is finished: the window closed (the node used
+    /// up, or left) and the last catch counted, about a second later. The node is left when none of the wanted fish
+    /// can come by any more (each bites only at some hours or in some weather, and that isn't now), after
+    /// <see cref="NoGigLimit"/> without a gig, or for a pause that can't wait (<see cref="Pause"/>).
+    /// </summary>
     private void SpearTick()
     {
-        if (!spear.Finished && SpearGame.WindowOpen)
+        var now = DateTime.UtcNow;
+        if (spear.Gigs != nodeGigs)
         {
+            nodeGigs = spear.Gigs;
+            lastGigAt = now;
+        }
+        if (leaveSince == null && SpearGame.WindowOpen && WhyLeave(now) is { } why)
+        {
+            log(why, false);
+            leaveSince = now;
+        }
+        if (leaveSince != null && (SpearGame.WindowOpen || SpearGame.AbandonAsked))
+        {
+            LeaveNode();
+            return;
+        }
+        if (!spear.Finished)
+        {
+            // Also once the window has closed: the spearfishing game counts the catch still on its way to the bags.
             if (spear.Status.Length > 0) Status = spear.Status;
             return;
         }
         if (spear.Active) spear.Stop();
+        leaveSince = null;
         nodesAtSpot++;
         if (pool != null && nodePoint != 0) SpotNodes.Remember(Recent(pool.Id), nodePoint);
         // The shadows' node is gone once used: the predator has to be gigged again for the next one.
@@ -352,7 +457,39 @@ internal sealed unsafe partial class Fisher
         exploreRounds = 0;
         // The next node is a new object (it may take an old one's slot): nothing to skip any more.
         skipNodes.Clear();
-        if (pausing) { Settle(Step.Paused); return; }
+        if (pausing) { PauseOnceIn(); return; }
         Go(Step.Choose, 1);
+    }
+
+    /// <summary>Why to leave the open node now (for the run log), or null to keep gigging.</summary>
+    private string? WhyLeave(DateTime now)
+    {
+        var at = pool ?? spot;
+        var where = at != null ? SpotName(at) : "the spearfishing spot";
+        if (at != null && SpotNodes.NoneBite(wanted, Data.WeatherTable(at.TerritoryId), DateTimeOffset.UtcNow))
+            return $"{Names(wanted)} {(wanted.Count == 1 ? "doesn't" : "don't")} bite at {where} any more for now; leaving the spearfishing node.";
+        if (now - lastGigAt > NoGigLimit)
+            return $"Nothing wanted swam by at {where} for {NoGigLimit.TotalMinutes:0} minutes; leaving the spearfishing node.";
+        return null;
+    }
+
+    /// <summary>Leaves the open spearfishing node: every frame until its window (and the game's question) is gone.</summary>
+    private void LeaveNode()
+    {
+        leaveSince ??= DateTime.UtcNow;
+        Status = "Leaving the spearfishing node";
+        if (DateTime.UtcNow - leaveSince > LeaveLimit)
+        {
+            Fail("Couldn't leave the spearfishing node; close it, then start again.");
+            return;
+        }
+        spear.Leave();
+    }
+
+    /// <summary>"Ichimonji", "Ichimonji and Snailfish", "Ichimonji, Snailfish and Garden Eel".</summary>
+    private string Names(IReadOnlyList<FishInfo> fish)
+    {
+        var names = fish.Select(f => Name(f.ItemId)).Distinct().ToList();
+        return names.Count <= 1 ? names.FirstOrDefault() ?? "The fish" : string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1];
     }
 }

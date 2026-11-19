@@ -14,8 +14,12 @@ namespace Provenance.Run.Fishing;
 // can't be had (and why), spots resting after the fish sensed something amiss, and the waits the run asks for.
 internal sealed partial class Fisher
 {
-    /// <summary>A fish's next window at one usable spot. Opens: null when not within the forecast. Closes: MaxValue without a window.</summary>
-    private sealed record Place(FishingSpotInfo Spot, DateTimeOffset? Opens, DateTimeOffset Closes);
+    /// <summary>
+    /// A fish's next window at one usable spot. Opens: null when not within the forecast. Closes: MaxValue without a
+    /// window. Predator: behind swimming shadows, the first predator whose window (at its own spot) the shadows wait
+    /// for, so the window here is when both bite; 0 otherwise.
+    /// </summary>
+    private sealed record Place(FishingSpotInfo Spot, DateTimeOffset? Opens, DateTimeOffset Closes, uint Predator = 0);
 
     /// <summary>Where a fish can be fished (or why not), worked out every so often: the reach and level checks read the teleport list.</summary>
     private sealed class FishPlaces
@@ -84,10 +88,13 @@ internal sealed partial class Fisher
             {
                 foreach (var s in FishAccess.UsableSpots(Data, f, level))
                 {
-                    var (wait, bites) = SpotChoice.Window(f, Data.WeatherTable(s.TerritoryId), now, SpotChoice.Horizon);
-                    DateTimeOffset? opens = wait is { } w ? now + w : null;
-                    var closes = opens is not { } o || bites == TimeSpan.MaxValue ? DateTimeOffset.MaxValue : o + bites;
-                    result.Spots.Add(new Place(s, opens, closes));
+                    var table = Data.WeatherTable(s.TerritoryId);
+                    // Swimming shadows whose predator has a window of its own: both have to bite (GBR's IntersectPredatorUptime).
+                    var predator = ShadowPredator(f, s);
+                    var (wait, bites) = predator is { } p
+                        ? SpotChoice.Window(f, table, p.Fish, Data.WeatherTable(p.Parent.TerritoryId), now, SpotChoice.Horizon)
+                        : SpotChoice.Window(f, table, now, SpotChoice.Horizon);
+                    result.Spots.Add(ToPlace(s, now, wait, bites, predator?.Fish.ItemId ?? 0));
                 }
                 if (result.Spots.Count == 0) result.Blocker = "no fishing spot you can use";
             }
@@ -96,9 +103,31 @@ internal sealed partial class Fisher
         return result;
     }
 
-    /// <summary>A fish's next window at a spot (open and close times); null when it doesn't bite there within the forecast.</summary>
-    private (DateTimeOffset Opens, DateTimeOffset Closes)? WindowState(uint itemId, uint spotId)
-        => Places(itemId).Spots.FirstOrDefault(p => p.Spot.Id == spotId) is { Opens: { } opens } place ? (opens, place.Closes) : null;
+    private static Place ToPlace(FishingSpotInfo s, DateTimeOffset now, TimeSpan? wait, TimeSpan bites, uint predator = 0)
+    {
+        DateTimeOffset? opens = wait is { } w ? now + w : null;
+        var closes = opens is not { } o || bites == TimeSpan.MaxValue ? DateTimeOffset.MaxValue : o + bites;
+        return new Place(s, opens, closes, predator);
+    }
+
+    /// <summary>
+    /// The place as it counts now. Behind swimming shadows the predator's window counts until the fisher works the
+    /// shadows' own spot for this fish (their node is up, or enough of the predator was gigged); from then on only
+    /// the fish's own window does.
+    /// </summary>
+    private Place Effective(uint itemId, FishInfo f, Place p, DateTimeOffset now)
+    {
+        if (p.Predator == 0 || current?.ItemId != itemId || pool?.Id != p.Spot.Id) return p;
+        var (wait, bites) = SpotChoice.Window(f, Data.WeatherTable(p.Spot.TerritoryId), now, SpotChoice.Horizon);
+        return ToPlace(p.Spot, now, wait, bites);
+    }
+
+    /// <summary>A fish's next window at a spot as it counts now (see <see cref="Effective"/>); null when the spot isn't usable.</summary>
+    private Place? PlaceAt(FishInfo f, uint spotId)
+        => Places(f.ItemId).Spots.FirstOrDefault(p => p.Spot.Id == spotId) is { } place ? Effective(f.ItemId, f, place, DateTimeOffset.UtcNow) : null;
+
+    /// <summary>The fish has a window somewhere: its own, or the predator's its swimming shadows wait for.</summary>
+    private static bool Windowed(FishInfo f, FishPlaces p) => f.Restricted || p.Spots.Any(x => x.Predator != 0);
 
     /// <summary>Nothing worked at the spot <see cref="BrokenAfter"/> times this run: it isn't used again.</summary>
     private bool IsBroken(uint spotId) => brokenCounts.GetValueOrDefault(spotId) >= BrokenAfter;
@@ -123,13 +152,15 @@ internal sealed partial class Fisher
     /// <summary>The run's wait for a fish (see <see cref="WaitFor"/>), with resting spots counted from the end of their rest.</summary>
     private TimeSpan? WindowWait(uint itemId)
     {
-        if (plugin.Plans.Catalog == null || Data.Fish(itemId) is not { Restricted: true }) return null;
+        if (plugin.Plans.Catalog == null || Data.Fish(itemId) is not { } f) return null;
         var p = Places(itemId);
+        if (!Windowed(f, p)) return null;
         if (p.Blocker != null) return TimeSpan.MaxValue;
         var now = DateTimeOffset.UtcNow;
         var best = TimeSpan.MaxValue;
-        foreach (var place in p.Spots)
+        foreach (var raw in p.Spots)
         {
+            var place = Effective(itemId, f, raw, now);
             if (place.Opens is not { } opens || now >= place.Closes || IsBroken(place.Spot.Id)) continue;
             var wait = opens <= now ? TimeSpan.Zero : opens - now;
             if (resting.TryGetValue(place.Spot.Id, out var r) && r.Until > DateTime.UtcNow)
@@ -155,6 +186,7 @@ internal sealed partial class Fisher
 
     private SpotCandidate Candidate(uint itemId, FishInfo f, Place p, DateTimeOffset now, uint here)
     {
+        p = Effective(itemId, f, p, now);
         TimeSpan? wait = null;
         var bites = TimeSpan.Zero;
         if (p.Opens is { } opens && now < p.Closes)
@@ -163,10 +195,10 @@ internal sealed partial class Fisher
             bites = p.Closes == DateTimeOffset.MaxValue ? TimeSpan.MaxValue : p.Closes - (opens <= now ? now : opens);
         }
         var isHere = p.Spot.TerritoryId == here;
-        return new SpotCandidate(itemId, p.Spot.Id, f.Restricted, wait, bites, isHere, isHere ? 0 : CostTo(p.Spot.TerritoryId), IsResting(p.Spot.Id));
+        return new SpotCandidate(itemId, p.Spot.Id, f.Restricted || p.Predator != 0, wait, bites, isHere, isHere ? 0 : CostTo(p.Spot.TerritoryId), IsResting(p.Spot.Id));
     }
 
-    /// <summary>Why a target can't be fished at all (level, reach, actions, bait), or null.</summary>
+    /// <summary>Why a target can't be fished at all (level, reach, actions, bait, no window within the forecast), or null.</summary>
     private string? Problem(GatherTarget t)
     {
         var p = Places(t.ItemId);
@@ -178,10 +210,22 @@ internal sealed partial class Fisher
             return $"tried {names} {BrokenAfter} times: {last}";
         }
         var f = Data.Fish(t.ItemId)!;
-        // Weather that rare isn't worth a run waiting days for it.
-        if (f.Restricted && p.Spots.All(x => x.Opens == null))
-            return $"it doesn't bite at any spot you can use within the next {SpotChoice.Horizon.TotalDays:0} days";
+        // The run waits for any window within the forecast (window after window as it moves on). A fish with none
+        // at any spot it can use can't be had by a run; the plan blocks it as well. It counts again once one comes.
+        var now = DateTimeOffset.UtcNow;
+        if (Windowed(f, p) && p.Spots.All(x => Effective(t.ItemId, f, x, now).Opens == null)) return NoWindow(f, p);
         return f.Spear ? null : PlanBait(f, Math.Max(1, left(t))).Problem;
+    }
+
+    /// <summary>"it only bites in Fog after Rain, which doesn't come in the next 7 days of the weather forecast", and the like.</summary>
+    private string NoWindow(FishInfo f, FishPlaces p)
+    {
+        var days = $"the next {SpotChoice.Horizon.TotalDays:0} days of the weather forecast";
+        if (p.Spots.FirstOrDefault(x => x.Predator != 0) is { } bound)
+            return $"its swimming shadows need {Name(bound.Predator)} gigged first, and {(f.Restricted ? "the two don't bite at the same time" : "that doesn't bite")} in {days}";
+        var rule = WeatherRule(f);
+        if (rule.Length == 0) return $"it doesn't bite at any spot you can use in {days}";
+        return $"it only bites {rule}{(f.Window != null ? " at its Eorzea hours" : "")}, which doesn't come in {days}";
     }
 
     private void NoteUnreachable(uint itemId, string why)
@@ -229,8 +273,8 @@ internal sealed partial class Fisher
     private void Choose()
     {
         Waiting = false;
-        if (StanceUp || angler.Active || SpearGame.WindowOpen) { Settle(Step.Choose); return; }
-        if (pausing) { pausing = false; Go(Step.Paused); Status = "Paused"; return; }
+        if (SomethingOut) { Settle(Step.Choose); return; }
+        if (pausing) { PauseOnceIn(); return; }
         if (upkeep.Begin(neededCollectables())) { Go(Step.Upkeep); return; }
 
         var needed = targets.Where(t => left(t) > 0).ToList();

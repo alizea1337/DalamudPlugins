@@ -51,15 +51,50 @@ public static class SpotChoice
     }
 
     /// <summary>
+    /// When a fish and another one it depends on both bite, each in its own zone's weather (a fish behind swimming
+    /// shadows and the predator gigged first at its own spot, as GBR's IntersectPredatorUptime): real time until
+    /// both do (zero when they do now, null when not within <paramref name="horizon"/>) and how long both then keep
+    /// biting (<see cref="TimeSpan.MaxValue"/> when neither has a window).
+    /// </summary>
+    public static (TimeSpan? Wait, TimeSpan Bites) Window(FishInfo fish, IReadOnlyList<(uint Weather, int Rate)> table,
+        FishInfo other, IReadOnlyList<(uint Weather, int Rate)> otherTable, DateTimeOffset now, TimeSpan horizon)
+    {
+        if (!other.Restricted) return Window(fish, table, now, horizon);
+        if (!fish.Restricted) return Window(other, otherTable, now, horizon);
+        var end = now + horizon;
+        var from = now;
+        // Each round starts at the other fish's next opening, so it moves on until both bite at once.
+        for (var round = 0; round < 1000 && from <= end; round++)
+        {
+            if (FishWindow.NextOpen(fish, table, from, end - from) is not { } open) break;
+            if (FishWindow.NextOpen(other, otherTable, open, end - open) is not { } otherOpen) break;
+            if (otherOpen == open)
+            {
+                var day = TimeSpan.FromDays(1);
+                var a = FishWindow.Left(fish, table, open, day);
+                var b = FishWindow.Left(other, otherTable, open, day);
+                return (open - now, a < b ? a : b);
+            }
+            from = otherOpen;
+        }
+        return (null, TimeSpan.Zero);
+    }
+
+    /// <summary>
     /// How long before a window the fisher wants to be at work: the setting's minutes, plus catching the
     /// fish Fisher's Intuition needs (each catch takes <paramref name="secondsPerCatch"/>, once more per link
-    /// of a mooch chain), at most <see cref="MaxPrep"/>.
+    /// of a mooch chain), at most <see cref="MaxPrep"/>. A spearfish's predator (for its swimming shadows) that
+    /// has a window of its own is gigged inside that window, which already bounds the fish's: nothing is added.
     /// </summary>
     public static TimeSpan Lead(FishInfo fish, int leadMinutes, Func<uint, FishInfo?> fishData, double secondsPerCatch)
     {
         var prep = 0.0;
         foreach (var (id, count) in fish.Predators)
-            prep += Math.Max(1, count) * Math.Max(1, secondsPerCatch) * (1 + (fishData(id)?.Mooch.Count ?? 0));
+        {
+            var predator = fishData(id);
+            if (fish.Spear && predator is { Restricted: true }) continue;
+            prep += Math.Max(1, count) * Math.Max(1, secondsPerCatch) * (1 + (predator?.Mooch.Count ?? 0));
+        }
         return TimeSpan.FromMinutes(Math.Max(0, leadMinutes)) + TimeSpan.FromSeconds(Math.Min(prep, MaxPrep.TotalSeconds));
     }
 

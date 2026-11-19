@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Provenance.Core.Fishing;
@@ -7,6 +8,28 @@ namespace Provenance.Tests;
 
 public class SpotNodesTests
 {
+    private const long Hour = 175_000; // one Eorzea hour in real milliseconds
+
+    private static FishInfo Spearfish(uint id, Uptime? window, uint[]? weather = null)
+        => new(id, true, 0, Array.Empty<uint>(), Array.Empty<(uint, int)>(), 0, window, weather ?? Array.Empty<uint>(), Array.Empty<uint>(),
+            HookSet.Unknown, Tug.Unknown, false, "None", SpearSize.Large, SpearSpeed.LynFast, 0, false, false, new uint[] { 1 }, null);
+
+    private static DateTimeOffset At(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms);
+
+    [Fact]
+    public void No_wanted_fish_bites_only_when_each_one_is_out_of_its_window()
+    {
+        var table = new (uint, int)[] { (1, 100) };
+        var morning = Spearfish(1, new Uptime(10 * Hour, 14 * Hour, 2 * Hour)); // 02:00-12:00 ET
+        Assert.True(SpotNodes.NoneBite(new[] { morning }, table, At(14 * Hour)));
+        Assert.False(SpotNodes.NoneBite(new[] { morning }, table, At(3 * Hour)));
+        // A wanted fish without a window can always come by.
+        Assert.False(SpotNodes.NoneBite(new[] { morning, Spearfish(2, null) }, table, At(14 * Hour)));
+        // An empty list gigs every fish.
+        Assert.False(SpotNodes.NoneBite(Array.Empty<FishInfo>(), table, At(14 * Hour)));
+        // Weather counts too: this one only bites in weather 2, which never comes here.
+        Assert.True(SpotNodes.NoneBite(new[] { Spearfish(3, null, new uint[] { 2 }) }, table, At(3 * Hour)));
+    }
     [Fact]
     public void Three_points_cycle_without_going_back_to_the_last_two()
     {

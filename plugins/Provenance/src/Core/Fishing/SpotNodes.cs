@@ -61,4 +61,13 @@ public static class SpotNodes
     /// <summary>A node opens from under 3.5 yalms across and under 3 up or down (GBR); a little margin keeps clear of the edge.</summary>
     public static bool InReach(Vector3 node, Vector3 me)
         => Vector2.Distance(new Vector2(node.X, node.Z), new Vector2(me.X, me.Z)) < 3.2f && MathF.Abs(node.Y - me.Y) < 2.7f;
+
+    /// <summary>
+    /// None of the fish wanted at a node can come by now: each one only bites at some hours or in some weather
+    /// (<paramref name="table"/> is the spot zone's), and that isn't now. Such a node isn't opened yet, or is left:
+    /// gigs raise the wariness that ends a node, so with nothing to gig its window may never close. False for an
+    /// empty list (that gigs every fish) and whenever a fish without a window is wanted.
+    /// </summary>
+    public static bool NoneBite(IReadOnlyCollection<FishInfo> wanted, IReadOnlyList<(uint Weather, int Rate)> table, DateTimeOffset now)
+        => wanted.Count > 0 && wanted.All(f => f.Restricted && !FishWindow.IsOpen(f, table, now));
 }

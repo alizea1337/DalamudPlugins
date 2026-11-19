@@ -13,8 +13,8 @@ public class SpotChoiceTests
     private static readonly TimeSpan Lead = TimeSpan.FromMinutes(3);
 
     private static FishInfo Fish(uint id = 1, Uptime? window = null, uint[]? weather = null, uint[]? mooch = null,
-        (uint, int)[]? predators = null, bool big = false)
-        => new(id, false, 2585, mooch ?? Array.Empty<uint>(), predators ?? Array.Empty<(uint, int)>(), 0, window,
+        (uint, int)[]? predators = null, bool big = false, bool spear = false)
+        => new(id, spear, 2585, mooch ?? Array.Empty<uint>(), predators ?? Array.Empty<(uint, int)>(), 0, window,
             weather ?? Array.Empty<uint>(), Array.Empty<uint>(), HookSet.Precise, Tug.Weak, false, "None", SpearSize.Unknown,
             SpearSpeed.Unknown, 0, false, big, new uint[] { 100 }, (3f, 20f));
 
@@ -68,6 +68,62 @@ public class SpotChoiceTests
         // Never more than the cap.
         var greedy = Fish(predators: new (uint, int)[] { (5, 500) });
         Assert.Equal(TimeSpan.FromMinutes(3) + SpotChoice.MaxPrep, SpotChoice.Lead(greedy, 3, Data, 40));
+    }
+
+    [Fact]
+    public void A_spearfish_lead_leaves_out_a_predator_with_a_window()
+    {
+        // The swimming shadows' predator that only bites at some hours is gigged inside its own window (which bounds
+        // the fish's); one that always bites can be gigged ahead of the fish's window.
+        var timed = Fish(5, window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour), spear: true);
+        FishInfo? Data(uint id) => id == 5 ? timed : Fish(id, spear: true);
+        Assert.Equal(TimeSpan.FromMinutes(3), SpotChoice.Lead(Fish(spear: true, predators: new (uint, int)[] { (5, 7) }), 3, Data, 40));
+        Assert.Equal(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7 * 40),
+            SpotChoice.Lead(Fish(spear: true, predators: new (uint, int)[] { (6, 7) }), 3, Data, 40));
+    }
+
+    [Fact]
+    public void Two_fish_bite_together_where_their_windows_overlap()
+    {
+        var fish = Fish(window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour));          // 9:00-15:00 ET
+        var predator = Fish(2, window: new Uptime(6 * Hour, 18 * Hour, 12 * Hour));  // 12:00-18:00 ET
+        var (wait, bites) = SpotChoice.Window(fish, Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon);
+        Assert.Equal(TimeSpan.FromMilliseconds(4 * Hour), wait);
+        Assert.Equal(TimeSpan.FromMilliseconds(3 * Hour), bites); // until the fish's own window closes at 15:00
+
+        // Both bite now: the shorter of what's left.
+        (wait, bites) = SpotChoice.Window(fish, Mixed, predator, Mixed, At(13 * Hour), SpotChoice.Horizon);
+        Assert.Equal(TimeSpan.Zero, wait);
+        Assert.Equal(TimeSpan.FromMilliseconds(2 * Hour), bites);
+
+        // Windows that never meet.
+        var evening = Fish(3, window: new Uptime(4 * Hour, 20 * Hour, 16 * Hour));   // 16:00-20:00 ET
+        Assert.Null(SpotChoice.Window(fish, Mixed, evening, Mixed, At(8 * Hour), SpotChoice.Horizon).Wait);
+    }
+
+    [Fact]
+    public void A_fish_without_a_window_bites_while_its_predator_does()
+    {
+        var predator = Fish(2, window: new Uptime(6 * Hour, 18 * Hour, 12 * Hour)); // 12:00-18:00 ET
+        var (wait, bites) = SpotChoice.Window(Fish(), Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon);
+        Assert.Equal(TimeSpan.FromMilliseconds(4 * Hour), wait);
+        Assert.Equal(TimeSpan.FromMilliseconds(6 * Hour), bites);
+
+        // Neither has a window: always.
+        (wait, bites) = SpotChoice.Window(Fish(), Mixed, Fish(2), Mixed, At(8 * Hour), SpotChoice.Horizon);
+        Assert.Equal(TimeSpan.Zero, wait);
+        Assert.Equal(TimeSpan.MaxValue, bites);
+    }
+
+    [Fact]
+    public void Each_fish_is_judged_by_its_own_zone_weather()
+    {
+        // The predator only bites in weather 9: its own zone always has it, the fish's zone never does.
+        var fish = Fish(window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour)); // 9:00-15:00 ET
+        var predator = Fish(2, weather: new uint[] { 9 });
+        var always9 = new (uint, int)[] { (9, 100) };
+        Assert.Equal(TimeSpan.FromMilliseconds(Hour), SpotChoice.Window(fish, Mixed, predator, always9, At(8 * Hour), SpotChoice.Horizon).Wait);
+        Assert.Null(SpotChoice.Window(fish, Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon).Wait);
     }
 
     [Fact]

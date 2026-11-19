@@ -32,7 +32,8 @@ internal sealed record FishingView(uint Fish, string Spot, uint Bait, int BaitIn
 /// lets the <see cref="Integrations.Fishing.Angler"/> (or the <see cref="Integrations.Fishing.SpearGame"/>)
 /// catch. Moves on when the fish turn wary, leaves when they sense something amiss, buys more bait when
 /// it runs out, and always reels in before teleporting. Framework thread; <see cref="Tick"/> every frame
-/// while the fisher is the run's active worker. Follows GatherBuddy Reborn's AutoGather (Apache-2.0).
+/// while the fisher is the run's active worker, and whenever it is <see cref="Busy"/> (pausing, stopping).
+/// Follows GatherBuddy Reborn's AutoGather (Apache-2.0).
 /// </summary>
 internal sealed unsafe partial class Fisher : IDisposable
 {
@@ -40,8 +41,13 @@ internal sealed unsafe partial class Fisher : IDisposable
     {
         Idle,
         Paused,
-        /// <summary>Reeling in (and letting a spearfishing window close), then on to <see cref="afterSettle"/>.</summary>
+        /// <summary>Reeling in (and dealing with a spearfishing window nobody works on), then on to <see cref="afterSettle"/>.</summary>
         Settle,
+        /// <summary>
+        /// Stopped or failed with something still out: lets the bite go, reels in and puts the rod away, leaves an
+        /// open spearfishing window, then Idle. Runs on the ticks the run keeps giving after it stopped.
+        /// </summary>
+        Ending,
         Choose,
         Upkeep,
         Gear,
@@ -91,8 +97,6 @@ internal sealed unsafe partial class Fisher : IDisposable
     private DateTime stepSince;
     /// <summary>Settling saw the rod out (or a window open): stand up for a moment before moving on.</summary>
     private bool settleSawWork;
-    /// <summary>Settling started gigging in a window nobody worked on (once).</summary>
-    private bool settleGigged;
     /// <summary>A pause is asked for: go to <see cref="Step.Paused"/> once the catch, node or purchase under way is done.</summary>
     private bool pausing;
 
@@ -126,8 +130,8 @@ internal sealed unsafe partial class Fisher : IDisposable
     public string Status { get; private set; } = "";
     /// <summary>Why the fisher gave up (no gearset, no bait anywhere, nothing reachable); the run stops on it.</summary>
     public string? Failure { get; private set; }
-    /// <summary>Has fish to work on and isn't paused.</summary>
-    public bool Running => step is not (Step.Idle or Step.Paused) && targets.Any(t => left(t) > 0);
+    /// <summary>Has fish to work on and isn't paused (nor stopped and only reeling in).</summary>
+    public bool Running => step is not (Step.Idle or Step.Paused or Step.Ending) && targets.Any(t => left(t) > 0);
     /// <summary>Paused, with the rod reeled in and the spearfishing window closed.</summary>
     public bool IsPaused => step == Step.Paused;
     /// <summary>Nothing can be fished now: every fish left waits for its time or weather window.</summary>
@@ -139,8 +143,14 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// not fishing time. Stays the active work: <see cref="HasWorkNow"/> is true then.
     /// </summary>
     public bool WaitingForWindow => step == Step.Fish && angler.Active && angler.WaitingForWindow;
-    /// <summary>The rod is out, a spearfishing window is open, or a catch is under way: don't switch to gathering now.</summary>
-    public bool Busy => StanceUp || angler.Active || spear.Active || SpearGame.WindowOpen || step is Step.Settle or Step.Shop or Step.SpearOpen;
+    /// <summary>
+    /// The rod is out, a spearfishing window is open, or a catch, a node (until its last catch is counted), a bait
+    /// trip, materia extraction or reduction, or reeling in after a stop is under way: don't switch to other work
+    /// now, and keep ticking the fisher. False once paused with everything put away. A session left over from a
+    /// stop that nobody ticks any more (<c>Stop(now: true)</c>) doesn't count; the rod itself still does.
+    /// </summary>
+    public bool Busy => StanceUp || (angler.Active && step != Step.Idle) || spear.Active || SpearGame.WindowOpen
+                        || step is Step.Settle or Step.Upkeep or Step.Shop or Step.SpearOpen or Step.Spear or Step.Ending;
     /// <summary>A fish left in the order bites now (or within the lead time), at a spot the fisher can use.</summary>
     public bool HasWorkNow => targets.Count > 0 && Ranked().Count > 0;
     /// <summary>When the next fish window opens (zero when one is open now); null when no fish left has a window.</summary>
@@ -164,7 +174,7 @@ internal sealed unsafe partial class Fisher : IDisposable
     {
         get
         {
-            if (step == Step.Idle || current is not { } t || fish is not { } f || spot is not { } s) return null;
+            if (step is Step.Idle or Step.Ending || current is not { } t || fish is not { } f || spot is not { } s) return null;
             var inBags = !f.Spear && bait != 0 ? GameState.BagCount(bait) : 0;
             var intuition = angler.Active ? angler.IntuitionLeft : null;
             var casts = f.Spear ? nodesAtSpot : castsAtSpot + (sessionCounted ? 0 : angler.Casts);
@@ -184,6 +194,9 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// </summary>
     private static bool StanceUp
         => RodOut || Services.Condition[ConditionFlag.Gathering] && GameState.CurrentJob == FishAccess.Fisher && !SpearGame.WindowOpen;
+
+    /// <summary>Something to reel in or close first: the rod (or the stance), a session, a spearfishing window or its abandon question.</summary>
+    private bool SomethingOut => StanceUp || angler.Active || spear.Active || SpearGame.WindowOpen || SpearGame.AbandonAsked;
 
     /// <summary>
     /// Starts with the run's fish targets (other targets are ignored).
@@ -237,7 +250,10 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// </remarks>
     public TimeSpan? WaitFor(uint itemId) => WindowWait(itemId);
 
-    /// <summary>Every frame while fishing is the active work.</summary>
+    /// <summary>
+    /// Every frame while fishing is the active work, and whenever <see cref="Busy"/> (a pause or a stop reels in
+    /// and closes what's open through these ticks).
+    /// </summary>
     public void Tick()
     {
         if (step is Step.Idle or Step.Paused) return;
@@ -264,16 +280,17 @@ internal sealed unsafe partial class Fisher : IDisposable
         }
         if (DateTime.UtcNow < waitUntil) return;
         // A pause asked for while a catch, node or purchase was under way: that's done now (or never came), so pause.
-        if (pausing && step is not (Step.Settle or Step.Upkeep or Step.Shop or Step.SpearOpen))
+        if (pausing && step is not (Step.Settle or Step.Ending or Step.Upkeep or Step.Shop or Step.SpearOpen))
         {
             travel.Cancel();
             Vnav.Stop();
-            Settle(Step.Paused);
+            PauseOnceIn();
             return;
         }
         switch (step)
         {
             case Step.Settle: SettleTick(); return;
+            case Step.Ending: EndingTick(); return;
             case Step.Upkeep: UpkeepTick(); return;
             case Step.Choose: Choose(); return;
             case Step.Gear: Gear(); return;
@@ -296,30 +313,58 @@ internal sealed unsafe partial class Fisher : IDisposable
 
     // ------------------------------------------------------------------ pause, resume, stop
 
-    /// <summary>Pause now: lets the bite go, reels in, stops moving. <see cref="IsPaused"/> once the rod is in.</summary>
+    /// <summary>
+    /// Pause now: lets the bite go, reels in, leaves an open spearfishing node, stops moving. With nothing out
+    /// (rod away, no session, no spearfishing window) <see cref="IsPaused"/> at once, without a tick; otherwise
+    /// once the ticks that follow have put it away (<see cref="Busy"/> until then). Materia extraction or
+    /// reduction under way finishes first (quick; its windows mustn't stay open).
+    /// </summary>
     public void Pause()
     {
-        if (step is Step.Idle or Step.Paused) return;
+        if (step is Step.Idle or Step.Paused or Step.Ending) return;
         pausing = true;
         travel.Cancel();
         Vnav.Stop();
         if (step == Step.Shop) shopper.Cancel();
         if (angler.Active) angler.Stop();
-        // A spearfishing node can't be left halfway: it finishes by itself (a node is over in about a minute).
-        // Materia extraction and reduction finish too; both are quick.
-        if (step is Step.Spear or Step.Upkeep || spear.Active)
+        switch (step)
         {
-            Status = step == Step.Upkeep ? "Pausing after this" : "Pausing after this node";
+            case Step.Upkeep:
+                Status = "Pausing after this";
+                return;
+            case Step.Spear:
+                // A node only ends by itself once its fish are gigged: leave it now (SpearTick).
+                leaveSince ??= DateTime.UtcNow;
+                Status = "Leaving the spearfishing node";
+                return;
+            case Step.SpearOpen when openTries > 0:
+                // The node may be opening as the pause comes: give its window a moment to show, then leave it.
+                Settle(Step.Paused, 2);
+                Status = "Pausing";
+                return;
+        }
+        PauseOnceIn();
+    }
+
+    /// <summary>Paused at once when nothing is out; otherwise reels in (and leaves an open window) first.</summary>
+    private void PauseOnceIn()
+    {
+        if (SomethingOut)
+        {
+            Settle(Step.Paused);
+            Status = "Pausing";
             return;
         }
-        Settle(Step.Paused);
-        Status = "Pausing";
+        CountSession();
+        pausing = false;
+        Go(Step.Paused);
+        Status = "Paused";
     }
 
     /// <summary>Pause after the current catch (or spearfishing node): <see cref="IsPaused"/> once the rod is in.</summary>
     public void RequestPause()
     {
-        if (step is Step.Idle or Step.Paused) return;
+        if (step is Step.Idle or Step.Paused or Step.Ending) return;
         if (angler.Active)
         {
             pausing = true;
@@ -327,10 +372,17 @@ internal sealed unsafe partial class Fisher : IDisposable
             Status = "Pausing after this catch";
             return;
         }
-        if (step is Step.Spear or Step.Upkeep or Step.SpearOpen || spear.Active)
+        if (step is Step.Spear or Step.SpearOpen || spear.Active)
         {
+            // The node is gigged to its end (or left when its fish can't come any more).
             pausing = true;
             Status = "Pausing after this node";
+            return;
+        }
+        if (step == Step.Upkeep)
+        {
+            pausing = true;
+            Status = "Pausing after this";
             return;
         }
         if (step == Step.Shop)
@@ -363,25 +415,39 @@ internal sealed unsafe partial class Fisher : IDisposable
         pausing = false;
         if (step == Step.Settle && afterSettle == Step.Paused) afterSettle = Step.Choose;
         if (step == Step.Shop) shopper.Resume();
-        // A catch already asked to stop still ends; the fisher then chooses again.
+        // A catch already asked to stop still ends, and a node being left is left; the fisher then chooses again.
     }
 
-    /// <summary>Ends fishing: reels in first unless <paramref name="now"/> (then everything just stops).</summary>
+    /// <summary>
+    /// Ends fishing. Unless <paramref name="now"/>, what the fisher has out is put away on the ticks the run keeps
+    /// giving (<see cref="Busy"/> meanwhile, not <see cref="Running"/>): the bite is let go, the rod reeled in and
+    /// stowed, an open spearfishing window left; then Idle. With <paramref name="now"/> (logged out, knocked out)
+    /// everything just stops.
+    /// </summary>
     public void Stop(bool now = false)
     {
         var wasWorking = step != Step.Idle;
+        // Only what the fisher itself has out is put away (not a rod the player took out while the run was paused).
+        var reelIn = !now && step is not (Step.Idle or Step.Paused);
         pausing = false;
+        leaveSince = null;
         travel.Cancel();
         shopper.Cancel();
         if (wasWorking) Vnav.Stop();
         if (spear.Active) spear.Stop();
         if (angler.Active) angler.Stop();
-        // The run stops ticking the fisher from here on: put the rod away right away.
-        if (!now && StanceUp) QuitRod();
+        // Quit right away when the game allows it; the ticks that follow finish the rest.
+        if (reelIn && StanceUp) QuitRod();
         Waiting = false;
         current = null;
-        step = Step.Idle;
         Status = "";
+        if (reelIn && SomethingOut)
+        {
+            Go(Step.Ending);
+            Status = "Reeling in";
+            return;
+        }
+        step = Step.Idle;
     }
 
     /// <summary>Removes the fishing hooks; always called on plugin unload.</summary>
@@ -416,12 +482,12 @@ internal sealed unsafe partial class Fisher : IDisposable
 
     // ------------------------------------------------------------------ reeling in
 
-    /// <summary>Reels in (and lets an open spearfishing window close), then goes on with <paramref name="next"/>.</summary>
+    /// <summary>Reels in (and deals with an open spearfishing window), then goes on with <paramref name="next"/>.</summary>
     private void Settle(Step next, double wait = 0)
     {
         afterSettle = next;
         settleSawWork = false;
-        settleGigged = false;
+        leaveSince = null;
         CountSession();
         Go(Step.Settle, wait);
     }
@@ -444,19 +510,18 @@ internal sealed unsafe partial class Fisher : IDisposable
             if (since > TimeSpan.FromSeconds(45)) { Fail("The fishing didn't end; reel in and start again."); return; }
             return;
         }
-        if (SpearGame.WindowOpen)
+        if (SpearGame.WindowOpen || SpearGame.AbandonAsked)
         {
             settleSawWork = true;
-            // A window nobody works on (opened by hand, or just as a pause came): gig what's wanted so the node
-            // runs out, since it can't be left halfway.
-            if (!spear.Active && !settleGigged && fish is { Spear: true })
+            // A window nobody works on (opened by hand, or as a pause came). Spearfishing for a fish still wanted:
+            // work it like any node. Otherwise leave it, since nothing else can happen while it's open.
+            if (leaveSince == null && SpearGame.WindowOpen && !pausing && afterSettle != Step.Paused
+                && fish is { Spear: true } && current is { } t && left(t) > 0)
             {
-                settleGigged = true;
-                spear.Begin(wanted.Count > 0 ? wanted : new List<FishInfo> { fish });
+                StartSpear();
+                return;
             }
-            Status = spear.Active ? spear.Status : "Waiting for the spearfishing window to close";
-            if (since > TimeSpan.FromMinutes(3)) { Fail("The spearfishing window stayed open; close it and start again."); return; }
-            Wait(0.5);
+            LeaveNode();
             return;
         }
         if (StanceUp)
@@ -478,6 +543,31 @@ internal sealed unsafe partial class Fisher : IDisposable
         }
         // Standing up takes a moment; moving or teleporting right away is refused (GBR waits after Quit).
         Go(afterSettle, settleSawWork ? 1.5 : 0);
+    }
+
+    /// <summary>Reeling in after a stop or a failure never takes longer (the angler ends itself after 30 s).</summary>
+    private static readonly TimeSpan EndingLimit = TimeSpan.FromSeconds(45);
+
+    /// <summary>Stopped or failed: lets the session end, leaves an open spearfishing window, puts the rod away, then Idle.</summary>
+    private void EndingTick()
+    {
+        var since = DateTime.UtcNow - stepSince;
+        if (since > EndingLimit) { step = Step.Idle; return; }
+        // The angler lets the bite go, reels in and stows the rod itself (ticked above while it's Active).
+        if (angler.Active) return;
+        if (SpearGame.WindowOpen || SpearGame.AbandonAsked)
+        {
+            spear.Leave();
+            return;
+        }
+        if (StanceUp)
+        {
+            // The angler leaves the rod in when its session ends; when it doesn't, Quit here.
+            if (since > TimeSpan.FromSeconds(2)) QuitRod();
+            Wait(1.5);
+            return;
+        }
+        step = Step.Idle;
     }
 
     /// <summary>The Quit action (puts the rod away), when the game allows it now.</summary>
@@ -506,7 +596,7 @@ internal sealed unsafe partial class Fisher : IDisposable
         upkeep.Tick();
         Status = upkeep.Status;
         if (upkeep.Busy) return;
-        if (pausing) { Settle(Step.Paused); return; }
+        if (pausing) { PauseOnceIn(); return; }
         Go(Step.Choose);
     }
 
@@ -603,14 +693,17 @@ internal sealed unsafe partial class Fisher : IDisposable
         return names.Count <= 1 ? names.FirstOrDefault() ?? "" : string.Join(", ", names.Take(names.Count - 1)) + " or " + names[^1];
     }
 
-    /// <summary>" (in Fog after Rain)", or "" for a fish that only keeps Eorzea hours.</summary>
-    private static string WeatherNote(FishInfo f)
+    /// <summary>"in Fog after Rain", or "" for a fish that only keeps Eorzea hours.</summary>
+    private static string WeatherRule(FishInfo f)
     {
         var parts = new List<string>();
         if (f.Weather.Count > 0) parts.Add("in " + Either(f.Weather));
         if (f.PreviousWeather.Count > 0) parts.Add("after " + Either(f.PreviousWeather));
-        return parts.Count == 0 ? "" : $" ({string.Join(" ", parts)})";
+        return string.Join(" ", parts);
     }
+
+    /// <summary>" (in Fog after Rain)", or "" for a fish that only keeps Eorzea hours.</summary>
+    private static string WeatherNote(FishInfo f) => WeatherRule(f) is { Length: > 0 } rule ? $" ({rule})" : "";
 
     /// <summary>"8 min", "under a minute", "2 h 05 min".</summary>
     private static string Span(TimeSpan t)
@@ -621,34 +714,42 @@ internal sealed unsafe partial class Fisher : IDisposable
     }
 
     /// <summary>
-    /// "Bites for 12 more minutes", "Bites in 8 min (in Fog)", or "" for a fish without a window.
+    /// "Bites for 12 more minutes", "Bites in 8 min (in Fog)", or "" for a fish without a window. Swimming shadows
+    /// waiting for a predator's window: "Ichimonji bites in 40 min, for the swimming shadows".
     /// <paramref name="lower"/> starts it in lower case, for the middle of a sentence.
     /// </summary>
     private string WindowText(FishInfo f, FishingSpotInfo s, bool lower)
     {
-        if (!f.Restricted) return "";
+        var place = PlaceAt(f, s.Id);
+        var predator = place?.Predator ?? 0;
+        if (!f.Restricted && predator == 0) return "";
         var now = DateTimeOffset.UtcNow;
         string text;
-        if (WindowState(f.ItemId, s.Id) is not { } w) text = "Doesn't bite within the forecast";
-        else if (w.Opens <= now)
+        if (place is not { Opens: { } opens }) text = "doesn't bite within the forecast";
+        else if (opens <= now)
         {
-            var open = w.Closes - now;
+            var open = place.Closes - now;
             var minutes = (int)Math.Round(open.TotalMinutes);
-            text = open.TotalSeconds < 60 ? "Bites for under a minute more"
-                : minutes < 60 ? $"Bites for {minutes} more {(minutes == 1 ? "minute" : "minutes")}"
-                : $"Bites for {Span(open)} more";
+            text = open.TotalSeconds < 60 ? "bites for under a minute more"
+                : minutes < 60 ? $"bites for {minutes} more {(minutes == 1 ? "minute" : "minutes")}"
+                : $"bites for {Span(open)} more";
         }
-        else text = $"Bites in {Span(w.Opens - now)}{WeatherNote(f)}";
-        return lower ? char.ToLowerInvariant(text[0]) + text[1..] : text;
+        else text = $"bites in {Span(opens - now)}{WeatherNote(predator != 0 && Data.Fish(predator) is { } p ? p : f)}";
+        // The predator's name starts it, whatever the case asked for.
+        if (predator != 0) return $"{Name(predator)} {text}, for the swimming shadows";
+        return lower ? text : char.ToUpperInvariant(text[0]) + text[1..];
     }
 
     // ------------------------------------------------------------------ step machine
 
-    /// <summary>Gives up: the run stops on <see cref="Failure"/> (and stops ticking the fisher), so the rod is put away now.</summary>
+    /// <summary>
+    /// Gives up: the run stops on <see cref="Failure"/> (the first reason is kept). What the fisher has out is put
+    /// away on the ticks the run keeps giving (<see cref="Step.Ending"/>, <see cref="Busy"/> meanwhile), then Idle.
+    /// </summary>
     private void Fail(string message)
     {
-        Failure = message;
-        Status = message;
+        Failure ??= message;
+        Status = Failure;
         travel.Cancel();
         shopper.Cancel();
         Vnav.Stop();
@@ -657,7 +758,9 @@ internal sealed unsafe partial class Fisher : IDisposable
         if (StanceUp) QuitRod();
         Waiting = false;
         pausing = false;
-        step = Step.Idle;
+        leaveSince = null;
+        if (SomethingOut) Go(Step.Ending);
+        else step = Step.Idle;
     }
 
     private void Go(Step next, double wait = 0)

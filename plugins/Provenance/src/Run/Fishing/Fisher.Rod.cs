@@ -44,14 +44,21 @@ internal sealed unsafe partial class Fisher
     private Teleporter.Destination? leaveTo;
     private DateTime lingerUntil;
     private List<Purchase> buying = new();
-    /// <summary>Bait whose purchase failed this run, with why: not tried again.</summary>
+    /// <summary>Bait that can't be bought this run, with why: not tried again.</summary>
     private readonly Dictionary<uint, string> unbuyable = new();
+    /// <summary>Failed trips per bait this run (a fight, a stuck path or an NPC that didn't answer can pass).</summary>
+    private readonly Dictionary<uint, int> buyFails = new();
+    /// <summary>Failed trips after which a bait counts as unbuyable for the run (at once when the gil is short).</summary>
+    private const int BuyTries = 2;
+    /// <summary>The wait before trying a failed bait trip again.</summary>
+    private static readonly TimeSpan BuyRetryAfter = TimeSpan.FromSeconds(30);
     private readonly HashSet<uint> lureNoted = new();
 
     private void ResetRod()
     {
         failedStands.Clear();
         unbuyable.Clear();
+        buyFails.Clear();
         lureNoted.Clear();
         standKey = null;
         amissLeaves = 0;
@@ -130,6 +137,13 @@ internal sealed unsafe partial class Fisher
         }
         if (plan.Buy.Count > 0)
         {
+            // In a fight the trip would fail (no teleport, no talking to the vendor): buy after it.
+            if (Services.Condition[ConditionFlag.InCombat])
+            {
+                Status = "In combat; buying bait after the fight";
+                Wait(1);
+                return;
+            }
             // The rod is in (Choose and every signal reel in first): off to the vendor, then back.
             buying = plan.Buy;
             log($"Buying bait: {string.Join(", ", plan.Buy.Select(p => $"{p.Amount}× {Name(p.ItemId)} from {p.Offer.NpcName}"))}.", false);
@@ -149,19 +163,37 @@ internal sealed unsafe partial class Fisher
         Status = shopper.Status;
         if (shopper.Failure is { } why)
         {
-            // Don't try it again this run: the next choice falls back to Versatile Lure or says why it can't.
-            foreach (var p in buying.Where(p => GameState.BagCount(p.ItemId) == 0)) unbuyable.TryAdd(p.ItemId, why);
-            log($"Couldn't buy bait: {why}", true);
+            // A trip that failed for a passing reason (a fight, a stuck path, an NPC that didn't answer) is tried
+            // again after a while. A bait that keeps failing, or that the gil left can't pay for, isn't tried again
+            // this run: the next choice falls back to Versatile Lure or says why it can't.
+            var missing = buying.Where(p => GameState.BagCount(p.ItemId) == 0).ToList();
+            foreach (var p in missing)
+            {
+                var fails = buyFails[p.ItemId] = buyFails.GetValueOrDefault(p.ItemId) + 1;
+                if (fails >= BuyTries || !CanAfford(p.Offer)) unbuyable.TryAdd(p.ItemId, why);
+            }
+            var retry = missing.Any(p => !unbuyable.ContainsKey(p.ItemId));
+            log(retry ? $"Couldn't buy bait: {why.TrimEnd('.')}. Trying again in {BuyRetryAfter.TotalSeconds:0} seconds." : $"Couldn't buy bait: {why}", true);
             ranked = null;
-            if (pausing) Settle(Step.Paused);
-            else Go(Step.Choose, 1);
+            if (pausing) { PauseOnceIn(); return; }
+            if (retry) Status = $"Couldn't buy bait; trying again in {BuyRetryAfter.TotalSeconds:0} seconds";
+            Go(Step.Choose, retry ? BuyRetryAfter.TotalSeconds : 1);
             return;
         }
         if (!shopper.Finished && !shopper.IsPaused) return;
         ranked = null;
-        if (pausing) { Settle(Step.Paused); return; }
+        if (pausing) { PauseOnceIn(); return; }
         if (!shopper.Finished) return; // paused, then resumed: carries on
+        foreach (var p in buying) buyFails.Remove(p.ItemId);
         Go(Step.Choose, 0.5);
+    }
+
+    /// <summary>The gil in the bags (within the run's gil limit) pays for at least one of the offer.</summary>
+    private bool CanAfford(VendorOffer offer)
+    {
+        long gil = GameState.BagCount(1);
+        if (plugin.Runs.GilLeft is { } budget) gil = Math.Min(gil, budget);
+        return gil >= Math.Max(1, offer.Price);
     }
 
     // ------------------------------------------------------------------ the place to stand
@@ -424,7 +456,7 @@ internal sealed unsafe partial class Fisher
         CountSession();
         switching = false;
         if (signal != AnglerSignal.NoBait) noBaitStreak = 0;
-        if (pausing) { Settle(Step.Paused); return; }
+        if (pausing) { PauseOnceIn(); return; }
         switch (signal)
         {
             case AnglerSignal.Wary:

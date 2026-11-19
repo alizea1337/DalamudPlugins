@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using ECommons;
+using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Provenance.Core.Fishing;
 using Provenance.Data;
 using AddonSpearFishing = FFXIVClientStructs.FFXIV.Client.UI.AddonSpearFishing;
@@ -47,8 +50,13 @@ internal sealed unsafe class SpearGame
     private static readonly TimeSpan CollectHold = TimeSpan.FromSeconds(2);
     /// <summary>Begun again this soon after the last look at the bags: keep counting from that look.</summary>
     private static readonly TimeSpan CarryOver = TimeSpan.FromSeconds(5);
-    /// <summary>Between two presses of the window's close (see <see cref="Leave"/>).</summary>
+    /// <summary>Between two presses of the window's close or of the question's Yes (see <see cref="Leave"/>).</summary>
     private const int LeaveRetryMs = 1500;
+    /// <summary>
+    /// Addon row of the game's question when a spearfishing window is closed: "Abandon the teeming waters?" then
+    /// "※Doing so will cause the teeming waters to dissipate." (English client; read in the client's language).
+    /// </summary>
+    private const uint AbandonQuestion = 12683;
 
     /// <summary>What the spearfishing is doing, in a few words for the Run page.</summary>
     public string Status { get; private set; } = "";
@@ -72,6 +80,9 @@ internal sealed unsafe class SpearGame
 
     /// <summary>The SpearFishing window is open.</summary>
     public static bool WindowOpen => Window() != null;
+
+    /// <summary>The game asks whether to abandon the teeming waters (after the window's close; <see cref="Leave"/> answers it).</summary>
+    public static bool AbandonAsked => AbandonPrompt() != null;
 
     private List<FishInfo> wanted = new();
     private string watching = "";
@@ -170,7 +181,10 @@ internal sealed unsafe class SpearGame
         GigIfInHitbox(addon);
     }
 
-    /// <summary>Stops gigging (the window stays open; it closes by itself when the node is used up).</summary>
+    /// <summary>
+    /// Stops gigging. The window stays open: it closes by itself once the node is used up, which gigging does, so
+    /// to be done with a node without gigging, <see cref="Leave"/> it.
+    /// </summary>
     public void Stop()
     {
         stopped = true;
@@ -179,16 +193,26 @@ internal sealed unsafe class SpearGame
     }
 
     /// <summary>
-    /// Leaves the node now: stops gigging and closes the window as its close button does. The game won't let
-    /// go while an action plays out ("Unable to abandon spearfishing when performing actions"), so call again
-    /// until <see cref="WindowOpen"/> is false. True when the close was sent now.
+    /// Leaves the node now: stops gigging and closes the window as its close button does; the game then asks
+    /// "Abandon the teeming waters?" (Addon 12683), which this answers with Yes, and the node is gone. The game
+    /// won't let go while an action plays out ("Unable to abandon spearfishing when performing actions"), so call
+    /// every frame until neither <see cref="WindowOpen"/> nor <see cref="AbandonAsked"/>. True when something was
+    /// pressed now.
     /// </summary>
     public bool Leave()
     {
         Stop();
-        var addon = Window();
         var now = Environment.TickCount64;
-        if (addon == null || now < blockUntil || now < nextLeave || !CanAct() || Services.Condition[ConditionFlag.ExecutingGatheringAction]) return false;
+        if (now < blockUntil || now < nextLeave || !CanAct() || Services.Condition[ConditionFlag.ExecutingGatheringAction]) return false;
+        if (AbandonPrompt() is var prompt && prompt != null)
+        {
+            nextLeave = now + LeaveRetryMs;
+            new AddonMaster.SelectYesno((nint)prompt).Yes();
+            Services.Log.Debug("Spearfishing: abandoning the teeming waters");
+            return true;
+        }
+        var addon = Window();
+        if (addon == null) return false;
         nextLeave = now + LeaveRetryMs;
         addon->AtkUnitBase.Close(true);
         Services.Log.Debug("Spearfishing: closing the window");
@@ -219,6 +243,45 @@ internal sealed unsafe class SpearGame
     /// <summary>The SpearFishing window while it's open (AutoHook's test: loaded, with a window node).</summary>
     private static AddonSpearFishing* Window()
         => GenericHelpers.TryGetAddonByName<AddonSpearFishing>("SpearFishing", out var a) && a != null && a->AtkUnitBase.WindowNode != null ? a : null;
+
+    /// <summary>
+    /// The abandon question's first line in the client's language, without spaces (the second line comes in colour,
+    /// and French puts a space before "?"); "" when the sheet can't be read, and then no question is answered.
+    /// </summary>
+    private static readonly Lazy<string> AbandonText = new(() =>
+    {
+        try
+        {
+            var text = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Addon>().GetRowOrDefault(AbandonQuestion)?.Text.ExtractText() ?? "";
+            return Squash(text.Split('\r', '\n').FirstOrDefault(line => line.Trim().Length > 0) ?? "");
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Spearfishing: couldn't read the question asked when leaving a node");
+            return "";
+        }
+    });
+
+    private static readonly Regex Spaces = new(@"\s+", RegexOptions.Compiled);
+
+    private static string Squash(string text) => Spaces.Replace(text, "");
+
+    /// <summary>The "Abandon the teeming waters?" question while it's up and ready; any other yes/no is left alone.</summary>
+    private static AtkUnitBase* AbandonPrompt()
+    {
+        if (AbandonText.Value.Length == 0) return null;
+        var yesno = Interact.Ready("SelectYesno");
+        if (yesno == null) return null;
+        try
+        {
+            return Squash(new AddonMaster.SelectYesno((nint)yesno).Text).Contains(AbandonText.Value, StringComparison.Ordinal) ? yesno : null;
+        }
+        catch (Exception)
+        {
+            // A prompt whose text can't be read isn't ours to answer.
+            return null;
+        }
+    }
 
     /// <summary>The window is gone: the node is done once the last catch had time to land, or it never opened.</summary>
     private void Closed()
