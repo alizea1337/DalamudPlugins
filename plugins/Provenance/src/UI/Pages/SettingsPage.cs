@@ -264,6 +264,8 @@ internal sealed class SettingsPage : Page
             v = rs.DiscardTimedExtras;
             if (Ui.Checkbox("Also from timed nodes", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
         }
+        v = rs.WaitForCollectableGp;
+        if (Ui.Checkbox("Wait for GP before collectables", ref v, "The top reward needs the full collectable rotation (Scrutiny, Solid Reason), which takes 600 GP. On regular nodes the run waits next to the node until the GP is back; timed nodes are never waited for.")) { rs.WaitForCollectableGp = v; Config.Save(); }
         v = rs.ExtractMateria;
         if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
         v = rs.ReduceCollectables;

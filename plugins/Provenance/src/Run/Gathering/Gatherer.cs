@@ -405,11 +405,29 @@ internal sealed unsafe class Gatherer
             Go(Step.Approach);
             return;
         }
+        if (NeedsGpFirst() is { } gp)
+        {
+            Status = $"Waiting for GP for a full collectable rotation ({gp.Have} of {gp.Need})";
+            Wait(1);
+            return;
+        }
         if (++interactTries > 4) { visited.Add((node!.PointId, (int)live.Position.X, (int)live.Position.Z)); Go(Step.Choose); return; }
         Status = "Opening the node";
         lastNodePosition = live.Position;
         Interact.With(live);
         Wait(1.2);
+    }
+
+    /// <summary>
+    /// A collectable gets the top reward only with the full rotation (Scrutiny, Solid Reason): on a
+    /// regular node, wait for that much GP (or the most the job has). Timed nodes would close meanwhile.
+    /// </summary>
+    private (uint Have, int Need)? NeedsGpFirst()
+    {
+        if (!plugin.Config.Run.WaitForCollectableGp || node is not { Timed: false } || current is not { } cur || !GameState.OnlyCollectable(cur.ItemId)) return null;
+        if (Services.Objects.LocalPlayer is not { } p) return null;
+        var need = (int)Math.Min(CollectableRotation.FullRotationGp, p.MaxGp);
+        return p.CurrentGp < need ? (p.CurrentGp, need) : null;
     }
 
     // ------------------------------------------------------------------ inside a node

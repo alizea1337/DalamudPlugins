@@ -115,6 +115,8 @@ public sealed class RunSettings
     public bool DiscardExtras { get; set; } = true;
     /// <summary>With <see cref="DiscardExtras"/>: also throw away extras of items that only grow on timed nodes.</summary>
     public bool DiscardTimedExtras { get; set; } = true;
+    /// <summary>Before a collectable on a regular node, wait next to it until there's GP for the full rotation.</summary>
+    public bool WaitForCollectableGp { get; set; } = true;
     /// <summary>When a needed master book or folklore tome costs more scrips than you have, earn them first with collectables.</summary>
     public bool EarnScrips { get; set; } = true;
     /// <summary>Extract materia from fully spiritbonded gear between nodes.</summary>
