@@ -293,51 +293,32 @@ internal sealed class CharacterPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
     }
 
-    private string pickerFilter = "";
+    private readonly Dictionary<string, List<ConsumableInfo>> pickerOptions = new();
+    private readonly Dictionary<string, List<DropdownItem>> pickerItems = new();
 
-    /// <summary>A pill showing the current choice; clicking opens a searchable list of matching consumables.</summary>
+    /// <summary>A field showing the current choice; it opens a searchable list of matching consumables.</summary>
     private void Picker(string id, string label, ConsumableKind kind, Discipline d, ConsumableChoice choice)
     {
         var s = Ui.S;
         var catalog = Plans.Catalog;
         if (catalog == null) return;
         var current = catalog.Consumable(choice.ItemId);
-
-        var start = ImGui.GetCursorScreenPos();
-        var h = 34 * s;
-        var text = current?.Name ?? "None";
-        float tw;
-        using (Ui.F.Strong.Push()) tw = ImGui.CalcTextSize(text).X;
-        float lw = ImGui.CalcTextSize(label).X;
-        var w = 14 * s + lw + 10 * s + (current != null ? 24 * s : 0) + tw + 30 * s;
-        if (ImGui.InvisibleButton(id, new Vector2(w, h)))
+        if (Ui.DropdownField(id, current?.Name, "None", prefix: label, gameIcon: current?.Icon ?? 0, hq: choice.Hq && current is { CanBeHq: true }))
         {
-            pickerFilter = "";
-            ImGui.OpenPopup(id + "popup");
+            var options = catalog.Consumables.Where(c => c.Kind == kind && c.Discipline == d).ToList();
+            var items = new List<DropdownItem> { new("None", Sub: "No " + label.ToLowerInvariant()) };
+            foreach (var c in options)
+            {
+                var owned = Plans.Owned.GetValueOrDefault(c.ItemId);
+                items.Add(new DropdownItem(c.Name, Sub: Describe(c, choice.Hq, d), Badge: owned > 0 ? $"{owned} in your bags" : null,
+                    GameIcon: c.Icon, Hq: choice.Hq && c.CanBeHq));
+            }
+            pickerOptions[id] = options;
+            pickerItems[id] = items;
         }
-        var hovered = ImGui.IsItemHovered();
         Ui.Tooltip(current == null
             ? $"No {label.ToLowerInvariant()} is used. Pick one to see what it adds to each job's stats."
             : Describe(current, choice.Hq, d));
-        var dl = ImGui.GetWindowDrawList();
-        dl.AddRectFilled(start, start + new Vector2(w, h), Palette.U32(hovered ? Palette.RaisedHover : Palette.Raised), h / 2);
-        var x = start.X + 14 * s;
-        var ty = start.Y + (h - ImGui.GetTextLineHeight()) / 2;
-        dl.AddText(new Vector2(x, ty), Palette.U32(Palette.TextMuted), label);
-        x += lw + 10 * s;
-        if (current != null)
-        {
-            Ui.DrawItemIcon(dl, current.Icon, new Vector2(x, start.Y + (h - 20 * s) / 2), 20 * s, choice.Hq);
-            x += 24 * s;
-        }
-        using (Ui.F.Strong.Push())
-            dl.AddText(new Vector2(x, ty), Palette.U32(current != null ? Palette.Text : Palette.TextFaint), text);
-        using (Ui.F.IconSmall.Push())
-        {
-            var chevron = FontAwesomeIcon.ChevronDown.ToIconString();
-            var cs = ImGui.CalcTextSize(chevron);
-            dl.AddText(new Vector2(start.X + w - 14 * s - cs.X, start.Y + (h - cs.Y) / 2), Palette.U32(Palette.TextMuted), chevron);
-        }
 
         if (current is { CanBeHq: true })
         {
@@ -347,68 +328,12 @@ internal sealed class CharacterPage : Page
             Ui.Tooltip("Use the high-quality version, which adds more.");
         }
 
-        ImGui.SetNextWindowSize(new Vector2(460 * s, 0));
-        if (!ImGui.BeginPopup(id + "popup")) return;
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
-        ImGui.InputTextWithHint("##filter", "Search " + label.ToLowerInvariant(), ref pickerFilter, 64);
-        var options = catalog.Consumables
-            .Where(c => c.Kind == kind && c.Discipline == d
-                        && (pickerFilter.Length == 0 || c.Name.Contains(pickerFilter, StringComparison.CurrentCultureIgnoreCase)))
-            .ToList();
-
-        if (ImGui.BeginChild("##options", new Vector2(0, MathF.Min(360 * s, (options.Count + 1) * 42 * s)), false))
-        {
-            if (Option("None", null, 0, choice.ItemId == 0, "No " + label.ToLowerInvariant()))
-            {
-                choice.ItemId = 0;
-                Config.Save();
-                ImGui.CloseCurrentPopup();
-            }
-            foreach (var c in options)
-            {
-                var owned = Plans.Owned.GetValueOrDefault(c.ItemId);
-                if (Option(c.Name, c, owned, c.ItemId == choice.ItemId, Describe(c, choice.Hq, d)))
-                {
-                    choice.ItemId = c.ItemId;
-                    Config.Save();
-                    ImGui.CloseCurrentPopup();
-                }
-            }
-        }
-        ImGui.EndChild();
-        ImGui.EndPopup();
-    }
-
-    private static bool Option(string name, ConsumableInfo? c, int owned, bool selected, string detail)
-    {
-        var s = Ui.S;
-        var width = ImGui.GetContentRegionAvail().X;
-        var h = 40 * s;
-        var start = ImGui.GetCursorScreenPos();
-        var clicked = ImGui.InvisibleButton("##opt" + (c?.ItemId ?? 0), new Vector2(width, h));
-        var hovered = ImGui.IsItemHovered();
-        var dl = ImGui.GetWindowDrawList();
-        if (hovered || selected)
-            dl.AddRectFilled(start, start + new Vector2(width, h), Palette.U32(selected ? Palette.WithAlpha(Palette.Accent, 0.14f) : Palette.Raised), Ui.InputRadius * s);
-        var x = start.X + 8 * s;
-        if (c != null)
-        {
-            Ui.DrawItemIcon(dl, c.Icon, new Vector2(x, start.Y + (h - 26 * s) / 2), 26 * s);
-            x += 34 * s;
-        }
-        dl.AddText(new Vector2(x, start.Y + 4 * s), Palette.U32(Palette.Text), name);
-        using (Ui.F.Small.Push())
-        {
-            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted), detail);
-            if (owned > 0)
-            {
-                var label = $"{owned} in your bags";
-                var lw = ImGui.CalcTextSize(label).X;
-                dl.AddText(new Vector2(start.X + width - lw - 8 * s, start.Y + 4 * s), Palette.U32(Palette.Accent), label);
-            }
-        }
-        return clicked;
+        var listed = pickerOptions.GetValueOrDefault(id);
+        var at = listed?.FindIndex(c => c.ItemId == choice.ItemId) ?? -1;
+        var selected = choice.ItemId == 0 ? 0 : at >= 0 ? at + 1 : -1;
+        var pick = Ui.DropdownList(id, pickerItems.GetValueOrDefault(id), selected, "Nothing of this kind in the game data.", 460 * s);
+        if (pick == 0) { choice.ItemId = 0; Config.Save(); }
+        else if (pick > 0 && listed != null) { choice.ItemId = listed[pick - 1].ItemId; Config.Save(); }
     }
 
     private static string Describe(ConsumableInfo c, bool hq, Discipline d)

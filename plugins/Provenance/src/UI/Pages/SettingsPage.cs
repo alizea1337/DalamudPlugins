@@ -21,32 +21,31 @@ internal sealed class SettingsPage : Page
 
     public override (string Text, Vector4 Color)? Status => ("Changes are saved as you make them", Palette.TextFaint);
 
-    private List<Integrations.Teleporter.Destination>? aetherytes;
+    private List<Integrations.Teleporter.Destination> aetherytes = new();
+    private List<DropdownItem>? aetheryteItems;
 
     private void BellPicker()
     {
         var s = Ui.S;
         var id = Config.Run.BellAetheryte;
         var name = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Aetheryte>().GetRowOrDefault(id)?.PlaceName.ValueNullable?.Name.ExtractText() ?? "Aetheryte " + id;
-        if (Ui.Button(name, Ui.Kind.Secondary, FontAwesomeIcon.MapMarkerAlt, id: "##bellpick"))
+        if (Ui.DropdownField("##bell", name, "Pick an aetheryte", 340 * s, FontAwesomeIcon.MapMarkerAlt))
         {
             aetherytes = Integrations.Teleporter.Unlocked().OrderBy(d => d.Name).ToList();
-            ImGui.OpenPopup("##bellpopup");
+            // The zone, when the aetheryte's own name doesn't say it (Wineport: Eastern La Noscea).
+            aetheryteItems = aetherytes.Select(d => new DropdownItem(d.Name, ZoneName(d.TerritoryId) is { } zone && zone != d.Name ? zone : null)).ToList();
         }
-        ImGui.SetNextWindowSize(new Vector2(320 * s, 0));
-        if (!ImGui.BeginPopup("##bellpopup")) return;
-        if (ImGui.BeginChild("##bells", new Vector2(0, 300 * s)))
-        {
-            foreach (var d in aetherytes ?? new())
-                if (ImGui.Selectable(d.Name + "##" + d.AetheryteId, d.AetheryteId == id)) { Config.Run.BellAetheryte = d.AetheryteId; Config.Save(); ImGui.CloseCurrentPopup(); }
-        }
-        ImGui.EndChild();
-        ImGui.EndPopup();
+        var pick = Ui.DropdownList("##bell", aetheryteItems, aetherytes.FindIndex(d => d.AetheryteId == id), "No aetheryte unlocked.");
+        if (pick >= 0) { Config.Run.BellAetheryte = aetherytes[pick].AetheryteId; Config.Save(); }
     }
+
+    private static string? ZoneName(uint territoryId)
+        => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(territoryId)?.PlaceName.ValueNullable?.Name.ExtractText() is { Length: > 0 } n ? n : null;
 
     private static readonly string[] Stances = { "Free", "Defender", "Attacker", "Healer" };
     private static readonly string[] AfterPlaces = { "Stay", "Where it started", "Inn room", "Home" };
     private List<Integrations.Teleporter.Destination>? homes;
+    private List<DropdownItem>? homeItems, innItems;
 
     /// <summary>Where to go once an order is finished: stay, back to the start, an inn room, or a house or apartment.</summary>
     private void DrawAfterOrder(float w)
@@ -73,90 +72,57 @@ internal sealed class SettingsPage : Page
             {
                 var inns = catalog?.Inns ?? Array.Empty<Data.GameCatalog.Inn>();
                 var current = inns.FirstOrDefault(i => i.NpcId == a.InnNpc);
-                if (Ui.Button(current == null ? "Pick an inn" : $"{current.City} ({current.NpcName})", current == null ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.Bed, id: "##innpick"))
-                    ImGui.OpenPopup("##innpopup");
-                ImGui.SetNextWindowSize(new Vector2(320 * s, 0));
-                if (ImGui.BeginPopup("##innpopup"))
-                {
-                    foreach (var inn in inns)
-                        if (ImGui.Selectable($"{inn.City} ({inn.NpcName})##inn{inn.NpcId}", inn.NpcId == a.InnNpc)) { a.InnNpc = inn.NpcId; Config.Save(); ImGui.CloseCurrentPopup(); }
-                    ImGui.EndPopup();
-                }
+                if (Ui.DropdownField("##inn", current?.City, "Pick an inn", 380 * s, FontAwesomeIcon.Bed, detail: current?.NpcName))
+                    innItems = inns.Select(i => new DropdownItem(i.City, i.NpcName)).ToList();
+                var pick = Ui.DropdownList("##inn", innItems, inns.ToList().FindIndex(i => i.NpcId == a.InnNpc), "No inns found in the game data.");
+                if (pick >= 0) { a.InnNpc = inns[pick].NpcId; Config.Save(); }
+                ImGui.Dummy(new Vector2(0, 2 * s));
                 Ui.Wrapped("Travels to the innkeeper and takes a room.", Palette.TextMuted);
                 break;
             }
             case AfterOrderPlace.Home:
             {
-                var label = a.HomeAetheryte == 0 ? "Pick a house or apartment" : a.HomeLabel;
-                if (Ui.Button(label, a.HomeAetheryte == 0 ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.Home, id: "##homepick"))
+                if (Ui.DropdownField("##home", a.HomeAetheryte == 0 ? null : a.HomeLabel, "Pick a house or apartment", 380 * s, FontAwesomeIcon.Home))
                 {
                     homes = Integrations.Teleporter.Homes();
-                    ImGui.OpenPopup("##homepopup");
+                    homeItems = homes.Select(h => new DropdownItem(h.Estate ?? h.Name)).ToList();
                 }
-                ImGui.SetNextWindowSize(new Vector2(360 * s, 0));
-                if (ImGui.BeginPopup("##homepopup"))
+                var pick = Ui.DropdownList("##home", homeItems, homes?.FindIndex(h => h.AetheryteId == a.HomeAetheryte && h.SubIndex == a.HomeSubIndex) ?? -1,
+                    "No house or apartment in your teleport list.");
+                if (pick >= 0 && homes != null)
                 {
-                    if (homes is not { Count: > 0 }) Ui.Muted("No house or apartment in your teleport list.");
-                    foreach (var h in homes ?? new())
-                        if (ImGui.Selectable($"{h.Estate}##home{h.AetheryteId}_{h.SubIndex}", h.AetheryteId == a.HomeAetheryte && h.SubIndex == a.HomeSubIndex))
-                        {
-                            a.HomeAetheryte = h.AetheryteId;
-                            a.HomeSubIndex = h.SubIndex;
-                            a.HomeLabel = h.Estate ?? h.Name;
-                            Config.Save();
-                            ImGui.CloseCurrentPopup();
-                        }
-                    ImGui.EndPopup();
+                    var h = homes[pick];
+                    a.HomeAetheryte = h.AetheryteId;
+                    a.HomeSubIndex = h.SubIndex;
+                    a.HomeLabel = h.Estate ?? h.Name;
+                    Config.Save();
                 }
+                ImGui.Dummy(new Vector2(0, 2 * s));
                 Ui.Wrapped("Teleports to the house or apartment entrance (any house or apartment in your teleport list).", Palette.TextMuted);
                 break;
             }
         }
         Ui.EndCard();
     }
-    private string jobSearch = "";
+    private List<uint> combatJobs = new();
+    private List<DropdownItem>? combatJobItems;
 
-    /// <summary>A button with the picked job; it opens a searchable list of combat jobs with a saved gearset.</summary>
+    /// <summary>A field with the picked job; it opens a searchable list of combat jobs with a saved gearset.</summary>
     private void CombatJobPicker()
     {
         var s = Ui.S;
         var c = Config.Combat;
-        var label = c.ClassJob == 0
-            ? "Pick a combat job"
-            : $"{JobName(c.ClassJob)} (level {Data.PlanService.JobLevel(c.ClassJob)})";
-        if (Ui.Button(label, c.ClassJob == 0 ? Ui.Kind.Primary : Ui.Kind.Secondary, FontAwesomeIcon.ChevronDown, id: "##combatjob"))
+        var picked = c.ClassJob != 0;
+        if (Ui.DropdownField("##combatjob", picked ? JobName(c.ClassJob) : null, "Pick a combat job", 340 * s, FontAwesomeIcon.FistRaised,
+                dot: picked ? Palette.ClassJobColor(c.ClassJob) : null, detail: picked ? $"level {Data.PlanService.JobLevel(c.ClassJob)}" : null))
         {
-            jobSearch = "";
-            ImGui.OpenPopup("##combatjobs");
+            combatJobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
+                .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(JobName).ToList();
+            combatJobItems = combatJobs.Select(j => new DropdownItem(JobName(j), $"level {Data.PlanService.JobLevel(j)}",
+                Dot: Palette.ClassJobColor(j), Keywords: Core.Character.ClassJobs.Abbreviation(j))).ToList();
         }
-        ImGui.SetNextWindowSize(new Vector2(300 * s, 0));
-        if (!ImGui.BeginPopup("##combatjobs")) return;
-        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
-        ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##jobsearch", "Search jobs", ref jobSearch, 32);
-        var jobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
-            .Where(j => jobSearch.Length == 0 || JobName(j).Contains(jobSearch, StringComparison.CurrentCultureIgnoreCase)
-                        || Core.Character.ClassJobs.Abbreviation(j).Contains(jobSearch, StringComparison.CurrentCultureIgnoreCase))
-            .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(JobName).ToList();
-        if (ImGui.BeginChild("##joblist", new Vector2(0, Math.Min(320 * s, (jobs.Count + 1) * ImGui.GetTextLineHeightWithSpacing() + 8 * s))))
-        {
-            if (jobs.Count == 0) Ui.Muted(jobSearch.Length > 0 ? "No job matches." : "Save a gearset for a combat job first.");
-            foreach (var job in jobs)
-            {
-                var pos = ImGui.GetCursorScreenPos();
-                var h = ImGui.GetTextLineHeight();
-                ImGui.GetWindowDrawList().AddCircleFilled(pos + new Vector2(5 * s, h / 2 + 2 * s), 3.5f * s, ImGui.GetColorU32(Palette.ClassJobColor(job)));
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 16 * s);
-                if (ImGui.Selectable($"{JobName(job)}  ({Core.Character.ClassJobs.Abbreviation(job)} {Data.PlanService.JobLevel(job)})##job{job}", c.ClassJob == job))
-                {
-                    c.ClassJob = job;
-                    Config.Save();
-                    ImGui.CloseCurrentPopup();
-                }
-            }
-        }
-        ImGui.EndChild();
-        ImGui.EndPopup();
+        var pick = Ui.DropdownList("##combatjob", combatJobItems, combatJobs.IndexOf(c.ClassJob), "Save a gearset for a combat job first.");
+        if (pick >= 0) { c.ClassJob = combatJobs[pick]; Config.Save(); }
     }
 
     private static string JobName(uint classJob)

@@ -13,7 +13,7 @@ namespace Provenance.UI;
 /// The widget kit. Shape rule: actions and chips are pills, cards 14, inputs and rows 8, item icons 8.
 /// Motion: only easing on values that change because of the user or the run (tab marker, bars).
 /// </summary>
-internal static class Ui
+internal static partial class Ui
 {
     public const float CardRadius = 14f;
     public const float InputRadius = 8f;
