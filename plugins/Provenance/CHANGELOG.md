@@ -4,6 +4,10 @@
 
 Fishing and spearfishing without AutoHook.
 
+- This is also the first release with 0.7.0's changes, which didn't go out on their own: Provenance
+  gathers by itself (GatherBuddy Reborn is no longer needed), with collectables, cordials for GP,
+  materia extraction and aetherial reduction between nodes, and content filters in Browse. The full
+  list is under 0.7.0 in the changelog.
 - Orders with fish run now. Provenance fishes by itself, rod fishing and spearfishing; AutoHook and
   GatherBuddy Reborn aren't needed. The catching is ported from AutoHook, getting to the water from
   GatherBuddy Reborn.
