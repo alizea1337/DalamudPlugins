@@ -94,6 +94,8 @@ public sealed class BrowseSettings
 {
     /// <summary>Bit per crafter (Carpenter = bit 0). 0 shows every job.</summary>
     public int JobMask { get; set; } = 0;
+    /// <summary>Bits of <see cref="Core.Catalog.Place"/>: the open world, the Diadem and so on. 0 shows everything.</summary>
+    public int PlaceMask { get; set; } = 0;
     public int MinLevel { get; set; } = 1;
     public int MaxLevel { get; set; } = 100;
 }

@@ -37,8 +37,12 @@ internal enum BrowseKind { Recipe, Gather, Fish }
 /// <param name="ClassJobId">Crafter (8–15) or gatherer (16–18).</param>
 /// <param name="Level">Recipe level, or the lowest node / fishing hole level.</param>
 /// <param name="TimedOnly">Gatherables found only on timed nodes.</param>
+/// <param name="Places">
+/// <see cref="Place.OpenWorld"/> when a run can get it there, else the special content it comes from
+/// (the Diadem, Cosmic Exploration and so on).
+/// </param>
 internal sealed record BrowseEntry(BrowseKind Kind, uint RecipeId, uint ItemId, string Name, uint ClassJobId, int Level, int Stars, uint Icon,
-    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false)
+    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false, Place Places = Place.OpenWorld)
 {
     public readonly string NameLower = Name.ToLowerInvariant();
     public string Key => Kind == BrowseKind.Recipe ? "r" + RecipeId : $"g{ClassJobId}_{ItemId}";
@@ -62,8 +66,11 @@ internal sealed class GameCatalog : IGameCatalog
     public IReadOnlyList<BrowseEntry> Browse { get; private set; } = Array.Empty<BrowseEntry>();
     private List<BrowseEntry> recipeBrowse = new();
 
-    /// <summary>Lowest level per (item, gatherer job), and whether any of its nodes is always up.</summary>
-    private readonly Dictionary<(uint Item, uint Job), (int Level, bool Normal, BrowseKind Kind)> gatherBrowse = new();
+    /// <summary>
+    /// Lowest level per (item, gatherer job), whether any of its nodes is always up, and where: the open
+    /// world, or the special content it only comes from.
+    /// </summary>
+    private readonly Dictionary<(uint Item, uint Job), (int Level, bool Normal, BrowseKind Kind, Place Places)> gatherBrowse = new();
     public IReadOnlyList<MasterBook> MasterBooks { get; private set; } = Array.Empty<MasterBook>();
     public IReadOnlyList<FolkloreTome> FolkloreTomes { get; private set; } = Array.Empty<FolkloreTome>();
     /// <summary>Foods and medicines that raise crafting or gathering stats, highest item level first.</summary>
@@ -77,14 +84,16 @@ internal sealed class GameCatalog : IGameCatalog
     {
         var sw = Stopwatch.StartNew();
         var c = new GameCatalog();
+        c.Gather = GatherData.Load();
+        c.IndexCosmic();
         c.IndexRecipes();
         c.IndexGathering();
         c.IndexFishing();
+        c.ApplyCosmic();
         c.IndexVendors();
         c.IndexBells();
         c.IndexDrops();
         c.IndexCollectables();
-        c.Gather = GatherData.Load();
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
@@ -157,15 +166,21 @@ internal sealed class GameCatalog : IGameCatalog
                 r.RowId, result, (Job)r.CraftType.RowId,
                 level?.ClassJobLevel ?? 0, level?.Stars ?? 0,
                 Math.Max(1, (int)r.AmountResult), r.IsExpert, ingredients, r.SecretRecipeBook.RowId, r.CanHq);
-            recipesById[r.RowId] = info;
-            if (!recipesByItem.TryGetValue(result, out var list)) recipesByItem[result] = list = new List<RecipeInfo>(1);
-            list.Add(info);
+            // Cosmic Exploration's recipes only open during its missions: browsable, never planned.
+            var place = cosmic.Contains(result) ? Place.CosmicExploration : Place.OpenWorld;
+            if (place == Place.OpenWorld)
+            {
+                recipesById[r.RowId] = info;
+                if (!recipesByItem.TryGetValue(result, out var list)) recipesByItem[result] = list = new List<RecipeInfo>(1);
+                list.Add(info);
+            }
+            else Add(result, Obtain.CraftElsewhere, place);
 
             if (items.GetRowOrDefault(result) is { } item)
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
-                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false, r.CanHq));
+                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false, r.CanHq, place));
             }
         }
         browse.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
@@ -178,40 +193,66 @@ internal sealed class GameCatalog : IGameCatalog
         var transient = Services.Data.GetExcelSheet<GatheringPointTransient>();
         var exported = Services.Data.GetExcelSheet<ExportedGatheringPoint>();
         var territories = Services.Data.GetExcelSheet<TerritoryType>();
+        foreach (var gi in gatheringItems)
+            if (gi.Item.RowId != 0) gatheredItems.Add(gi.Item.RowId);
+
+        // A point's items are its base's list plus the GatheringItemPoint links, which tie more
+        // items to single points (Mythrite Ore to a node in Coerthas Western Highlands, for one).
+        var linked = new Dictionary<uint, List<uint>>();
+        foreach (var row in Services.Data.GetSubrowExcelSheet<GatheringItemPoint>())
+            foreach (var link in row)
+            {
+                if (link.GatheringPoint.RowId == 0) continue;
+                if (!linked.TryGetValue(link.GatheringPoint.RowId, out var l)) linked[link.GatheringPoint.RowId] = l = new List<uint>(2);
+                if (!l.Contains(row.RowId)) l.Add(row.RowId);
+            }
+
+        var ids = new List<uint>(16);
         foreach (var point in Services.Data.GetExcelSheet<GatheringPoint>())
         {
             if (point.TerritoryType.RowId == 0) continue;
-            // Only open-world zones (intended use 1) can be travelled to; the Diadem (47) and the
-            // placeholder zone of instanced content (Cosmic Exploration and the like) can't.
-            var openWorld = territories.GetRowOrDefault(point.TerritoryType.RowId)?.TerritoryIntendedUse.RowId == 1;
             if (point.GatheringPointBase.ValueNullable is not { } pointBase) continue;
             // Types 0–3 are mining, quarrying, logging and harvesting; spearfishing rows point elsewhere.
             if (pointBase.GatheringType.RowId > 3) continue;
+            // Runs only travel to the open world; the Diadem and instanced content are listed for the browser.
+            var zone = PlaceOf(territories.GetRowOrDefault(point.TerritoryType.RowId));
             var timedRow = transient.GetRowOrDefault(point.RowId);
             var timed = IsTimed(timedRow);
+            var ephemeral = timed && timedRow!.Value.GatheringRarePopTimeTable.RowId == 0;
             var mask = timed ? UptimeMask(timedRow!.Value) : 0u;
             var tome = timed ? TomeOf(point.GatheringSubCategory.ValueNullable) : 0;
             var job = pointBase.GatheringType.RowId <= 1 ? 16u : 17u;
+
+            ids.Clear();
             foreach (var reference in pointBase.Item)
+                if (reference.RowId != 0 && !ids.Contains(reference.RowId)) ids.Add(reference.RowId);
+            var fromBase = ids.Count;
+            if (linked.TryGetValue(point.RowId, out var more))
+                foreach (var id in more)
+                    if (!ids.Contains(id)) ids.Add(id);
+
+            for (var i = 0; i < ids.Count; i++)
             {
-                if (reference.RowId == 0 || gatheringItems.GetRowOrDefault(reference.RowId) is not { } gi) continue;
+                if (gatheringItems.GetRowOrDefault(ids[i]) is not { } gi) continue;
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
-                if (!openWorld)
+                // Crystals these links add to ephemeral nodes are left out, as GatherBuddy Reborn does.
+                if (i >= fromBase && ephemeral && itemId is >= 2 and <= 19) continue;
+                var place = zone == Place.Other && cosmic.Contains(itemId) ? Place.CosmicExploration : zone;
+                NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather, place);
+                if (place != Place.OpenWorld)
                 {
-                    // Still listed in Browse, but the plan says it has to be got by hand.
-                    Add(itemId, Obtain.GatherElsewhere);
-                    NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
+                    // Listed in Browse; the plan says where to get it by hand.
+                    Add(itemId, Obtain.GatherElsewhere, place);
                     continue;
                 }
-                Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather, place);
                 if (!gatherPoints.TryGetValue(itemId, out var pointList)) gatherPoints[itemId] = pointList = new List<GatherPoint>(2);
                 pointList.Add(new GatherPoint(point.RowId, pointBase.RowId, point.TerritoryType.RowId, job, pointBase.GatheringLevel, timed, mask, tome,
                     gi.GatheringItemLevel.RowId, gi.IsHidden));
                 if (gi.PerceptionReq > 0)
                     perception[itemId] = perception.TryGetValue(itemId, out var p) ? Math.Min(p, gi.PerceptionReq) : gi.PerceptionReq;
                 if (timed) timedMasks[itemId] = timedMasks.GetValueOrDefault(itemId) | mask;
-                NoteBrowse(itemId, job, pointBase.GatheringLevel, !timed, BrowseKind.Gather);
                 if (timed) NoteTome(itemId, tome);
                 if (timed && exported.GetRowOrDefault(pointBase.RowId) is { } at)
                 {
@@ -221,6 +262,48 @@ internal sealed class GameCatalog : IGameCatalog
                 }
             }
         }
+    }
+
+    /// <summary>Items of Cosmic Exploration: its mission materials, gathering, fishing and crafts.</summary>
+    private readonly HashSet<uint> cosmic = new();
+    /// <summary>Every item a gatherer can collect somewhere (GatheringItem rows).</summary>
+    private readonly HashSet<uint> gatheredItems = new();
+
+    private void IndexCosmic()
+    {
+        foreach (var row in Services.Data.GetExcelSheet<WKSItemInfo>())
+            if (row.Item.RowId != 0) cosmic.Add(row.Item.RowId);
+    }
+
+    /// <summary>
+    /// Most of Cosmic Exploration's gathering has no gathering points in the sheets; its items still
+    /// say where they come from.
+    /// </summary>
+    private void ApplyCosmic()
+    {
+        foreach (var itemId in cosmic)
+        {
+            var src = sources.GetValueOrDefault(itemId);
+            var way = gatheredItems.Contains(itemId) && !src.Has(Obtain.Gather | Obtain.GatherTimed | Obtain.Elsewhere) ? Obtain.GatherElsewhere : Obtain.None;
+            sources[itemId] = src with { Flags = src.Flags | way, Places = src.Places | Place.CosmicExploration };
+        }
+    }
+
+    /// <summary>
+    /// Where a zone is. Runs go to field zones (intended use 1), cities (0) and housing districts (13);
+    /// zone 1 is the placeholder that quest and instanced content's points sit in.
+    /// </summary>
+    private static Place PlaceOf(TerritoryType? zone)
+    {
+        if (zone is not { } t || t.RowId <= 1) return Place.Other;
+        return t.TerritoryIntendedUse.RowId switch
+        {
+            0 or 1 or 13 => Place.OpenWorld,
+            46 => Place.OceanFishing,
+            47 => Place.Diadem,
+            60 => Place.CosmicExploration,
+            _ => Place.Other,
+        };
     }
 
     /// <summary>Unspoiled/legendary nodes have a rare-pop table; ephemeral ones a start and end time (HHMM).</summary>
@@ -258,7 +341,7 @@ internal sealed class GameCatalog : IGameCatalog
         GatherNeeds? best = null;
         foreach (var job in Core.Character.ClassJobs.Gatherers)
         {
-            if (!gatherBrowse.TryGetValue((itemId, job), out var e)) continue;
+            if (!gatherBrowse.TryGetValue((itemId, job), out var e) || e.Places != Place.OpenWorld) continue;
             var needs = new GatherNeeds(job, e.Level, job == 18 ? 0 : perception.GetValueOrDefault(itemId));
             if (best is not { } b) { best = needs; continue; }
             var canNew = jobLevel(job) >= needs.Level;
@@ -286,32 +369,43 @@ internal sealed class GameCatalog : IGameCatalog
 
     private void IndexFishing()
     {
+        var territories = Services.Data.GetExcelSheet<TerritoryType>();
+        var spotPlaces = new Dictionary<uint, Place>();
         foreach (var spot in Services.Data.GetExcelSheet<FishingSpot>())
         {
-            if (spot.GatheringLevel == 0 || spot.TerritoryType.RowId == 0) continue;
+            if (spot.GatheringLevel == 0) continue;
+            // The Diadem's and Cosmic Exploration's spots have no zone in the sheet; the exported spot
+            // data has it. Spots in neither are content that is gone (the first Diadem).
+            var zoneId = Gather.Spot(spot.RowId)?.TerritoryId ?? spot.TerritoryType.RowId;
+            var zone = zoneId == 0 ? Place.Other : PlaceOf(territories.GetRowOrDefault(zoneId));
+            spotPlaces[spot.RowId] = zone;
             foreach (var fish in spot.Item)
-                if (fish.RowId is > 0 and < 1_000_000) NoteBrowse(fish.RowId, 18, spot.GatheringLevel, true, BrowseKind.Fish);
+            {
+                if (fish.RowId is 0 or >= 1_000_000) continue;
+                var place = zone == Place.Other && cosmic.Contains(fish.RowId) ? Place.CosmicExploration : zone;
+                NoteBrowse(fish.RowId, 18, spot.GatheringLevel, true, BrowseKind.Fish, place);
+                Add(fish.RowId, place == Place.OpenWorld ? Obtain.Fish : Obtain.FishElsewhere, place);
+            }
         }
         var spearItems = Services.Data.GetExcelSheet<SpearfishingItem>();
         foreach (var note in Services.Data.GetExcelSheet<SpearfishingNotebook>())
         {
             if (note.GatheringPointBase.ValueNullable is not { } spearBase) continue;
+            var place = PlaceOf(territories.GetRowOrDefault(note.TerritoryType.RowId));
             foreach (var reference in spearBase.Item)
                 if (spearItems.GetRowOrDefault(reference.RowId) is { } si && si.Item.RowId is > 0 and < 1_000_000)
-                    NoteBrowse(si.Item.RowId, 18, note.GatheringLevel, true, BrowseKind.Fish);
+                {
+                    NoteBrowse(si.Item.RowId, 18, note.GatheringLevel, true, BrowseKind.Fish, place);
+                    Add(si.Item.RowId, place == Place.OpenWorld ? Obtain.Fish : Obtain.FishElsewhere, place);
+                    NoteTome(si.Item.RowId, 0);
+                }
         }
 
         foreach (var f in Services.Data.GetExcelSheet<FishParameter>())
             if (f.Item.RowId is > 0 and < 1_000_000 && f.FishingSpot.RowId != 0)
             {
-                Add(f.Item.RowId, Obtain.Fish);
+                if (spotPlaces.GetValueOrDefault(f.FishingSpot.RowId) == Place.OpenWorld) Add(f.Item.RowId, Obtain.Fish, Place.OpenWorld);
                 NoteTome(f.Item.RowId, TomeOf(f.GatheringSubCategory.ValueNullable));
-            }
-        foreach (var s in Services.Data.GetExcelSheet<SpearfishingItem>())
-            if (s.Item.RowId is > 0 and < 1_000_000)
-            {
-                Add(s.Item.RowId, Obtain.Fish);
-                NoteTome(s.Item.RowId, 0);
             }
     }
 
@@ -624,12 +718,17 @@ internal sealed class GameCatalog : IGameCatalog
 
     public string MasterBookName(uint id) => MasterBooks.FirstOrDefault(b => b.Id == id)?.Name ?? "a master book";
 
-    private void NoteBrowse(uint itemId, uint job, int level, bool normal, BrowseKind kind)
+    /// <summary>
+    /// Notes a node or fishing hole for the browser row of (item, job). Open-world ones decide the
+    /// row's level and timing; special content only counts while the item has no open-world source.
+    /// </summary>
+    private void NoteBrowse(uint itemId, uint job, int level, bool normal, BrowseKind kind, Place place)
     {
-        if (gatherBrowse.TryGetValue((itemId, job), out var e))
-            gatherBrowse[(itemId, job)] = (Math.Min(e.Level, level), e.Normal || normal, kind);
-        else
-            gatherBrowse[(itemId, job)] = (level, normal, kind);
+        var key = (itemId, job);
+        if (!gatherBrowse.TryGetValue(key, out var e) || (place == Place.OpenWorld && e.Places != Place.OpenWorld))
+            gatherBrowse[key] = (level, normal, kind, place);
+        else if (place == Place.OpenWorld || e.Places != Place.OpenWorld)
+            gatherBrowse[key] = (Math.Min(e.Level, level), e.Normal || normal, kind, e.Places | place);
     }
 
     /// <summary>Recipes plus everything gatherers and fishers collect, sorted by level then name.</summary>
@@ -637,20 +736,20 @@ internal sealed class GameCatalog : IGameCatalog
     {
         var items = Services.Data.GetExcelSheet<Item>();
         var all = new List<BrowseEntry>(recipeBrowse);
-        foreach (var ((itemId, job), (level, normal, kind)) in gatherBrowse)
+        foreach (var ((itemId, job), (level, normal, kind, places)) in gatherBrowse)
         {
             if (items.GetRowOrDefault(itemId) is not { } item) continue;
             var name = item.Name.ExtractText();
             if (name.Length == 0) continue;
-            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal));
+            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places));
         }
         all.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         Browse = all;
     }
 
-    private void Add(uint itemId, Obtain flag)
+    private void Add(uint itemId, Obtain flag, Place place = Place.None)
     {
         var existing = sources.GetValueOrDefault(itemId);
-        sources[itemId] = new ItemSources(existing.Flags | flag, existing.VendorPrice);
+        sources[itemId] = existing with { Flags = existing.Flags | flag, Places = existing.Places | place };
     }
 }

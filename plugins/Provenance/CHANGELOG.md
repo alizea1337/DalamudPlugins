@@ -16,9 +16,16 @@ Gathering without GatherBuddy Reborn.
   Both in Settings.
 - Node positions seen during runs are remembered on this PC (never uploaded).
 - Fishing isn't in this testing build yet; orders with fish can't start until it arrives.
-- Items gathered only in the Diadem or in special instanced content (Cosmic Exploration and the
-  like) are no longer planned as gathering: the plan lists them under "Get these yourself" with the
-  reason, instead of the run stopping halfway.
+- Items that only come from content a run can't go to are no longer planned as gathering: the plan
+  lists them under "Get these yourself" and names the content, for example "Only gathered in Cosmic
+  Exploration" or "Only fished in Ocean Fishing", instead of the run stopping halfway. This covers
+  the Diadem, Cosmic Exploration (its gathering, fishing and mission recipes), Ocean Fishing, and
+  quests and other special content.
+- Browse: a new row of content filters (Open world, The Diadem, Cosmic Exploration, Ocean Fishing,
+  Quests & other). Toggle one or more to show only those; "All content" shows everything. Items a
+  run can't get carry an amber tag naming where they come from.
+- Gathering finds more nodes: items the game links to single nodes (Mythrite Ore in Coerthas
+  Western Highlands, for one) are now known.
 - Groundwork for gathering and fishing without GatherBuddy Reborn and AutoHook: exact node
   positions, the fish database (bait, mooch chains, intuition, time and weather windows, hooks,
   bite times) and fishing spots with places to stand ship with the plugin (tools/GbrExport), plus

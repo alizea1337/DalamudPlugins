@@ -67,8 +67,6 @@ internal sealed class RunEngine : IDisposable
     private readonly Dictionary<uint, int> consumed = new();
 
     private DateTime nextCheck = DateTime.MinValue;
-    private DateTime gbrOffSince = DateTime.MinValue;
-    private int reEnables;
     private bool pausedForDuty;
     private string? pendingStop;
     private bool pendingStopProblem;
@@ -216,7 +214,6 @@ internal sealed class RunEngine : IDisposable
 
         log.Clear();
         consumed.Clear();
-        reEnables = 0;
         knockOuts = 0;
         knockedOut = false;
         pausedForDuty = false;
@@ -224,7 +221,6 @@ internal sealed class RunEngine : IDisposable
         craftingBetween = false;
         yielding = false;
         NextWindow = null;
-        gbrOffSince = DateTime.MinValue;
         StartedAt = DateTime.Now;
         EndedAt = null;
         Detail = "";
@@ -535,7 +531,6 @@ internal sealed class RunEngine : IDisposable
         if (Phase is not (RunPhase.Paused or RunPhase.Pausing)) return;
         var wasPaused = Phase == RunPhase.Paused;
         Phase = RunPhase.Running;
-        gbrOffSince = DateTime.MinValue;
         if (Stage == RunStage.Vendors) Shopper.Resume();
         else if (Stage == RunStage.Retainers) Retainers.Resume();
         else if (Stage == RunStage.Hunt) Hunt.Resume();
@@ -1075,7 +1070,6 @@ internal sealed class RunEngine : IDisposable
     {
         CancelNodeTrip();
         Gather.Resume();
-        gbrOffSince = DateTime.MinValue;
     }
 
     private void CancelNodeTrip()
@@ -1090,7 +1084,6 @@ internal sealed class RunEngine : IDisposable
         craftingBetween = false;
         yielding = false;
         Gather.Resume();
-        gbrOffSince = DateTime.MinValue;
         Headline = "Gathering";
         if (log) Add("Back to gathering for the timed nodes.", false);
     }

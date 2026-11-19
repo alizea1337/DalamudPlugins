@@ -55,15 +55,41 @@ public class PlannerTests
     {
         var catalog = new FakeCatalog();
         const uint Special = 9100;
-        catalog.SetSources(Special, new ItemSources(Obtain.GatherElsewhere, 0));
+        catalog.SetSources(Special, new ItemSources(Obtain.GatherElsewhere, 0, Places: Place.CosmicExploration));
         var plan = Planner.Build(OrderOf((Special, 3)), catalog, new Dictionary<uint, int>(), new PlannerOptions());
         Assert.Equal(Supply.Manual, plan[Special]!.Supply);
-        Assert.Contains("Diadem", plan[Special]!.ManualReason);
+        Assert.Equal("Only gathered in Cosmic Exploration, which a run can't go to", plan[Special]!.ManualReason);
         Assert.False(plan.CanStart);
+        Assert.Equal(new[] { Special }, plan.TargetsNeeding(Special));
 
         // Gatherable in the open world as well: gathered there.
-        catalog.SetSources(Special, new ItemSources(Obtain.Gather | Obtain.GatherElsewhere, 0));
+        catalog.SetSources(Special, new ItemSources(Obtain.Gather | Obtain.GatherElsewhere, 0, Places: Place.OpenWorld | Place.Diadem));
         Assert.Equal(Supply.Gather, Planner.Build(OrderOf((Special, 3)), catalog, new Dictionary<uint, int>(), new PlannerOptions())[Special]!.Supply);
+    }
+
+    [Theory]
+    [InlineData(Obtain.FishElsewhere, Place.Diadem, "Only fished in the Diadem, which a run can't go to")]
+    [InlineData(Obtain.FishElsewhere, Place.OceanFishing, "Only fished in Ocean Fishing, which a run can't go to")]
+    [InlineData(Obtain.CraftElsewhere, Place.CosmicExploration, "Only crafted in Cosmic Exploration, which a run can't go to")]
+    [InlineData(Obtain.GatherElsewhere | Obtain.FishElsewhere, Place.Diadem | Place.Other,
+        "Only gathered or fished in the Diadem or quests and other special content, which a run can't go to")]
+    [InlineData(Obtain.None, Place.CosmicExploration, "Only from Cosmic Exploration, which a run can't go to")]
+    public void Special_content_is_named_in_the_reason(Obtain how, Place where, string reason)
+    {
+        var catalog = new FakeCatalog();
+        const uint Special = 9101;
+        catalog.SetSources(Special, new ItemSources(how, 0, Places: where));
+        Assert.Equal(reason, Planner.Build(OrderOf((Special, 1)), catalog, new Dictionary<uint, int>(), new PlannerOptions())[Special]!.ManualReason);
+    }
+
+    [Fact]
+    public void A_vendor_over_the_cap_is_named_before_special_content()
+    {
+        var catalog = new FakeCatalog();
+        const uint Special = 9102;
+        catalog.SetSources(Special, new ItemSources(Obtain.Vendor | Obtain.GatherElsewhere, 5000, Places: Place.Diadem));
+        var line = Planner.Build(OrderOf((Special, 1)), catalog, new Dictionary<uint, int>(), new PlannerOptions { VendorMaxPrice = 1000 })[Special]!;
+        Assert.Contains("above your cap", line.ManualReason);
     }
 
     [Fact]

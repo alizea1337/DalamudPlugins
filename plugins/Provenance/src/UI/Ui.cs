@@ -437,14 +437,17 @@ internal static class Ui
         ImGui.Dummy(new Vector2(w, h));
     }
 
-    /// <summary>A chip that toggles; used for the crafter filter.</summary>
+    public static float ToggleChipWidth(string text)
+    {
+        using (F.Strong.Push()) return ImGui.CalcTextSize(text).X + 34 * S;
+    }
+
+    /// <summary>A chip that toggles; used for the browser's filters.</summary>
     public static bool ToggleChip(string id, string text, Vector4 color, bool on)
     {
         var s = S;
         var h = 30 * s;
-        float tw;
-        using (F.Strong.Push()) tw = ImGui.CalcTextSize(text).X;
-        var w = tw + 34 * s;
+        var w = ToggleChipWidth(text);
         var pos = ImGui.GetCursorScreenPos();
         var pressed = ImGui.InvisibleButton(id, new Vector2(w, h));
         var hovered = ImGui.IsItemHovered();

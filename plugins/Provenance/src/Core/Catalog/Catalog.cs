@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Provenance.Core.Catalog;
 
@@ -71,15 +72,59 @@ public enum Obtain
     Vendor = 1 << 3,
     /// <summary>Dropped by monsters.</summary>
     Drop = 1 << 4,
-    /// <summary>Gathered only in the Diadem or special instanced content, which a run can't go to.</summary>
+    /// <summary>Gathered in content a run can't go to (<see cref="ItemSources.Places"/> says which).</summary>
     GatherElsewhere = 1 << 5,
+    /// <summary>Fished in content a run can't go to.</summary>
+    FishElsewhere = 1 << 6,
+    /// <summary>Crafted only in content a run can't go to (Cosmic Exploration missions).</summary>
+    CraftElsewhere = 1 << 7,
+    Elsewhere = GatherElsewhere | FishElsewhere | CraftElsewhere,
+}
+
+/// <summary>Where an item is gathered, fished or crafted. A run only goes to the open world.</summary>
+[Flags]
+public enum Place : byte
+{
+    None = 0,
+    /// <summary>Field zones, cities and housing districts.</summary>
+    OpenWorld = 1 << 0,
+    Diadem = 1 << 1,
+    CosmicExploration = 1 << 2,
+    OceanFishing = 1 << 3,
+    /// <summary>Quests, events and content that is no longer in the game.</summary>
+    Other = 1 << 4,
+}
+
+public static class Places
+{
+    /// <summary>The content other than the open world, in the order the browser lists it.</summary>
+    public static readonly Place[] Special = { Place.Diadem, Place.CosmicExploration, Place.OceanFishing, Place.Other };
+
+    /// <summary>"the Diadem", "Cosmic Exploration", "quests and other special content".</summary>
+    public static string Name(Place place) => place switch
+    {
+        Place.OpenWorld => "the open world",
+        Place.Diadem => "the Diadem",
+        Place.CosmicExploration => "Cosmic Exploration",
+        Place.OceanFishing => "Ocean Fishing",
+        Place.Other => "quests and other special content",
+        _ => "special content",
+    };
+
+    /// <summary>Every flag named, joined with "or": "the Diadem or Cosmic Exploration".</summary>
+    public static string Describe(Place places)
+    {
+        var names = Enum.GetValues<Place>().Where(p => p != Place.None && (places & p) != 0).Select(Name).ToList();
+        return names.Count == 0 ? Name(Place.None) : string.Join(" or ", names);
+    }
 }
 
 /// <param name="Tome">
 /// Item id of the folklore tome the item's timed nodes or fishing holes need, or 0 when at least one
 /// of them needs no tome.
 /// </param>
-public readonly record struct ItemSources(Obtain Flags, uint VendorPrice, uint Tome = 0)
+/// <param name="Places">Everywhere the item is gathered, fished or crafted (not where it's sold or dropped).</param>
+public readonly record struct ItemSources(Obtain Flags, uint VendorPrice, uint Tome = 0, Place Places = Place.None)
 {
     public bool Has(Obtain flag) => (Flags & flag) != 0;
 }

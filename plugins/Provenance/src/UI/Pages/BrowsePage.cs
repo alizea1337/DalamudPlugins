@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Provenance.Core.Catalog;
 using Provenance.Core.Character;
 using Provenance.Data;
 using Provenance.UI.Theme;
@@ -20,7 +21,7 @@ internal sealed class BrowsePage : Page
 
     private string query = "";
     private List<BrowseEntry> results = new();
-    private (string Query, int Mask, int Lo, int Hi, int Count) filterKey;
+    private (string Query, int Jobs, int Places, int Lo, int Hi, int Count) filterKey;
     private readonly Dictionary<string, int> quantities = new();
     private readonly Dictionary<string, bool> hqChoice = new();
 
@@ -72,6 +73,20 @@ internal sealed class BrowsePage : Page
             JobChip(job, b);
         }
 
+        // Content chips: all, the open world a run goes to, then the special content it can't.
+        // They wrap when the window is narrow.
+        var right = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+        if (Ui.ToggleChip("##place_all", "All content", Palette.Accent, b.PlaceMask == 0)) { b.PlaceMask = 0; Config.Save(); }
+        foreach (var place in PlaceOrder)
+        {
+            var label = PlaceLabel(place);
+            var gap = (place == Place.Diadem ? 18 : 6) * s;
+            if (ImGui.GetItemRectMax().X + gap + Ui.ToggleChipWidth(label) <= right) ImGui.SameLine(0, gap);
+            var bit = (int)place;
+            if (Ui.ToggleChip("##place_" + bit, label, PlaceColor(place), (b.PlaceMask & bit) != 0)) { b.PlaceMask ^= bit; Config.Save(); }
+            Ui.Tooltip(PlaceHint(place));
+        }
+
         // Level range
         using (Ui.F.Strong.Push()) Ui.Text("Job level");
         ImGui.SameLine(0, 10 * s);
@@ -87,7 +102,7 @@ internal sealed class BrowsePage : Page
         if (results.Count == 0)
         {
             ImGui.Dummy(new Vector2(0, 8 * s));
-            Ui.Wrapped("Nothing matches. Widen the level range or pick other jobs.", Palette.TextMuted);
+            Ui.Wrapped("Nothing matches. Widen the level range, or pick other jobs or content.", Palette.TextMuted);
             return;
         }
 
@@ -99,6 +114,30 @@ internal sealed class BrowsePage : Page
         clipper.End();
         clipper.Destroy();
     }
+
+    private static readonly Place[] PlaceOrder = { Place.OpenWorld, Place.Diadem, Place.CosmicExploration, Place.OceanFishing, Place.Other };
+
+    /// <summary>The same words on the filter chips and on the rows' hints.</summary>
+    private static string PlaceLabel(Place place) => place switch
+    {
+        Place.OpenWorld => "Open world",
+        Place.Diadem => "The Diadem",
+        Place.CosmicExploration => "Cosmic Exploration",
+        Place.OceanFishing => "Ocean Fishing",
+        _ => "Quests & other",
+    };
+
+    /// <summary>Amber marks content a run can't go to, on the filter and on the rows.</summary>
+    private static Vector4 PlaceColor(Place place) => place == Place.OpenWorld ? Palette.Accent : Palette.Warn;
+
+    private static string PlaceHint(Place place) => place switch
+    {
+        Place.OpenWorld => "What a run can get: gathering and fishing in field zones, cities and housing districts, and regular recipes.",
+        Place.Diadem => "Only gathered or fished in the Diadem.",
+        Place.CosmicExploration => "Only gathered, fished or crafted in Cosmic Exploration.",
+        Place.OceanFishing => "Only fished on Ocean Fishing voyages.",
+        _ => "Only gathered or fished during quests, events or content that's no longer in the game.",
+    };
 
     private void JobChip(uint job, BrowseSettings b)
     {
@@ -157,6 +196,17 @@ internal sealed class BrowsePage : Page
                 Ui.Chip("fish", Palette.SupplyColor(Core.Planning.Supply.Fish));
                 break;
         }
+        if (e.Places != Place.OpenWorld)
+        {
+            var how = e.Kind switch { BrowseKind.Recipe => "Crafted", BrowseKind.Fish => "Fished", _ => "Gathered" };
+            foreach (var place in Places.Special)
+            {
+                if ((e.Places & place) == 0) continue;
+                ImGui.SameLine(0, 6 * s);
+                Ui.Chip(PlaceLabel(place), PlaceColor(place), FontAwesomeIcon.MapMarkerAlt);
+                Ui.Tooltip($"{how} only in {Places.Describe(e.Places)}. A run can't get it there: added to the order, it's listed under things to get yourself.");
+            }
+        }
 
         // Right side: amount + add
         var inOrder = Config.Order.Lines.Where(l => l.ItemId == e.ItemId).Sum(l => l.Quantity);
@@ -199,12 +249,13 @@ internal sealed class BrowsePage : Page
     private void Refilter(GameCatalog catalog)
     {
         var b = Config.Browse;
-        var key = (query.Trim().ToLowerInvariant(), b.JobMask, b.MinLevel, b.MaxLevel, catalog.Browse.Count);
+        var key = (query.Trim().ToLowerInvariant(), b.JobMask, b.PlaceMask, b.MinLevel, b.MaxLevel, catalog.Browse.Count);
         if (key == filterKey) return;
         filterKey = key;
         var q = key.Item1;
         results = catalog.Browse
             .Where(e => (b.JobMask == 0 || (b.JobMask & (1 << (int)(e.ClassJobId - 8))) != 0)
+                        && (b.PlaceMask == 0 || (b.PlaceMask & (int)e.Places) != 0)
                         && e.Level >= b.MinLevel && e.Level <= b.MaxLevel
                         && (q.Length == 0 || e.NameLower.Contains(q, StringComparison.Ordinal)))
             .ToList();

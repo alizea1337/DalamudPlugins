@@ -170,8 +170,8 @@ public static class Planner
                 line.Supply = Supply.Manual;
                 line.ManualReason = src.Has(Obtain.Vendor)
                     ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
-                    : src.Has(Obtain.GatherElsewhere)
-                        ? "Only gathered in the Diadem or special content (like Cosmic Exploration), which a run can't go to"
+                    : (src.Places & ~Place.OpenWorld) != Place.None
+                        ? ElsewhereReason(src)
                         : "No gathering, fishing, vendor or monster source";
             }
             // Legendary nodes and some fishing holes only show up once their folklore tome is read.
@@ -188,6 +188,19 @@ public static class Planner
                 node.Children.Add(BuildTree(ing.ItemId, crafts * ing.Amount, depth + 1));
             return node;
         }
+    }
+
+    /// <summary>"Only gathered in the Diadem, which a run can't go to."</summary>
+    internal static string ElsewhereReason(ItemSources src)
+    {
+        var ways = new List<string>(3);
+        if (src.Has(Obtain.GatherElsewhere)) ways.Add("gathered");
+        if (src.Has(Obtain.FishElsewhere)) ways.Add("fished");
+        if (src.Has(Obtain.CraftElsewhere)) ways.Add("crafted");
+        var where = Places.Describe(src.Places & ~Place.OpenWorld);
+        return ways.Count == 0
+            ? $"Only from {where}, which a run can't go to"
+            : $"Only {string.Join(" or ", ways)} in {where}, which a run can't go to";
     }
 
     private enum VisitState { Open, Done }
