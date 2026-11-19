@@ -344,7 +344,7 @@ internal sealed class PlanPage : Page
         // Placed in screen space against the card's own width, like the rows' remove buttons, so both
         // right edges line up (SameLine offsets count from the window and add the card's indent again).
         var start = ImGui.GetCursorScreenPos();
-        var avail = ImGui.GetContentRegionAvail().X;
+        var avail = Ui.CardInnerWidth;
         Ui.Icon(icon, color);
         ImGui.SameLine(0, 10 * s);
         float titleH;
@@ -357,11 +357,18 @@ internal sealed class PlanPage : Page
         var after = ImGui.GetCursorScreenPos();
         var label = removable.Count == 1 ? "Remove it" : $"Remove all {removable.Count}";
         var size = Ui.LinkButtonSize(label, FontAwesomeIcon.TrashAlt);
-        ImGui.SetCursorScreenPos(new Vector2(start.X + avail - size.X, start.Y + (titleH - size.Y) / 2));
+        // The link's text ends 10 px inside its box; the trash icon sits centred in its round button.
+        // Line up what the eye sees: the end of the text with the right edge of the trash icons.
+        var iconInset = (RemoveButton * s - Ui.IconSize(FontAwesomeIcon.TrashAlt).X) / 2;
+        var right = start.X + avail - iconInset + 10 * s;
+        ImGui.SetCursorScreenPos(new Vector2(right - size.X, start.Y + (titleH - size.Y) / 2));
         if (Ui.LinkButton(label, Palette.Danger, FontAwesomeIcon.TrashAlt, "Takes these out of the order: " + Names(removable, catalog) + ".", "##removeall" + id))
             RemoveFromOrder(removable, catalog);
         ImGui.SetCursorScreenPos(after);
     }
+
+    /// <summary>Size of the round remove button on each row (before scaling).</summary>
+    private const float RemoveButton = 28;
 
     /// <summary>Last frame's height of each removable row, so the hover highlight can be drawn behind this frame's content.</summary>
     private readonly Dictionary<string, float> rowHeights = new();
@@ -375,13 +382,14 @@ internal sealed class PlanPage : Page
     {
         var s = Ui.S;
         var start = ImGui.GetCursorScreenPos();
-        var avail = ImGui.GetContentRegionAvail().X;
-        var button = 28 * s;
+        var avail = Ui.CardInnerWidth;
+        var button = RemoveButton * s;
         var canRemove = targets.Count > 0;
         rowHeights.TryGetValue(id, out var height);
 
-        var min = start - new Vector2(8 * s, 5 * s);
-        var max = start + new Vector2(avail + 8 * s, height + 5 * s);
+        // Highlight reaches 10 px into the card's padding on both sides, never past the card.
+        var min = start - new Vector2(10 * s, 6 * s);
+        var max = start + new Vector2(avail + 10 * s, height + 6 * s);
         if (canRemove && height > 0 && ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows) && ImGui.IsMouseHoveringRect(min, max))
             ImGui.GetWindowDrawList().AddRectFilled(min, max, Palette.U32(Palette.WithAlpha(Palette.Raised, 0.6f)), 10 * s);
 
@@ -395,7 +403,7 @@ internal sealed class PlanPage : Page
             var tip = targets.Count == 1 && targets[0] == itemId
                 ? $"Remove {catalog.ItemName(itemId)} from the order"
                 : $"Remove {Names(targets, catalog)} from the order (they need {catalog.ItemName(itemId)})";
-            if (Ui.IconButton("##rm" + id, FontAwesomeIcon.TrashAlt, tip, Ui.Kind.Danger, 28)) RemoveFromOrder(targets, catalog);
+            if (Ui.IconButton("##rm" + id, FontAwesomeIcon.TrashAlt, tip, Ui.Kind.Danger, RemoveButton)) RemoveFromOrder(targets, catalog);
             ImGui.SetCursorScreenPos(end);
         }
     }
