@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Dalamud.Game.ClientState.Conditions;
 using Lumina.Excel.Sheets;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
@@ -36,6 +37,33 @@ internal sealed class PlanService : IDisposable
         this.config = config;
         this.raphael = raphael;
         loading = Task.Run(GameCatalog.Build);
+        Services.ClientState.ClassJobChanged += OnClassJobChanged;
+        Services.ClientState.LevelChanged += OnLevelChanged;
+        Services.ClientState.Login += OnLogin;
+    }
+
+    /// <summary>When to check the character by itself: shortly after a job change, a level-up or a login.</summary>
+    private DateTime? autoCheckAt;
+
+    // Only the job being played can be measured exactly, so a job change is the moment to look. The new
+    // gearset's stats need a moment to settle first.
+    private void OnClassJobChanged(uint classJobId) => autoCheckAt = DateTime.UtcNow.AddSeconds(2.5);
+    private void OnLevelChanged(uint classJobId, uint level) => autoCheckAt = DateTime.UtcNow.AddSeconds(2.5);
+    private void OnLogin() => autoCheckAt = DateTime.UtcNow.AddSeconds(5);
+
+    /// <summary>The automatic check, quietly; it waits while crafting, gathering or between areas.</summary>
+    private void AutoCheck()
+    {
+        var c = Services.Condition;
+        if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null
+            || c[ConditionFlag.BetweenAreas] || c[ConditionFlag.BetweenAreas51] || c[ConditionFlag.OccupiedInCutSceneEvent]
+            || c[ConditionFlag.Crafting] || c[ConditionFlag.ExecutingCraftingAction] || c[ConditionFlag.Gathering] || c[ConditionFlag.ExecutingGatheringAction])
+        {
+            autoCheckAt = DateTime.UtcNow.AddSeconds(2);
+            return;
+        }
+        autoCheckAt = null;
+        CheckCharacter();
     }
 
     public GameCatalog? Catalog => loading.IsCompletedSuccessfully ? loading.Result : null;
@@ -62,6 +90,7 @@ internal sealed class PlanService : IDisposable
     {
         var catalog = Catalog;
         if (catalog == null) return;
+        if (autoCheckAt is { } at && DateTime.UtcNow >= at) AutoCheck();
 
         if (DateTime.UtcNow >= nextStockCheck && Services.ClientState.IsLoggedIn)
         {
@@ -82,7 +111,7 @@ internal sealed class PlanService : IDisposable
             nextEstimate = DateTime.UtcNow.AddSeconds(1);
             var cfg = config();
             var hqItems = cfg.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
-            Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains);
+            Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains, CollectableInputsFor(cfg));
             Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem);
         }
         if (!dirty) return;
@@ -258,6 +287,17 @@ internal sealed class PlanService : IDisposable
             config().Crafting.UseSpecialistActions && job.Specialist, hq ? null : 0);
     }
 
+    /// <summary>For the estimate: items that only come as collectables, the gatherer's GP, the cordials in the bags.</summary>
+    private CollectableInputs CollectableInputsFor(Configuration cfg)
+    {
+        var catalog = Catalog;
+        var profile = Profile;
+        int MaxGp(uint itemId)
+            => catalog?.GatherNeedsFor(itemId, JobLevel) is { } g && profile?.Job(g.ClassJobId) is { Stats.Length: >= 3 } js ? js.Stats[2] : 0;
+        var cordials = cfg.Run.UseCordials ? Cordials.InBags() : new List<Core.Gathering.Cordial>();
+        return new CollectableInputs(GameState.GatheredAsCollectable, MaxGp, cordials, cfg.Run.WaitForCollectableGp);
+    }
+
     /// <summary>Time for one craft of a recipe, from the rotation length when known.</summary>
     public TimeSpan PerCraft(RecipeInfo recipe, bool hq)
     {
@@ -342,5 +382,10 @@ internal sealed class PlanService : IDisposable
         return true;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        Services.ClientState.ClassJobChanged -= OnClassJobChanged;
+        Services.ClientState.LevelChanged -= OnLevelChanged;
+        Services.ClientState.Login -= OnLogin;
+    }
 }

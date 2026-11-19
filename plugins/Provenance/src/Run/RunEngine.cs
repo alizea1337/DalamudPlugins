@@ -130,11 +130,17 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Provenance's own gatherer (nodes, the gathering window, collectables, upkeep).</summary>
     public Gathering.Gatherer Gather { get; }
 
-    /// <summary>Collectables the order or the scrip earning needs: never aetherially reduced.</summary>
+    /// <summary>
+    /// Collectables the order or the scrip earning needs: never aetherially reduced. Every ordered
+    /// item counts, also when the bags already cover it (so it isn't gathered) or while the run earns
+    /// scrips (when the gathering list is the scrip plan's).
+    /// </summary>
     private IReadOnlySet<uint> NeededCollectables()
     {
         var set = plugin.Plans.ScripTasks.Select(t => t.Option.ItemId).ToHashSet();
         foreach (var t in Targets) set.Add(t.ItemId);
+        foreach (var l in plugin.Config.Order.Lines) set.Add(l.ItemId);
+        foreach (var l in plugin.Plans.Plan.Lines.Where(l => l.IsTarget)) set.Add(l.ItemId);
         return set;
     }
     /// <summary>Where the run was started (for "back to where the run started").</summary>
@@ -873,7 +879,7 @@ internal sealed class RunEngine : IDisposable
 
         // Time actually spent gathering (not paused, not waiting, not crafting), for the gathering rate.
         var now = DateTime.UtcNow;
-        if (Phase == RunPhase.Running && !craftingBetween && !Gather.Waiting) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
+        if (Phase == RunPhase.Running && !craftingBetween && !Gather.Waiting && !Gather.WaitingForGp) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
         lastGatherTick = now;
 
         if (cleaning)
@@ -1131,7 +1137,8 @@ internal sealed class RunEngine : IDisposable
     private void LearnGatheringRate()
     {
         var gathered = Targets.Where(t => t.Supply != Supply.Fish).Sum(t => t.Remaining);
-        if (gatherActiveSeconds < 60 || gathered < 10 || Targets.Any(t => t.Supply == Supply.Fish)) return;
+        // Fish and collectables go at their own pace (learned per catch and per node visit).
+        if (gatherActiveSeconds < 60 || gathered < 10 || Targets.Any(t => t.Supply == Supply.Fish || GameState.GatheredAsCollectable(t.ItemId))) return;
         var t = plugin.Config.Timings;
         t.GatheredPerMinute = Math.Clamp(Timings.Blend(t.GatheredPerMinute, gathered / (gatherActiveSeconds / 60)), 1, 120);
         plugin.Config.Save();
@@ -1147,11 +1154,35 @@ internal sealed class RunEngine : IDisposable
         foreach (var job in Crafter.Upcoming) crafting += plans.PerCraft(job.Recipe, job.Hq) * job.Crafts;
         if (Stage == RunStage.Craft || !Crafter.Started) return Stage == RunStage.Craft ? crafting : crafting + plans.Estimate.Crafting;
         var t = plugin.Config.Timings;
-        var left = Targets.Where(x => x.Supply != Supply.Fish).Sum(Left);
+        var gather = Targets.Where(x => x.Supply != Supply.Fish).ToList();
+        var left = gather.Where(x => !GameState.GatheredAsCollectable(x.ItemId)).Sum(Left);
         var fish = Targets.Where(x => x.Supply == Supply.Fish).Sum(Left);
+        // Collectables go by node visits, with the wait for GP before the regular ones.
+        var collect = gather.Where(x => GameState.GatheredAsCollectable(x.ItemId)).ToList();
+        var visits = collect.Sum(x => Estimator.Visits(Left(x), t));
+        var gpWait = CollectableGpWait(collect.Where(x => x.Supply == Supply.Gather).Sum(x => Estimator.Visits(Left(x), t)), t);
         // Only closed timed nodes left: the wait for the window comes on top.
         var wait = NextWindow is { } w && w > TimeSpan.Zero ? w : TimeSpan.Zero;
-        return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute)) + wait + crafting;
+        return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute))
+               + TimeSpan.FromSeconds(visits * t.SecondsPerCollectableVisit) + gpWait + wait + crafting;
+    }
+
+    /// <summary>Waiting for GP before the collectable nodes still to visit, from the GP there is now.</summary>
+    private TimeSpan CollectableGpWait(int visits, Timings t)
+    {
+        if (visits == 0 || !Settings.WaitForCollectableGp) return TimeSpan.Zero;
+        var job = GameState.CurrentJob;
+        var gatherer = job is 16 or 17;
+        var p = Services.Objects.LocalPlayer;
+        var maxGp = gatherer && p != null ? (int)p.MaxGp
+            : new uint[] { 16, 17 }.Max(j => plugin.Plans.Profile?.Job(j) is { Stats.Length: >= 3 } js ? js.Stats[2] : 0);
+        if (maxGp <= 0) maxGp = Core.Gathering.CollectableRotation.FullRotationGp;
+        // A collectable node open right now counts as a normal visit, from the GP it was opened with.
+        var gp = Gather.VisitStartGp is { } opened ? (int)opened : gatherer && p != null ? (int)p.CurrentGp : maxGp;
+        var cordials = Settings.UseCordials ? Cordials.InBags() : new List<Core.Gathering.Cordial>();
+        var readyIn = Settings.UseCordials ? Cordials.SecondsUntilReady() : 0;
+        return Core.Gathering.GpBudget.Simulate(visits, gp, maxGp, cordials, (int)t.GpPerCollectableVisit, t.SecondsPerCollectableVisit,
+            t.SecondsInCollectableNode, readyIn).Wait;
     }
 
     /// <summary>Still to gather for one target: bags plus what crafting already used, against the target.</summary>

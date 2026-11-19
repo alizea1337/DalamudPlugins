@@ -9,6 +9,7 @@ using Dalamud.Game.ClientState.Objects.Types;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
+using Provenance.Core.Estimating;
 using Provenance.Core.Gathering;
 using Provenance.Core.Planning;
 using Provenance.Core.Run;
@@ -53,12 +54,19 @@ internal sealed unsafe class Gatherer
     /// <summary>All GatheringPoint rows of the chosen node (base): the node spawns at one of them at a time.</summary>
     private HashSet<uint> nodePoints = new();
     private readonly HashSet<(uint Point, int X, int Z)> visited = new();
+    /// <summary>Node groups (bases) given up on for a while: no landing next to the node, or it won't open.</summary>
+    private readonly Dictionary<uint, DateTime> givenUp = new();
+    private static readonly TimeSpan GiveUpFor = TimeSpan.FromMinutes(10);
     private Vector3 spot;
     private int interactTries;
     private int approachWalks;
     private DateTime walkUntil;
     /// <summary>Opening from the mount failed: land before trying again.</summary>
     private bool mustLand;
+    /// <summary>The landing is only to drink a cordial (opening from the mount would work).</summary>
+    private bool landingForCordial;
+    /// <summary>Landing for a cordial failed at this node: wait for the GP instead.</summary>
+    private bool noCordialThisVisit;
     private int landPresses, landMoves;
     private bool wasOnNode;
     private Vector3 lastNodePosition;
@@ -96,15 +104,35 @@ internal sealed unsafe class Gatherer
         left = leftOf;
         neededCollectables = collectablesNeeded;
         visited.Clear();
+        givenUp.Clear();
         unreachable.Clear();
+        lastVisitEnd = null;
+        visitStart = null;
+        wasOnNode = false;
+        gpWaitSince = null;
+        gpWaitedThisCycle = 0;
         Waiting = false;
         Failure = null;
         Go(Step.Choose);
     }
 
+    private void NodeClosed()
+    {
+        wasOnNode = false;
+        OnVisitEnd();
+        plan = null;
+        solving = null;
+        luckUsed = false;
+        collectableFull = false;
+        if (node != null && current != null) MarkVisitedAt(lastNodePosition);
+    }
+
     public void Pause()
     {
         if (step == Step.Idle) return;
+        if (wasOnNode && !OnNode) NodeClosed();
+        lastVisitEnd = null;
+        EndGpWait();
         travel.Cancel();
         Vnav.Stop();
         step = Step.Paused;
@@ -118,6 +146,11 @@ internal sealed unsafe class Gatherer
 
     public void Stop()
     {
+        if (wasOnNode && !OnNode) NodeClosed();
+        wasOnNode = false;
+        visitStart = null;
+        lastVisitEnd = null;
+        EndGpWait();
         travel.Cancel();
         Vnav.Stop();
         step = Step.Idle;
@@ -133,6 +166,7 @@ internal sealed unsafe class Gatherer
         LearnVisibleNodes();
         if (OnNode)
         {
+            if (!wasOnNode) OnVisitStart();
             wasOnNode = true;
             WorkNode();
             return;
@@ -140,12 +174,7 @@ internal sealed unsafe class Gatherer
         if (wasOnNode)
         {
             // The node closed: it respawns elsewhere in its group, so mark this spot and pick again.
-            wasOnNode = false;
-            plan = null;
-            solving = null;
-            luckUsed = false;
-            collectableFull = false;
-            if (node != null) visited.Add((node.PointId, (int)lastNodePosition.X, (int)lastNodePosition.Z));
+            NodeClosed();
             Go(Step.Choose, 0.8);
             return;
         }
@@ -178,6 +207,7 @@ internal sealed unsafe class Gatherer
         bool CanReach(uint t) => reach.TryGetValue(t, out var r) ? r : reach[t] = Teleporter.CanReach(t);
 
         var best = default((GatherTarget Target, GatherPoint Point, int Score)?);
+        var skipped = false;
         foreach (var t in targets)
         {
             if (left(t) <= 0) continue;
@@ -189,6 +219,7 @@ internal sealed unsafe class Gatherer
                 if (BasePositions(t.ItemId, p.BaseId).Count == 0 || !CanReach(p.TerritoryId)) continue;
                 any = true;
                 if (p.Timed && !Eorzea.IsUp(p.Mask, now)) continue;
+                if (givenUp.TryGetValue(p.BaseId, out var until) && DateTime.UtcNow < until) { skipped = true; continue; }
                 // Timed nodes first (short windows), then this zone, then the cheapest teleport.
                 var cost = p.TerritoryId == here ? 0 : unlocked.Where(d => d.TerritoryId == p.TerritoryId).Select(d => (int)d.GilCost).DefaultIfEmpty(5000).Min();
                 var score = (p.Timed ? 0 : 1_000_000) + cost;
@@ -208,7 +239,8 @@ internal sealed unsafe class Gatherer
         if (best is not { } pick)
         {
             Waiting = true;
-            Status = "No node is up right now";
+            lastVisitEnd = null;
+            Status = skipped ? "Gave up on a node for a while; trying it again soon" : "No node is up right now";
             Wait(3);
             return;
         }
@@ -284,23 +316,22 @@ internal sealed unsafe class Gatherer
         if (travel.Current == Travel.State.Failed)
         {
             log($"Couldn't get to the {Catalog.ItemName(current!.Value.ItemId)} node: {travel.Failure}", true);
-            visited.Add((node!.PointId, (int)spot.X, (int)spot.Z));
+            MarkVisitedAt(spot);
             Go(Step.Choose, 2);
             return;
         }
         if (travel.Current != Travel.State.Arrived) return;
-        if (LiveNode() is { } live && Vector3.Distance(live.Position, me.Position) < NodeHere)
+        if (LiveNode() is { } live && Across(live.Position, me.Position) < NodeHere)
         {
             interactTries = 0;
             approachWalks = 0;
             landPresses = landMoves = 0;
-            mustLand = false;
+            mustLand = landingForCordial = noCordialThisVisit = false;
             Go(Step.Approach);
             return;
         }
         // Nothing at this spot right now: try the next one.
-        visited.Add((node!.PointId, (int)spot.X, (int)spot.Z));
-        foreach (var p in nodePoints) visited.Add((p, (int)spot.X, (int)spot.Z));
+        MarkVisitedAt(spot);
         NextSpot();
     }
 
@@ -318,10 +349,12 @@ internal sealed unsafe class Gatherer
     private void ApproachTick(IGameObject me)
     {
         var live = LiveNode();
-        if (live == null || Vector3.Distance(live.Position, me.Position) > NodeHere) { Vnav.Stop(); Go(Step.Choose); return; }
+        if (live == null || Across(live.Position, me.Position) > NodeHere) { Vnav.Stop(); Go(Step.Choose); return; }
         var c = Services.Condition;
         var mounted = c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted];
-        if (!mounted) mustLand = false;
+        if (!mounted) mustLand = landingForCordial = false;
+        // Landing only for a cordial, and the GP came back meanwhile: open from where we are.
+        if (landingForCordial && NeedsGpFirst() == null) mustLand = landingForCordial = false;
         if (!mustLand && InReach(live.Position, me.Position))
         {
             Vnav.Stop();
@@ -358,34 +391,84 @@ internal sealed unsafe class Gatherer
     private void Land(IGameObject me, IGameObject live)
     {
         if (Vnav.Busy && DateTime.UtcNow < walkUntil) { Status = "Flying down to the ground"; return; }
-        if (!Services.Condition[ConditionFlag.InFlight] || landPresses < 2)
+        var inFlight = Services.Condition[ConditionFlag.InFlight];
+        // High above the node (came in over a cliff edge): fly down beside it first, or the landing
+        // ends up on top of the cliff.
+        if (inFlight && !landingForCordial && landMoves == 0 && me.Position.Y - live.Position.Y > 3f)
         {
-            if (++landPresses > 8) { GiveUpLanding(live); return; }
+            landMoves++;
+            landPresses = 0;
+            if (Vnav.NearestPoint(live.Position, 4f, 6f) is { } beside)
+            {
+                Status = "Flying down to the node";
+                Vnav.MoveTo(beside, true);
+                walkUntil = DateTime.UtcNow.AddSeconds(8);
+            }
+            Wait(0.5);
+            return;
+        }
+        if (!inFlight || landPresses < 2)
+        {
+            if (++landPresses > 8) { LandingFailed(live, $"Couldn't get off the mount next to the {Catalog.ItemName(current!.Value.ItemId)} node."); return; }
             Status = Services.Condition[ConditionFlag.InFlight] ? "Landing" : "Dismounting";
             ActionManager.Instance()->UseAction(ActionType.GeneralAction, LandOrDismount);
             Wait(1.2);
             return;
         }
-        if (landMoves >= 2) { GiveUpLanding(live); return; }
+        // Two presses changed nothing. A landing just for a cordial never flies off (opening from the
+        // mount right here still works); otherwise try the ground below, then ground a few yalms away.
+        if (landingForCordial || landMoves >= 2) { LandingFailed(live, $"Couldn't land next to the {Catalog.ItemName(current!.Value.ItemId)} node."); return; }
         var away = new Vector2(me.Position.X - live.Position.X, me.Position.Z - live.Position.Z);
         away = away.LengthSquared() > 0.01f ? Vector2.Normalize(away) : Vector2.UnitX;
-        var near = landMoves == 0 ? me.Position : me.Position + new Vector3(away.X, 0, away.Y) * 5f;
+        var floor = landMoves == 0
+            ? Vnav.NearestPoint(me.Position, 5f, 30f)
+            : Vnav.NearestPoint(me.Position + new Vector3(away.X, 0, away.Y) * 5f, 5f, 30f);
         landMoves++;
         landPresses = 0;
-        if (Vnav.NearestPoint(near, 5f, 10f) is { } floor)
+        if (floor is { } ground)
         {
             Status = "Flying down to the ground";
-            Vnav.MoveTo(floor, true);
+            Vnav.MoveTo(ground, true);
             walkUntil = DateTime.UtcNow.AddSeconds(5);
         }
         Wait(0.5);
     }
 
-    private void GiveUpLanding(IGameObject live)
+    /// <summary>
+    /// Landing didn't work. When it was only for a cordial (no moves made, still in reach), skip
+    /// cordials at this node, wait for the GP on the mount and open from it (the game lands by itself
+    /// then); otherwise give the node up.
+    /// </summary>
+    private void LandingFailed(IGameObject live, string why)
+    {
+        if (!landingForCordial) { GiveUp(live, why); return; }
+        Vnav.Stop();
+        noCordialThisVisit = true;
+        mustLand = landingForCordial = false;
+        landPresses = landMoves = 0;
+        Go(Step.Interact);
+    }
+
+    /// <summary>XZ distance: a node above or below still counts as here; landing and walking deal with the height.</summary>
+    private static float Across(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.X, a.Z), new Vector2(b.X, b.Z));
+
+    /// <summary>Marks the known spawn spots at a position (by their own keys), so the next trip skips them.</summary>
+    private void MarkVisitedAt(Vector3 position)
+    {
+        foreach (var spawn in BasePositions(current!.Value.ItemId, node!.BaseId))
+            if (Across(spawn.At, position) < 3f) visited.Add((spawn.Point, (int)spawn.At.X, (int)spawn.At.Z));
+    }
+
+    /// <summary>
+    /// Gives up on this node for a while (no landing next to it, or it won't open): its node group is
+    /// skipped when choosing, so the run moves on instead of flying straight back to it.
+    /// </summary>
+    private void GiveUp(IGameObject live, string why)
     {
         Vnav.Stop();
-        log($"Couldn't land next to the {Catalog.ItemName(current!.Value.ItemId)} node; trying another spot.", false);
-        visited.Add((node!.PointId, (int)live.Position.X, (int)live.Position.Z));
+        log($"{why} Trying other nodes; this one again in {(int)GiveUpFor.TotalMinutes} min.", false);
+        MarkVisitedAt(live.Position);
+        givenUp[node!.BaseId] = DateTime.UtcNow + GiveUpFor;
         mustLand = false;
         Go(Step.Choose, 1);
     }
@@ -393,7 +476,7 @@ internal sealed unsafe class Gatherer
     private void InteractTick(IGameObject me)
     {
         var live = LiveNode();
-        if (live == null || Vector3.Distance(live.Position, me.Position) > NodeHere) { Go(Step.Choose); return; }
+        if (live == null || Across(live.Position, me.Position) > NodeHere) { Go(Step.Choose); return; }
         // Drifted out of reach (a landing that slid down a slope): walk up again first.
         if (!InReach(live.Position, me.Position) && approachWalks < ApproachWalks) { Go(Step.Approach); return; }
         var c = Services.Condition;
@@ -407,11 +490,42 @@ internal sealed unsafe class Gatherer
         }
         if (NeedsGpFirst() is { } gp)
         {
+            gpWaitSince ??= DateTime.UtcNow;
+            if (plugin.Config.Run.UseCordials && !noCordialThisVisit && Cordials.AnyInBags)
+            {
+                if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted])
+                {
+                    // Cordials can't be drunk on a mount. Land only when one will really be drunk (judged
+                    // at the GP there'll be when the cooldown ends, before the GP is back by itself) and
+                    // the ground below is still in reach of the node; otherwise wait up here and open
+                    // from the mount.
+                    var regenSeconds = (gp.Need - (int)gp.Have) / GpBudget.RegenPerSecond;
+                    var readyIn = Cordials.SecondsUntilReady();
+                    var gpThen = (int)(gp.Have + readyIn * GpBudget.RegenPerSecond);
+                    var groundInReach = Vnav.NearestPoint(me.Position, 2f, 8f) is { } below && InReach(live.Position, below);
+                    if (readyIn < regenSeconds && gpThen < gp.Need && groundInReach
+                        && GpBudget.Pick(Cordials.KindsInBags(), gpThen, gp.Need, gp.Max) != null)
+                    {
+                        mustLand = true;
+                        landingForCordial = true;
+                        landPresses = landMoves = 0;
+                        Go(Step.Approach);
+                        return;
+                    }
+                }
+                else if (GpBudget.Pick(Cordials.Ready(), (int)gp.Have, gp.Need, gp.Max) is { } cordial && Cordials.Drink(cordial))
+                {
+                    log($"Drank a {Cordials.Name(cordial)} (+{cordial.Gp} GP) instead of waiting for GP.", false);
+                    Wait(1.5);
+                    return;
+                }
+            }
             Status = $"Waiting for GP for a full collectable rotation ({gp.Have} of {gp.Need})";
             Wait(1);
             return;
         }
-        if (++interactTries > 4) { visited.Add((node!.PointId, (int)live.Position.X, (int)live.Position.Z)); Go(Step.Choose); return; }
+        EndGpWait();
+        if (++interactTries > 4) { GiveUp(live, $"Couldn't open the {Catalog.ItemName(current!.Value.ItemId)} node."); return; }
         Status = "Opening the node";
         lastNodePosition = live.Position;
         Interact.With(live);
@@ -422,12 +536,64 @@ internal sealed unsafe class Gatherer
     /// A collectable gets the top reward only with the full rotation (Scrutiny, Solid Reason): on a
     /// regular node, wait for that much GP (or the most the job has). Timed nodes would close meanwhile.
     /// </summary>
-    private (uint Have, int Need)? NeedsGpFirst()
+    /// <summary>Standing at a node until the GP is back (not counted as gathering time).</summary>
+    public bool WaitingForGp => gpWaitSince != null;
+    private DateTime? gpWaitSince;
+    private double gpWaitedThisCycle;
+
+    private void EndGpWait()
     {
-        if (!plugin.Config.Run.WaitForCollectableGp || node is not { Timed: false } || current is not { } cur || !GameState.OnlyCollectable(cur.ItemId)) return null;
+        if (gpWaitSince is { } since) gpWaitedThisCycle += (DateTime.UtcNow - since).TotalSeconds;
+        gpWaitSince = null;
+    }
+
+    // A collectable node visit, measured to learn what one gives, spends and takes.
+    private (uint ItemId, uint Gp, int Items, DateTime At)? visitStart;
+    /// <summary>When the last node closed; null after a pause, a stop or a wait, so idle time isn't learned.</summary>
+    private DateTime? lastVisitEnd;
+
+    /// <summary>GP when the collectable node now open was opened (null when none is open).</summary>
+    public uint? VisitStartGp => OnNode ? visitStart?.Gp : null;
+
+    private void OnVisitStart()
+    {
+        EndGpWait();
+        visitStart = current is { } cur && GameState.GatheredAsCollectable(cur.ItemId) && Services.Objects.LocalPlayer is { } p
+            ? (cur.ItemId, p.CurrentGp, GameState.GatheredInBags(cur.ItemId), DateTime.UtcNow)
+            : null;
+    }
+
+    private void OnVisitEnd()
+    {
+        var now = DateTime.UtcNow;
+        if (visitStart is { } v && Services.Objects.LocalPlayer is { } p)
+        {
+            var t = plugin.Config.Timings;
+            var gained = GameState.GatheredInBags(v.ItemId) - v.Items;
+            if (gained > 0)
+            {
+                t.CollectablesPerVisit = Math.Clamp(Timings.Blend(t.CollectablesPerVisit, gained), 1, 10);
+                t.GpPerCollectableVisit = Math.Clamp(Timings.Blend(t.GpPerCollectableVisit, Math.Max(0, (int)v.Gp - (int)p.CurrentGp)), 0, 1000);
+                var inNode = (now - v.At).TotalSeconds;
+                if (inNode is >= 3 and <= 180) t.SecondsInCollectableNode = Math.Clamp(Timings.Blend(t.SecondsInCollectableNode, inNode), 3, 180);
+                // From the last node closing to this one (travel and the node), waiting for GP left out.
+                // Pauses, stops and waits clear lastVisitEnd, so idle time never gets in.
+                var cycle = lastVisitEnd is { } last ? (now - last).TotalSeconds - gpWaitedThisCycle : 0;
+                if (cycle is >= 10 and <= 240) t.SecondsPerCollectableVisit = Math.Clamp(Timings.Blend(t.SecondsPerCollectableVisit, cycle), 15, 240);
+                plugin.Config.Save();
+            }
+        }
+        visitStart = null;
+        lastVisitEnd = now;
+        gpWaitedThisCycle = 0;
+    }
+
+    private (uint Have, int Need, int Max)? NeedsGpFirst()
+    {
+        if (!plugin.Config.Run.WaitForCollectableGp || node is not { Timed: false } || current is not { } cur || !GameState.GatheredAsCollectable(cur.ItemId)) return null;
         if (Services.Objects.LocalPlayer is not { } p) return null;
-        var need = (int)Math.Min(CollectableRotation.FullRotationGp, p.MaxGp);
-        return p.CurrentGp < need ? (p.CurrentGp, need) : null;
+        var need = GpBudget.Need((int)p.MaxGp);
+        return need > 0 && p.CurrentGp < need ? (p.CurrentGp, need, (int)p.MaxGp) : null;
     }
 
     // ------------------------------------------------------------------ inside a node
@@ -601,6 +767,7 @@ internal sealed unsafe class Gatherer
 
     private void Go(Step next, double wait = 0)
     {
+        if (next != Step.Interact) EndGpWait();
         step = next;
         stepSince = DateTime.UtcNow;
         Wait(wait);

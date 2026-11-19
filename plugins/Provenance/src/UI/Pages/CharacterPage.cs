@@ -83,7 +83,7 @@ internal sealed class CharacterPage : Page
             return;
         }
 
-        Ui.Heading(p.World.Length > 0 ? $"{p.Name} of {p.World}" : p.Name, $"Checked {Ago(p.CheckedAtUtc)}. Each job shows its highest item level gearset, the one a run would equip.");
+        Ui.Heading(p.World.Length > 0 ? $"{p.Name} of {p.World}" : p.Name, $"Checked {Ago(p.CheckedAtUtc)}, and again by itself shortly after every job change. Each job shows its highest item level gearset, the one a run would equip.");
         if (error != null) Ui.Wrapped(error, Palette.Danger);
         if (p.Note != null)
         {

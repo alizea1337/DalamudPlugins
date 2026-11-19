@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Provenance.Core.Catalog;
+using Provenance.Core.Gathering;
 using Provenance.Core.Planning;
 
 namespace Provenance.Core.Estimating;
@@ -19,12 +20,27 @@ public sealed class Timings
     /// <summary>Gathered items per minute, travel between nodes included.</summary>
     public double GatheredPerMinute { get; set; } = 12;
     public double FishPerMinute { get; set; } = 1.5;
+    /// <summary>Collectables a collectable node gives (a few per node, with Solid Reason more).</summary>
+    public double CollectablesPerVisit { get; set; } = 2;
+    /// <summary>GP a collectable node visit spends (Scrutiny, sometimes Solid Reason).</summary>
+    public double GpPerCollectableVisit { get; set; } = 350;
+    /// <summary>One collectable node: getting there and working it, waiting for GP not included.</summary>
+    public double SecondsPerCollectableVisit { get; set; } = 45;
+    /// <summary>The part of a collectable visit spent inside the node, where GP doesn't come back.</summary>
+    public double SecondsInCollectableNode { get; set; } = 20;
 
     /// <summary>Moves a figure toward a new measurement (exponential average, 30% weight).</summary>
     public static double Blend(double current, double measured) => current * 0.7 + measured * 0.3;
 }
 
 public sealed record CraftEstimate(RecipeInfo Recipe, int Crafts, bool Hq, int? StepsPerCraft, TimeSpan Duration, TimeSpan FinishedAfter);
+
+/// <summary>What the estimate needs about collectables; without it they count like any gathered item.</summary>
+/// <param name="GatheredAsCollectable">Items nodes hand out as collectables (a few per node).</param>
+/// <param name="MaxGp">The gatherer's maximum GP for an item (0 when unknown).</param>
+/// <param name="Cordials">Cordials a run may drink, one entry per potion.</param>
+/// <param name="WaitForGp">The run waits for GP before collectable nodes.</param>
+public sealed record CollectableInputs(Func<uint, bool> GatheredAsCollectable, Func<uint, int> MaxGp, IReadOnlyList<Cordial> Cordials, bool WaitForGp);
 
 public sealed record OrderEstimate(
     TimeSpan Gathering,
@@ -33,7 +49,9 @@ public sealed record OrderEstimate(
     /// <summary>When each ordered item is ready, counted from the start of the run.</summary>
     IReadOnlyDictionary<uint, TimeSpan> ReadyAfter,
     /// <summary>Some recipes have no rotation yet, so a typical step count was assumed.</summary>
-    bool Approximate)
+    bool Approximate,
+    /// <summary>Part of <see cref="Gathering"/>: waiting for GP before collectable nodes, and the cordials drunk instead.</summary>
+    GpWaitEstimate GpWait = default)
 {
     public TimeSpan Crafting => Crafts.Aggregate(TimeSpan.Zero, (t, c) => t + c.Duration);
     public TimeSpan Total => Gathering + Crafting;
@@ -53,13 +71,21 @@ public static class Estimator
 
     /// <param name="steps">Rotation length for a recipe (and whether HQ is wanted), or null when unknown.</param>
     /// <param name="hqWanted">Whether an ordered item should be crafted in high quality.</param>
-    public static OrderEstimate Estimate(Plan plan, Timings t, Func<RecipeInfo, bool, int?> steps, Func<uint, bool> hqWanted)
+    /// <param name="collectables">Collectable gathering: by node visits, with the wait for GP.</param>
+    public static OrderEstimate Estimate(Plan plan, Timings t, Func<RecipeInfo, bool, int?> steps, Func<uint, bool> hqWanted,
+        CollectableInputs? collectables = null)
     {
         if (plan.Lines.Count == 0) return OrderEstimate.Empty;
 
-        var gathered = plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed).Sum(l => Math.Max(0, l.Remaining));
+        var collectable = collectables?.GatheredAsCollectable ?? (_ => false);
+        var gatherLines = plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed && l.Remaining > 0).ToList();
+        var gathered = gatherLines.Where(l => !collectable(l.ItemId)).Sum(l => l.Remaining);
         var fished = plan.Lines.Where(l => l.Supply == Supply.Fish).Sum(l => Math.Max(0, l.Remaining));
-        var gathering = TimeSpan.FromMinutes(gathered / Math.Max(0.1, t.GatheredPerMinute) + fished / Math.Max(0.05, t.FishPerMinute));
+        var collectLines = gatherLines.Where(l => collectable(l.ItemId)).ToList();
+        var gpWait = CollectableGp(collectLines, t, collectables);
+        var gathering = TimeSpan.FromMinutes(gathered / Math.Max(0.1, t.GatheredPerMinute) + fished / Math.Max(0.05, t.FishPerMinute))
+                        + TimeSpan.FromSeconds(collectLines.Sum(l => Visits(l.Remaining, t)) * t.SecondsPerCollectableVisit)
+                        + gpWait.Wait;
         var timed = plan.Lines.Any(l => l.Supply == Supply.GatherTimed && l.Remaining > 0);
 
         var crafts = new List<CraftEstimate>();
@@ -85,7 +111,27 @@ public static class Estimator
         foreach (var line in plan.Lines.Where(l => l.IsTarget && l.Supply != Supply.Craft))
             ready.TryAdd(line.ItemId, gathering);
 
-        return new OrderEstimate(gathering, timed, crafts, ready, approximate);
+        return new OrderEstimate(gathering, timed, crafts, ready, approximate, gpWait);
+    }
+
+    /// <summary>Collectable node visits for an amount of collectables.</summary>
+    public static int Visits(int collectables, Timings t)
+        => collectables <= 0 ? 0 : (int)Math.Ceiling(collectables / Math.Max(0.5, t.CollectablesPerVisit));
+
+    /// <summary>
+    /// Waiting for GP before the collectable nodes still to visit (regular nodes only: timed ones are
+    /// never waited for), starting from <paramref name="startGp"/> (full when null).
+    /// </summary>
+    public static GpWaitEstimate CollectableGp(IEnumerable<PlanLine> collectLines, Timings t, CollectableInputs? inputs, int? startGp = null)
+    {
+        if (inputs is not { WaitForGp: true }) return GpWaitEstimate.None;
+        var lines = collectLines.ToList();
+        var visits = lines.Where(l => l.Supply == Supply.Gather).Sum(l => Visits(l.Remaining, t));
+        if (visits == 0) return GpWaitEstimate.None;
+        var maxGp = lines.Max(l => inputs.MaxGp(l.ItemId));
+        if (maxGp <= 0) maxGp = CollectableRotation.FullRotationGp;
+        return GpBudget.Simulate(visits, startGp ?? maxGp, maxGp, inputs.Cordials, (int)t.GpPerCollectableVisit, t.SecondsPerCollectableVisit,
+            t.SecondsInCollectableNode);
     }
 
     /// <summary>"under a minute", "about 12 min", "about 1 h 05 min".</summary>

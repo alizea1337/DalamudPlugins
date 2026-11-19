@@ -117,6 +117,8 @@ public sealed class RunSettings
     public bool DiscardTimedExtras { get; set; } = true;
     /// <summary>Before a collectable on a regular node, wait next to it until there's GP for the full rotation.</summary>
     public bool WaitForCollectableGp { get; set; } = true;
+    /// <summary>With <see cref="WaitForCollectableGp"/>: drink a cordial from the bags instead of waiting.</summary>
+    public bool UseCordials { get; set; } = true;
     /// <summary>When a needed master book or folklore tome costs more scrips than you have, earn them first with collectables.</summary>
     public bool EarnScrips { get; set; } = true;
     /// <summary>Extract materia from fully spiritbonded gear between nodes.</summary>

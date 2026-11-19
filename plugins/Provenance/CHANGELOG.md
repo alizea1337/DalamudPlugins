@@ -15,6 +15,16 @@ Gathering without GatherBuddy Reborn.
 - Settings: "Throw away extra gathered items" has a new option under it, "Also from timed nodes"
   (on by default). Switch it off to keep the extras that unspoiled, legendary and ephemeral nodes
   bring in.
+- Collectables: items nodes hand out as collectables (the Rarefied ones, aethersand sources such as
+  Fire Moraine, custom delivery and quest items) are counted from the collectables in your bags,
+  and aetherial reduction never touches anything the order names, even when the bags already hold
+  it. Before a collectable on a regular node the run waits until there's
+  GP for the full rotation (600), so collectability reaches the top reward; with "Drink cordials
+  instead of waiting" (on by default) it drinks a Hi-Cordial, Cordial or Watered Cordial from your
+  bags instead, the smallest that fills the gap. Timed nodes are never waited for.
+- Estimates count collectables by node visits and include the wait for GP and the cordials drunk;
+  the plan says how much of the gathering time is waiting. What a collectable visit gives, spends
+  and takes is learned from your own runs.
 - Between nodes: materia extraction from fully spiritbonded gear, and aetherial reduction of spare
   collectables when the bags run low (never while a collectable the order needs is in the bags).
   Both in Settings.

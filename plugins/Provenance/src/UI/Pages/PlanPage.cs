@@ -136,6 +136,11 @@ internal sealed class PlanPage : Page
         if (e.Gathering > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Gathering).Replace("about ", "") + " gathering");
         if (e.Crafting > TimeSpan.Zero) parts.Add(Estimator.Describe(e.Crafting).Replace("about ", "") + " crafting");
         var text = $"{Capitalize(Estimator.Describe(e.Total))} for the whole order ({string.Join(", ", parts)}).";
+        if (e.GpWait.Wait > TimeSpan.Zero)
+            text += $" Gathering includes {Estimator.Describe(e.GpWait.Wait)} of waiting for GP before collectables"
+                    + (e.GpWait.Cordials > 0 ? $", after {CordialCount(e.GpWait.Cordials)}." : ".");
+        else if (e.GpWait.Cordials > 0)
+            text += $" {Capitalize(CordialCount(e.GpWait.Cordials))} {(e.GpWait.Cordials == 1 ? "keeps" : "keep")} the GP up for the collectables.";
         if (e.HasTimedNodes) text += " Waiting for timed nodes comes on top.";
         if (e.Approximate) text += Plans.Profile == null ? " Check your character for closer crafting times." : " Still working out some rotations.";
         Ui.Icon(FontAwesomeIcon.Clock, Palette.TextMuted, small: true);
@@ -145,6 +150,8 @@ internal sealed class PlanPage : Page
     }
 
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    private static string CordialCount(int n) => n == 1 ? "one cordial" : $"{n} cordials";
 
     private void DrawOrderHeader()
     {

@@ -91,31 +91,29 @@ internal static unsafe class GameState
         return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
     }
 
-    private static readonly Dictionary<uint, bool> OnlyCollectableCache = new();
-
-    /// <summary>
-    /// Items that only ever come as collectables (the "Rarefied" ones); the game's item count skips
-    /// them. The sheet's AlwaysCollectable flag is missing on most (all of Dawntrail's), but such an
-    /// item never stacks, while one that also comes normally (Fire Moraine, fish) stacks to 999.
-    /// Gear never stacks either, so it only counts with the flag.
-    /// </summary>
-    public static bool OnlyCollectable(uint itemId)
+    private static readonly Lazy<HashSet<uint>> GatheredCollectables = new(() =>
     {
-        if (!OnlyCollectableCache.TryGetValue(itemId, out var only))
-        {
-            var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId);
-            only = row is { IsCollectable: true } r && (r.AlwaysCollectable || (r.StackSize <= 1 && r.EquipSlotCategory.RowId == 0));
-            OnlyCollectableCache[itemId] = only;
-        }
-        return only;
-    }
+        var items = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>();
+        var set = new HashSet<uint>();
+        foreach (var gi in Services.Data.GetExcelSheet<Lumina.Excel.Sheets.GatheringItem>())
+            if (gi.Item.RowId is > 0 and < 1_000_000 && items.GetRowOrDefault(gi.Item.RowId) is { IsCollectable: true })
+                set.Add(gi.Item.RowId);
+        return set;
+    });
 
     /// <summary>
-    /// What a run counts as gathered: normal-quality items in the main bags, and for items that only
-    /// come as collectables, the collectables (any collectability).
+    /// Items a gathering node hands out as collectables: every gathered item that is a collectable
+    /// (the Rarefied ones, custom delivery and quest items, aethersand sources such as Fire Moraine).
+    /// No item is gathered both ways, whatever its stack size. Fish aren't included.
+    /// </summary>
+    public static bool GatheredAsCollectable(uint itemId) => GatheredCollectables.Value.Contains(itemId);
+
+    /// <summary>
+    /// What a run counts as gathered: normal-quality items in the main bags, and for items nodes hand
+    /// out as collectables, the collectables (any collectability).
     /// </summary>
     public static int GatheredInBags(uint itemId)
-        => BagCount(itemId, false) + (OnlyCollectable(itemId) ? Collectables(itemId).Count : 0);
+        => BagCount(itemId, false) + (GatheredAsCollectable(itemId) ? Collectables(itemId).Count : 0);
 
     /// <summary>Collectability of each collectable of an item in the main bags (collectables don't count as normal items).</summary>
     public static List<int> Collectables(uint itemId)

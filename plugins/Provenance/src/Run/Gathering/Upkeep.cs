@@ -71,8 +71,10 @@ internal sealed unsafe class Upkeep
                 var s = c->GetInventorySlot(i);
                 if (s == null || !s->IsCollectable()) continue;
                 var id = s->GetBaseItemId();
+                // Only reducible ones show up in the reduction window, so only those are at risk.
+                if (items.GetRowOrDefault(id)?.AetherialReduce is not > 0) continue;
                 if (needed.Contains(id)) { anyNeeded = true; continue; }
-                if (items.GetRowOrDefault(id)?.AetherialReduce > 0) result.Add(id);
+                result.Add(id);
             }
         }
         return (result, anyNeeded);

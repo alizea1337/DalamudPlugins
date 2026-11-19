@@ -55,9 +55,11 @@ public static class CollectableRotation
         bool Brazen() => s.Level >= a.BrazenLevel && s.Gp >= a.BrazenCost;
         bool Scrutiny() => s.Level >= a.ScrutinyLevel && s.Gp >= a.ScrutinyCost && !s.ScrutinyActive;
 
+        // Only steps the rotation would take count. Brazen's best roll is luck, except under Collector's
+        // High Standard, which makes it sure (and Brazen is picked then).
         var oneStepReaches = (s.ScourGain + s.Collectability >= target && Scour())
                              || (s.MeticulousGain + s.Collectability >= target && Meticulous())
-                             || (s.BrazenGainMax + s.Collectability >= target && Brazen());
+                             || (s.HighStandard && s.BrazenGainMax + s.Collectability >= target && Brazen());
         if (fullRotation && !oneStepReaches && Scrutiny()) return GatherAction.Scrutiny;
         if (s.MeticulousGain + s.Collectability >= target && Meticulous()) return GatherAction.Meticulous;
         if (s.HighStandard && Brazen()) return GatherAction.Brazen;

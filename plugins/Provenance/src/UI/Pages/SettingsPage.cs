@@ -266,6 +266,12 @@ internal sealed class SettingsPage : Page
         }
         v = rs.WaitForCollectableGp;
         if (Ui.Checkbox("Wait for GP before collectables", ref v, "The top reward needs the full collectable rotation (Scrutiny, Solid Reason), which takes 600 GP. On regular nodes the run waits next to the node until the GP is back; timed nodes are never waited for.")) { rs.WaitForCollectableGp = v; Config.Save(); }
+        if (rs.WaitForCollectableGp)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            v = rs.UseCordials;
+            if (Ui.Checkbox("Drink cordials instead of waiting", ref v, "Uses a Hi-Cordial, Cordial or Watered Cordial from your bags, the smallest that fills the gap, whenever one is off cooldown. Never buys any.")) { rs.UseCordials = v; Config.Save(); }
+        }
         v = rs.ExtractMateria;
         if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
         v = rs.ReduceCollectables;

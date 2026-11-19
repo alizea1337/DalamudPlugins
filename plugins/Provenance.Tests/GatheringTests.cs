@@ -57,6 +57,28 @@ public class GatheringTests
     private static readonly CollectableActions Acts = new(50, 0, 50, 100, 50, 0, 50, 200, 25, 300, 90);
 
     [Fact]
+    public void Brazens_best_roll_does_not_stop_scrutiny()
+    {
+        // 600 of 1000, two integrity left: neither Scour (900) nor Meticulous (825) gets there in one
+        // step. Only Brazen's luckiest roll would, so Scrutiny comes first instead of settling at 825.
+        var s = new CollectableState(Collectability: 600, Integrity: 2, MaxIntegrity: 4, ScourGain: 300, MeticulousGain: 225, BrazenGainMax: 450,
+            LowThreshold: 400, MidThreshold: 700, HighThreshold: 1000, Gp: 500, Level: 100, SolidAgeActive: false, ScrutinyActive: false,
+            HighStandard: false, Standard: false, ItemsLeft: 1);
+        Assert.Equal(GatherAction.Scrutiny, CollectableRotation.Next(s, Acts, fullRotation: true));
+    }
+
+    [Fact]
+    public void Collectors_high_standard_makes_brazen_sure()
+    {
+        // 700 of 1000: Scour (900) and Meticulous (850) fall short, but High Standard makes Brazen's
+        // +300 sure, so Brazen goes straight there and Scrutiny's GP is kept.
+        var s = new CollectableState(Collectability: 700, Integrity: 2, MaxIntegrity: 4, ScourGain: 200, MeticulousGain: 150, BrazenGainMax: 300,
+            LowThreshold: 400, MidThreshold: 700, HighThreshold: 1000, Gp: 200, Level: 100, SolidAgeActive: false, ScrutinyActive: false,
+            HighStandard: true, Standard: false, ItemsLeft: 1);
+        Assert.Equal(GatherAction.Brazen, CollectableRotation.Next(s, Acts, fullRotation: true));
+    }
+
+    [Fact]
     public void Collectables_reach_the_top_tier_then_collect()
     {
         var s = new CollectableState(Collectability: 0, Integrity: 4, MaxIntegrity: 4, ScourGain: 150, MeticulousGain: 100, BrazenGainMax: 200,
