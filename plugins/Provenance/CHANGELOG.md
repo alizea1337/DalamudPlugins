@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- Plan page: quieter remove actions. Each row in "Get these yourself" and "Your character can't do
+  this yet" has a small round trash button, centred on the row, muted until hovered; hovering a row
+  highlights it, and the tooltip names what gets removed. "Remove all" sits in the card's title line
+  as a quiet red action, lined up with the trash column. "Check again" for the stats sits on the
+  stats line.
+
 ## 0.6.1
 
 - Specialist crafters: intermediates no longer fail with "Raphael found no rotation". raphael-cli
