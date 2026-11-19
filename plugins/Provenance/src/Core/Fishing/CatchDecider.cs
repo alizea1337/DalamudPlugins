@@ -50,7 +50,19 @@ public enum RodMoveKind
 }
 
 /// <summary>What a <see cref="RodMoveKind.Wait"/> waits for.</summary>
-public enum RodWait { None, Window, Intuition, Predator, Gp, Action }
+public enum RodWait
+{
+    None,
+    /// <summary>The target's window (or, with <see cref="RodMove.Fish"/> a predator, the window to come close enough for the last predator catch).</summary>
+    Window,
+    /// <summary>Fisher's Intuition, after every predator was caught.</summary>
+    Intuition,
+    /// <summary>The window of predator <see cref="RodMove.Fish"/>: every predator still needed is out of its window.</summary>
+    Predator,
+    Gp,
+    /// <summary>Action <see cref="RodMove.Id"/> to become usable.</summary>
+    Action,
+}
 
 /// <summary>One move of the rod: at most one game action per tick.</summary>
 /// <param name="Id">The action (or bait) id.</param>
@@ -106,11 +118,12 @@ public sealed record RodSnapshot
     public int Left { get; init; }
     /// <summary>Predator catches toward the next Fisher's Intuition, by fish.</summary>
     public IReadOnlyDictionary<uint, int> Progress { get; init; } = new Dictionary<uint, int>();
+    /// <summary>The target's window (<see cref="CatchPlan.Window"/>: its own, narrowed by its mooch chain's).</summary>
     public CatchWindowState Window { get; init; } = CatchWindowState.Always;
     /// <summary>The target's window has been open during this session.</summary>
     public bool WindowSeenOpen { get; init; }
-    /// <summary>A predator bites now (its own time and weather window).</summary>
-    public Func<uint, bool> PredatorOpen { get; init; } = _ => true;
+    /// <summary>A predator's window (<see cref="CatchPlan.PredatorWindows"/>): open now, or when it opens. Always open without one.</summary>
+    public Func<uint, CatchWindowState> PredatorWindow { get; init; } = _ => CatchWindowState.Always;
     /// <summary>The cast in the water or biting; null when unknown.</summary>
     public RodCast? Cast { get; init; }
     /// <summary>Seconds since that cast went out (the bite-time data's reference point).</summary>
@@ -202,18 +215,21 @@ public static class CatchDecider
 
     /// <summary>
     /// The rule's fish is still wanted: the target while the order wants more (the slap fish only while
-    /// Surface Slap is affordable), a predator until its count toward Fisher's Intuition is reached.
+    /// Surface Slap is affordable and not up), a predator in its window until its count toward Fisher's
+    /// Intuition is reached.
     /// </summary>
     public static bool Wanted(CatchPlan plan, HookRule rule, RodSnapshot s)
     {
         if (rule.Route == 0)
         {
             if (s.Left <= 0) return false;
-            return rule.Role != CatchRole.Slap || s.Gp >= FishingIds.SurfaceSlapGp;
+            // Under Surface Slap the slap fish doesn't bite (status 1803), so a bite with its tug is another
+            // fish; hooking it would end the slap.
+            return rule.Role != CatchRole.Slap || !s.Has(FishingIds.SurfaceSlapStatus) && s.Gp >= FishingIds.SurfaceSlapGp;
         }
         if (rule.Route > plan.Predators.Count) return false;
         var route = plan.Route(rule.Route);
-        return s.Caught(route.Fish.ItemId) < route.Count && s.PredatorOpen(route.Fish.ItemId);
+        return s.Caught(route.Fish.ItemId) < route.Count && s.PredatorWindow(route.Fish.ItemId).Open;
     }
 
     // ------------------------------------------------------------------ the line in the water
@@ -266,7 +282,8 @@ public static class CatchDecider
 
     /// <summary>What can be fished now: a route to cast for, or why not.</summary>
     /// <param name="Wanted">Routes whose chain fish are worth mooching now.</param>
-    public readonly record struct Step(CatchRoute? Route, IReadOnlyList<CatchRoute> Wanted, RodWait Wait, CatchEnd End);
+    /// <param name="Fish">A wait's fish when it isn't the target: the predator waited for, or the one whose last catch is held back.</param>
+    public readonly record struct Step(CatchRoute? Route, IReadOnlyList<CatchRoute> Wanted, RodWait Wait, CatchEnd End, uint Fish = 0);
 
     /// <summary>
     /// Between casts (rod ready, or before the first cast), in AutoHook's order: stop conditions, the window,
@@ -279,7 +296,7 @@ public static class CatchDecider
 
         var step = StepNow(plan, s);
         if (step.End != CatchEnd.None) return Finish(s, step.End);
-        if (step.Route is null) return RodMove.Idle(step.Wait, fish: plan.Target.ItemId);
+        if (step.Route is null) return RodMove.Idle(step.Wait, fish: step.Fish != 0 ? step.Fish : plan.Target.ItemId);
         // Like AutoHook, act between casts only once Cast is usable: the catch animation is over.
         if (!s.Ready(FishingIds.Cast)) return RodMove.Idle(RodWait.Action, FishingIds.Cast);
         // Fish come in as normal items: keep the Collect toggle off (should it stick, the collectable prompt is accepted).
@@ -319,7 +336,10 @@ public static class CatchDecider
     /// The route to cast for now. The target's window decides: closed after being open (or opening too
     /// late) ends the session; closed but opening soon waits. A target that needs Fisher's Intuition gets
     /// its predators first, started so the intuition comes as the window opens (<see cref="CatchPlan.PrepLead"/>),
-    /// and an intuition that came early is held until the window opens.
+    /// with the last catch held back until the intuition it brings lasts into the window
+    /// (<see cref="CatchPlan.LastCatchLead"/>); an intuition that came early is held until the window opens.
+    /// Predators are fished in their own windows: with all those still needed out of theirs, the session waits
+    /// for the first to open (ends when one doesn't open within the forecast).
     /// </summary>
     public static Step StepNow(CatchPlan plan, RodSnapshot s)
     {
@@ -334,16 +354,26 @@ public static class CatchDecider
                 : new Step(null, none, RodWait.Window, CatchEnd.None);
 
         if (!w.Open && w.OpensIn > plan.PrepLead) return new Step(null, none, RodWait.Window, CatchEnd.None);
-        var open = plan.Predators.Where(p => s.Caught(p.Fish.ItemId) < p.Count && s.PredatorOpen(p.Fish.ItemId))
+        var missing = plan.Predators.Where(p => s.Caught(p.Fish.ItemId) < p.Count).ToList();
+        // Every predator caught by our count: the game grants the intuition on the last catch.
+        if (missing.Count == 0) return new Step(null, none, RodWait.Intuition, CatchEnd.None);
+        // Fisher's Intuition needs every one of them: one that doesn't bite within the forecast rules it out.
+        if (missing.Any(p => s.PredatorWindow(p.Fish.ItemId).OpensIn is null)) return new Step(null, none, RodWait.None, CatchEnd.WindowClosed);
+        // The last catch brings the intuition: not before it would last into the window.
+        if (!w.Open && w.OpensIn > plan.LastCatchLead && missing.Sum(p => p.Count - s.Caught(p.Fish.ItemId)) == 1)
+            return new Step(null, none, RodWait.Window, CatchEnd.None, missing[0].Fish.ItemId);
+
+        var open = missing.Where(p => s.PredatorWindow(p.Fish.ItemId).Open)
             // Stay with the fish just caught (Identical Cast follows it), then with the bait on the line.
             .OrderBy(p => s.JustCaught && p.Fish.ItemId == s.LastCatch ? 0 : 1)
             .ThenBy(p => Tackle(p, s) == s.Bait ? 0 : 1)
             .ThenBy(p => p.Index)
             .ToList();
         if (open.Count > 0) return new Step(open[0], open, RodWait.None, CatchEnd.None);
-        // Every predator caught by our count: the game grants the intuition on the last catch.
-        var missing = plan.Predators.Any(p => s.Caught(p.Fish.ItemId) < p.Count);
-        return new Step(null, none, missing ? RodWait.Predator : RodWait.Intuition, CatchEnd.None);
+        // Every predator still needed is out of its window: wait for the first to bite (the target's own window,
+        // when it has one, still ends the session once it has closed).
+        var next = missing.OrderBy(p => s.PredatorWindow(p.Fish.ItemId).OpensIn).ThenBy(p => p.Index).First();
+        return new Step(null, none, RodWait.Predator, CatchEnd.None, next.Fish.ItemId);
     }
 
     /// <summary>The wanted route the fish just landed is a chain link of, and the fish mooching it hooks.</summary>

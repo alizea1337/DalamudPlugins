@@ -286,7 +286,7 @@ public class FishCatchDeciderTests
     [Fact]
     public void Predators_wait_until_the_intuition_would_last_into_the_window()
     {
-        var plan = Plan(Big, buffs: false); // lead 90 s
+        var plan = Plan(Big, buffs: false); // lead 226 s
         RodSnapshot Closed(TimeSpan? opensIn) => Ready(bait: Shrimp) with { Window = new CatchWindowState(false, opensIn, TimeSpan.Zero) };
         Assert.Equal(RodMove.Idle(RodWait.Window, fish: 310), Next(plan, Closed(TimeSpan.FromMinutes(10))));
         Assert.Equal(RodMoveKind.Cast, Next(plan, Closed(TimeSpan.FromSeconds(60))).Kind);
@@ -301,11 +301,57 @@ public class FishCatchDeciderTests
     }
 
     [Fact]
-    public void A_predator_out_of_its_own_window_is_skipped()
+    public void The_last_predator_catch_waits_until_the_intuition_lasts_into_the_window()
+    {
+        // Big: predators expected to take 226 s; its 120 s intuition less a 30 s margin leaves 90 s.
+        var plan = Plan(Big, buffs: false);
+        RodSnapshot Closed(double seconds, int a, int b) => Ready(bait: Fly) with
+        {
+            Window = new CatchWindowState(false, TimeSpan.FromSeconds(seconds), TimeSpan.Zero),
+            Progress = new Dictionary<uint, int> { [300] = a, [301] = b },
+        };
+        // More than one catch to go: fish on.
+        Assert.Equal(new RodMove(RodMoveKind.Cast, FishingIds.Cast, 301), Next(plan, Closed(200, 3, 0)));
+        // The last one would bring the intuition too early: hold it.
+        Assert.Equal(RodMove.Idle(RodWait.Window, fish: 301), Next(plan, Closed(200, 3, 1)));
+        Assert.Equal(RodMove.Idle(RodWait.Window, fish: 301), Next(plan, Closed(91, 3, 1)));
+        Assert.Equal(RodMove.Idle(RodWait.Window, fish: 300), Next(plan, Closed(200, 2, 2) with { Bait = Shrimp }));
+        // Close enough, or the window open already: catch it.
+        Assert.Equal(new RodMove(RodMoveKind.Cast, FishingIds.Cast, 301), Next(plan, Closed(90, 3, 1)));
+        Assert.Equal(new RodMove(RodMoveKind.Cast, FishingIds.Cast, 301), Next(plan, Closed(200, 3, 1) with { Window = CatchWindowState.Always }));
+
+        // A last predator reached by mooching isn't mooched on while it's held either.
+        var top = Plan(Top, buffs: false); // 6 × (58 + 42) s expected
+        Assert.Equal(TimeSpan.FromSeconds(600), top.PrepLead);
+        var caught = Ready() with { JustCaught = true, LastCatch = 400, CanMooch = true, Progress = new Dictionary<uint, int> { [401] = 5 } };
+        Assert.Equal(RodMove.Idle(RodWait.Window, fish: 401), Next(top, caught with { Window = new CatchWindowState(false, TimeSpan.FromSeconds(200), TimeSpan.Zero) }));
+        Assert.Equal(new RodMove(RodMoveKind.Mooch, FishingIds.Mooch, 401), Next(top, caught with { Window = new CatchWindowState(false, TimeSpan.FromSeconds(80), TimeSpan.Zero) }));
+    }
+
+    [Fact]
+    public void A_predator_out_of_its_own_window_is_skipped_and_waited_for_when_none_bites()
     {
         var plan = Plan(Big, buffs: false);
-        Assert.Equal(new RodMove(RodMoveKind.ChangeBait, Fly, 301), Next(plan, Ready(bait: Shrimp) with { PredatorOpen = id => id != 300 }));
-        Assert.Equal(RodMove.Idle(RodWait.Predator, fish: 310), Next(plan, Ready() with { PredatorOpen = _ => false }));
+        var closed = new CatchWindowState(false, TimeSpan.FromMinutes(10), TimeSpan.Zero);
+        var later = closed with { OpensIn = TimeSpan.FromMinutes(25) };
+        Assert.Equal(new RodMove(RodMoveKind.ChangeBait, Fly, 301), Next(plan, Ready(bait: Shrimp) with { PredatorWindow = id => id == 300 ? closed : CatchWindowState.Always }));
+        // A bite of a predator out of its window isn't hooked.
+        Assert.Equal(RodMoveKind.Rest, Next(plan, Biting(Tug.Strong, 10, Tackle) with { PredatorWindow = id => id == 300 ? closed : CatchWindowState.Always }).Kind);
+        // Every one still needed out of its window: a window wait for the one that bites first.
+        Assert.Equal(RodMove.Idle(RodWait.Predator, fish: 301), Next(plan, Ready() with { PredatorWindow = id => id == 300 ? later : closed }));
+        Assert.Equal(RodMove.Idle(RodWait.Predator, fish: 300), Next(plan, Ready() with
+        {
+            PredatorWindow = id => id == 300 ? later : closed,
+            Progress = new Dictionary<uint, int> { [301] = 2 },
+        }));
+        // One that doesn't bite within the forecast: no intuition to be had, the session ends.
+        Assert.Equal(CatchEnd.WindowClosed, Next(plan, Ready() with { PredatorWindow = id => id == 300 ? closed with { OpensIn = null } : CatchWindowState.Always }).End);
+        // Once caught, its window doesn't matter any more.
+        Assert.Equal(RodMove.Idle(RodWait.Intuition, fish: 310), Next(plan, Ready() with
+        {
+            PredatorWindow = _ => closed with { OpensIn = null },
+            Progress = new Dictionary<uint, int> { [300] = 3, [301] = 2 },
+        }));
     }
 
     [Fact]
@@ -448,6 +494,19 @@ public class FishCatchDeciderTests
         Assert.Equal(new RodMove(RodMoveKind.Hook, FishingIds.Hook, 600), Next(plan, Biting(Tug.Strong, 10, Tackle)));
         Assert.Equal(RodMoveKind.Rest, Next(plan, Biting(Tug.Strong, 10, Tackle) with { Gp = 150 }).Kind);
         Assert.Equal(new RodMove(RodMoveKind.Hook, FishingIds.Hook, 610), Next(plan, Biting(Tug.Legendary, 10, Tackle)));
+    }
+
+    [Fact]
+    public void Under_surface_slap_the_slap_fish_is_neither_hooked_nor_waited_for()
+    {
+        var plan = Plan(Bombard);
+        var slap = Statuses((FishingIds.SurfaceSlapStatus, 0));
+        // It can't bite now: a "!!" is another fish, and hooking that would end the slap.
+        Assert.Equal(RodMoveKind.Rest, Next(plan, Biting(Tug.Strong, 10, Tackle) with { Statuses = slap }).Kind);
+        Assert.Equal(new RodMove(RodMoveKind.Hook, FishingIds.Hook, 610), Next(plan, Biting(Tug.Legendary, 10, Tackle) with { Statuses = slap }));
+        // The line comes in once the target's window is past (17 s), not the slap fish's (33 s).
+        Assert.Equal(RodMove.RestNow(), Next(plan, LineOut(17.5, Tackle) with { Statuses = slap }));
+        Assert.Equal(RodMove.Idle(), Next(plan, LineOut(17.5, Tackle)));
     }
 
     [Fact]

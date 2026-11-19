@@ -186,15 +186,113 @@ public class FishCatchPlannerTests
     }
 
     [Fact]
-    public void Predators_start_as_late_as_their_expected_time_but_inside_the_intuition()
+    public void Predators_start_on_their_expected_time_and_the_last_catch_waits_for_the_intuition_to_reach()
     {
         // 3 × 2 × (15 + 10) + 2 × 2 × (9 + 10) = 226 s expected; the intuition lasts 120 s (30 s margin).
-        Assert.Equal(TimeSpan.FromSeconds(90), Plan(Big).PrepLead);
+        Assert.Equal(TimeSpan.FromSeconds(226), Plan(Big).PrepLead);
+        Assert.Equal(TimeSpan.FromSeconds(90), Plan(Big).LastCatchLead);
         Assert.Equal(Plan(Big).PrepLead + CatchPlanner.EarlyWait, Plan(Big).EarlyLimit);
         var quick = Fish(330, predators: new (uint, int)[] { (300, 1) }, intuition: 600, bait: Spoon);
         Assert.Equal(TimeSpan.FromSeconds(2 * (15 + 10)), Plan(quick).PrepLead);
+        Assert.Equal(TimeSpan.FromSeconds(570), Plan(quick).LastCatchLead);
         Assert.Equal(TimeSpan.Zero, Plan(Straight).PrepLead);
+        Assert.Equal(TimeSpan.Zero, Plan(Straight).LastCatchLead);
         Assert.Equal(TimeSpan.FromSeconds(3 * 50 + 2 * 38), CatchPlanner.PredatorTime(Big, Data));
+    }
+
+    [Fact]
+    public void A_predator_whose_hours_end_before_the_target_s_starts_the_build_in_its_own_window()
+    {
+        const long hour = 175_000;
+        Uptime Hours(int from, int length) => new(length * hour, (24 - length) * hour, from * hour);
+        // The target bites 00:00–02:00 ET and needs 2 of a predator (2 × 2 × (25 + 10) = 140 s expected), 700 s of intuition.
+        FishInfo Target(uint predator) => Fish(340, Tug.Legendary, HookSet.Powerful, (24, 34), bait: Spoon, window: Hours(0, 2),
+            predators: new (uint, int)[] { (predator, 2) }, intuition: 700);
+        var before = Fish(341, Tug.Legendary, HookSet.Powerful, (20, 30), window: Hours(22, 2));   // 22:00–00:00 ET
+        var across = Fish(342, Tug.Legendary, HookSet.Powerful, (20, 30), window: Hours(23, 2));   // 23:00–01:00 ET
+        var early = Fish(343, Tug.Legendary, HookSet.Powerful, (20, 30), window: Hours(18, 2));    // 18:00–20:00 ET
+        FishInfo? Known(uint id) => new[] { before, across, early }.FirstOrDefault(f => f.ItemId == id);
+
+        // Only before the window: from the predator's window on (350 s ahead), which the intuition still spans.
+        Assert.Equal(TimeSpan.FromSeconds(140), CatchPlanner.PredatorTime(Target(341), Known));
+        Assert.Equal(TimeSpan.FromSeconds(350), CatchPlanner.PrepLead(Target(341), Known));
+        Assert.Equal(TimeSpan.FromSeconds(350), Plan(Target(341), data: Known).PrepLead);
+        // Still biting as the window opens: the expected time does.
+        Assert.Equal(TimeSpan.FromSeconds(140), CatchPlanner.PrepLead(Target(342), Known));
+        // Over 4 hours (700 s) before it: the intuition can't reach, so that window doesn't count.
+        Assert.Equal(TimeSpan.FromSeconds(140), CatchPlanner.PrepLead(Target(343), Known));
+    }
+
+    [Fact]
+    public void A_mooch_chain_s_windows_narrow_the_fish_s_own()
+    {
+        const long hour = 175_000;
+        var table = new (uint, int)[] { (1, 20), (2, 30), (3, 50) };
+        // Bites 09:00–15:00 ET in weather 1 or 3, mooched from a fish of 12:00–20:00 ET after weather 2 or 3.
+        var link = Fish(350, window: new Uptime(8 * hour, 16 * hour, 12 * hour), bait: Shrimp) with { PreviousWeather = new uint[] { 2, 3 } };
+        var free = Fish(351);
+        var target = Fish(352, Tug.Strong, HookSet.Powerful, (10, 20), window: new Uptime(6 * hour, 18 * hour, 9 * hour), weather: new uint[] { 1, 3 },
+            mooch: new uint[] { 351, 350 });
+        FishInfo? Known(uint id) => new[] { link, free, target }.FirstOrDefault(f => f.ItemId == id);
+        var plan = Plan(target, data: Known, table: table);
+        Assert.Equal(new[] { 350u }, plan.Window.Links.Select(l => l.ItemId));
+        Assert.Equal(plan.Window.Links, CatchWindow.For(target, Known, table).Links);
+
+        var window = plan.Window;
+        bool Both(DateTimeOffset t) => FishWindow.IsOpen(target, table, t) && FishWindow.IsOpen(link, table, t);
+        var from = DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_123_000);
+        for (var i = 0; i < 12; i++)
+        {
+            var at = from + TimeSpan.FromHours(5 * i);
+            Assert.Equal(Both(at), window.IsOpen(at));
+            // Brute force in 5-second steps: the first moment both bite, and how long they then keep at it.
+            DateTimeOffset? scan = null;
+            for (var t = at; t <= at + TimeSpan.FromDays(2); t = t.AddSeconds(5))
+                if (Both(t)) { scan = t; break; }
+            var next = window.NextOpen(at, TimeSpan.FromDays(2));
+            Assert.Equal(scan.HasValue, next.HasValue);
+            if (next is not { } n) continue;
+            Assert.True(Both(n));
+            Assert.True(n <= scan!.Value && scan.Value - n < TimeSpan.FromSeconds(5));
+            if (n > at) Assert.False(Both(n.AddSeconds(-1)));
+            var left = window.Left(n, TimeSpan.FromDays(2));
+            Assert.True(Both(n + left - TimeSpan.FromSeconds(1)));
+            Assert.False(Both(n + left));
+        }
+        // A fish the chain doesn't narrow keeps its own window, and none at all when it has none.
+        Assert.Empty(Plan(Goose).Window.Links);
+        Assert.False(Plan(Goose).Window.Restricted);
+    }
+
+    [Fact]
+    public void Predators_get_the_windows_of_their_mooch_chains()
+    {
+        const long hour = 175_000;
+        var timedLink = Fish(360, Tug.Weak, HookSet.Precise, (2, 20), window: new Uptime(4 * hour, 20 * hour, 0));   // 00:00–04:00 ET
+        var predator = Fish(361, Tug.Strong, HookSet.Powerful, (8, 30), mooch: new uint[] { 360 });
+        var target = Fish(362, Tug.Legendary, HookSet.Powerful, (13, 31), bait: Spoon, predators: new (uint, int)[] { (361, 3) }, intuition: 120);
+        FishInfo? Known(uint id) => new[] { timedLink, predator, target }.FirstOrDefault(f => f.ItemId == id);
+        var plan = Plan(target, data: Known);
+        Assert.Equal(new[] { 361u }, plan.PredatorWindows.Keys);
+        Assert.Equal(new[] { 360u }, plan.PredatorWindows[361].Links.Select(l => l.ItemId));
+        Assert.False(plan.PredatorWindows[361].At(DateTimeOffset.FromUnixTimeMilliseconds(6 * hour)).Open);
+        Assert.Equal(TimeSpan.FromMilliseconds(18 * hour), plan.PredatorWindows[361].At(DateTimeOffset.FromUnixTimeMilliseconds(6 * hour)).OpensIn);
+        // Predators without any window aren't listed.
+        Assert.Empty(Plan(Big).PredatorWindows);
+    }
+
+    [Fact]
+    public void Only_the_target_s_own_window_limits_how_long_a_session_waits()
+    {
+        const long hour = 175_000;
+        var timedLink = Fish(370, window: new Uptime(12 * hour, 12 * hour, 18 * hour));   // 18:00–06:00 ET
+        var mooched = Fish(371, Tug.Strong, HookSet.Powerful, (7, 32), mooch: new uint[] { 370 });
+        FishInfo? Known(uint id) => new[] { timedLink, mooched }.FirstOrDefault(f => f.ItemId == id);
+        // The run times its trips by the fish's own window; one only its chain gives it is waited out.
+        Assert.Equal(TimeSpan.MaxValue, Plan(mooched, data: Known).EarlyLimit);
+        var timed = mooched with { Window = new Uptime(2 * hour, 22 * hour, 20 * hour) };
+        Assert.Equal(CatchPlanner.EarlyWait, Plan(timed, data: Known).EarlyLimit);
+        Assert.Equal(CatchPlanner.EarlyWait, Plan(Straight).EarlyLimit);
     }
 
     [Fact]

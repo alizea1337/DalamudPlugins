@@ -39,6 +39,10 @@ public sealed record CatchRequest(
 /// <item>Lure fish get their lure on the cast that hooks them, up to three, Rest when it fails (D19).</item>
 /// <item>Surface Slap goes on GatherBuddy Reborn's curated slap fish only (no pool data, D1/D17).</item>
 /// <item>Long intuition keeps Chum (D20); Chum's shorter bites are handled by the decider (D5).</item>
+/// <item>A fish's window is narrowed by its mooch chain's restricted links, for the target and each predator
+/// (GatherBuddy Reborn intersects them too).</item>
+/// <item>Predators start as long before the window as they're expected to take (from a predator's own earlier
+/// window when it only bites before the target's); the last catch waits until the intuition reaches into the window.</item>
 /// </list>
 /// Ported from AutoHook (BSD-3, Puni.sh). Pure: no game access.
 /// </summary>
@@ -49,7 +53,8 @@ public static class CatchPlanner
 
     /// <summary>
     /// A target that opens later than this beyond the predator lead isn't waited for (the session ends as
-    /// the window closed). Generous: the run starts sessions ahead of a window by its own lead time.
+    /// the window closed). Generous: the run starts sessions ahead of a window by its own lead time. Not for a
+    /// window that only the target's mooch chain narrows: the run doesn't time its trips by that one.
     /// </summary>
     public static readonly TimeSpan EarlyWait = TimeSpan.FromMinutes(60);
 
@@ -109,13 +114,53 @@ public static class CatchPlanner
         var rules = BuildRules(request, targetRoute, predators, slap);
         var buffs = BuildBuffs(request, routes, predators, rules, slap);
         var intuitionSeconds = target.IntuitionSeconds > 0 ? target.IntuitionSeconds : DefaultIntuitionSeconds;
-        var lead = PrepLeadFor(predators, intuitionSeconds);
+        var lead = predators.Count > 0 ? PrepLead(target, request.FishData) : TimeSpan.Zero;
+        // A fish is only caught while its mooch chain's links bite too: the target's, and each predator's.
+        var window = WindowOf(targetRoute, request.WeatherTable);
         var predatorWindows = new Dictionary<uint, CatchWindow>();
         foreach (var p in predators)
-            if (p.Fish.Restricted) predatorWindows[p.Fish.ItemId] = new CatchWindow(p.Fish, request.WeatherTable);
+            if (WindowOf(p, request.WeatherTable) is { Restricted: true } w) predatorWindows[p.Fish.ItemId] = w;
+        // The run times its trips by the target's own window. One that only its mooch chain narrows is waited
+        // out at the stand: ending the session would only bring the run straight back.
+        var early = target.Restricted || !window.Restricted ? lead + EarlyWait : TimeSpan.MaxValue;
 
         return new CatchPlan(target, targetRoute, predators, predators.Count > 0 ? intuitionSeconds : 0, rules, buffs,
-            new CatchWindow(target, request.WeatherTable), predatorWindows, lead, lead + EarlyWait, problem);
+            window, predatorWindows, lead, predators.Count > 0 ? LastCatchLead(target) : TimeSpan.Zero, early, problem);
+    }
+
+    /// <summary>
+    /// How long before the target's window opens to start on the predators: as long as catching them is
+    /// expected to take (<see cref="PredatorTime"/>), so Fisher's Intuition comes as the window opens. When a
+    /// predator only bites at Eorzea hours that end before the target's window opens, from the start of that
+    /// predator's window instead (it can only be caught then), as long as the intuition reaches from its end
+    /// into the target's window. Catching them early is safe: the last catch, which brings the intuition, waits
+    /// for <see cref="LastCatchLead"/>. Zero for fish without predators.
+    /// </summary>
+    public static TimeSpan PrepLead(FishInfo target, Func<uint, FishInfo?> fishData)
+    {
+        var lead = PredatorTime(target, fishData);
+        if (target.Window is not { On: > 0, Off: > 0 } own) return lead;
+        var reach = LastCatchLead(target).TotalMilliseconds;
+        foreach (var (id, count) in target.Predators)
+        {
+            if (count <= 0 || fishData(id)?.Window is not { On: > 0, Off: > 0 } theirs || theirs.Period != own.Period) continue;
+            // From the start of the predator's window before the target's to the target's opening, and from its end.
+            var fromStart = Mod(own.Shift - theirs.Shift, own.Period);
+            var fromEnd = fromStart - theirs.On;
+            // Negative: it still bites as the target's window opens, so the expected time is enough.
+            if (fromEnd >= 0 && fromEnd < reach) lead = TimeSpan.FromMilliseconds(Math.Max(lead.TotalMilliseconds, fromStart));
+        }
+        return lead;
+    }
+
+    /// <summary>
+    /// How soon the target's window must open for the last predator catch, which brings Fisher's Intuition: the
+    /// intuition less a margin (a quarter of it, at most 30 seconds), so it lasts into the window.
+    /// </summary>
+    public static TimeSpan LastCatchLead(FishInfo target)
+    {
+        var seconds = target.IntuitionSeconds > 0 ? target.IntuitionSeconds : DefaultIntuitionSeconds;
+        return TimeSpan.FromSeconds(seconds - Math.Min(30.0, seconds / 4.0));
     }
 
     /// <summary>
@@ -251,18 +296,11 @@ public static class CatchPlanner
         return new BuffPolicy(patience, prize, makeshift, chum, slap, icPredators, icTarget, thaliak, cordials, want, moochII);
     }
 
-    /// <summary>
-    /// How long before the target's window opens to start on the predators: as long as catching them is
-    /// expected to take (so Fisher's Intuition comes as the window opens), but never so early that the
-    /// intuition would run out before the window opens if the predators came quickly.
-    /// </summary>
-    private static TimeSpan PrepLeadFor(List<CatchRoute> predators, int intuitionSeconds)
-    {
-        if (predators.Count == 0) return TimeSpan.Zero;
-        var margin = Math.Min(30.0, intuitionSeconds / 4.0);
-        var expected = predators.Sum(p => p.Count * (SecondsPerCatch(p.Fish) + p.Chain.Sum(SecondsPerCatch)));
-        return TimeSpan.FromSeconds(Math.Max(0, Math.Min(expected, intuitionSeconds - margin)));
-    }
+    /// <summary>A route's window: its fish's, narrowed by the restricted links of its mooch chain.</summary>
+    private static CatchWindow WindowOf(CatchRoute route, IReadOnlyList<(uint Weather, int Rate)> table)
+        => new(route.Fish, table) { Links = route.Chain.Where(c => c.Restricted).ToList() };
+
+    private static long Mod(long a, long m) => (a % m + m) % m;
 
     private static double SecondsPerCatch(FishInfo fish)
     {

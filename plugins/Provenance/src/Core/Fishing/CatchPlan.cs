@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Provenance.Core.Fishing;
 
@@ -138,21 +139,81 @@ public readonly record struct CatchWindowState(bool Open, TimeSpan? OpensIn, Tim
     public static readonly CatchWindowState Always = new(true, TimeSpan.Zero, TimeSpan.MaxValue);
 }
 
-/// <summary>A fish's time and weather window at a spot (its zone's weather table), through <see cref="FishWindow"/>.</summary>
+/// <summary>
+/// When a fish can be caught at a spot (its zone's weather table): its own time and weather window, through
+/// <see cref="FishWindow"/>, narrowed by <see cref="Links"/>. A mooch chain's links are caught on the way, each
+/// right before the next, so the fish is only caught while every restricted link bites too (Nautilus bites at
+/// any hour, but only from a Fullmoon Sardine, which bites 18:00–06:00 ET). Follows GatherBuddy Reborn's
+/// mooch uptime intersection (ActiveItemList, Apache-2.0), over the whole forecast rather than the next window only.
+/// </summary>
 public sealed record CatchWindow(FishInfo Fish, IReadOnlyList<(uint Weather, int Rate)> Table)
 {
-    /// <summary>How far ahead the forecast is searched for the next opening.</summary>
-    public static readonly TimeSpan Horizon = TimeSpan.FromHours(12);
+    /// <summary>How far ahead the forecast is searched for the next opening (the plan's and the run's one forecast).</summary>
+    public static readonly TimeSpan Horizon = FishWindow.Forecast;
 
-    public bool Restricted => Fish.Restricted;
+    /// <summary>Fish that must bite at the same moment for <see cref="Fish"/> to be caught: the restricted links of its mooch chain.</summary>
+    public IReadOnlyList<FishInfo> Links { get; init; } = Array.Empty<FishInfo>();
+
+    public bool Restricted => Fish.Restricted || Links.Any(l => l.Restricted);
+
+    /// <summary>The fish's window with its mooch chain's: every restricted link of the chain must bite at the same time.</summary>
+    public static CatchWindow For(FishInfo fish, Func<uint, FishInfo?> fishData, IReadOnlyList<(uint Weather, int Rate)> table)
+        => new(fish, table) { Links = fish.Mooch.Select(fishData).OfType<FishInfo>().Where(l => l.Restricted).ToList() };
+
+    /// <summary>The fish and every link bite at this moment.</summary>
+    public bool IsOpen(DateTimeOffset at)
+    {
+        if (!FishWindow.IsOpen(Fish, Table, at)) return false;
+        foreach (var link in Links)
+            if (!FishWindow.IsOpen(link, Table, at)) return false;
+        return true;
+    }
+
+    /// <summary>The first moment at or after <paramref name="from"/> when the fish and every link bite; null when not within <paramref name="horizon"/>.</summary>
+    public DateTimeOffset? NextOpen(DateTimeOffset from, TimeSpan horizon)
+    {
+        var end = from + horizon;
+        var t = from;
+        while (true)
+        {
+            // Every fish's next opening from t; the latest one is the earliest moment all of them can bite.
+            // Each turn moves t on to an opening, so the search ends (it never goes past the horizon).
+            var latest = t;
+            foreach (var fish in Fishes())
+            {
+                if (FishWindow.NextOpen(fish, Table, t, end - t) is not { } open) return null;
+                if (open > latest) latest = open;
+            }
+            if (latest == t) return t;
+            t = latest;
+        }
+    }
+
+    /// <summary>How long the fish and every link keep biting from <paramref name="at"/> (zero when one doesn't bite now).</summary>
+    public TimeSpan Left(DateTimeOffset at, TimeSpan horizon)
+    {
+        var left = TimeSpan.MaxValue;
+        foreach (var fish in Fishes())
+        {
+            var l = FishWindow.Left(fish, Table, at, horizon);
+            if (l < left) left = l;
+        }
+        return left;
+    }
 
     /// <summary>Open now, or how long until it opens (and how long it stays open).</summary>
     public CatchWindowState At(DateTimeOffset now)
     {
-        if (!Fish.Restricted) return CatchWindowState.Always;
-        return FishWindow.IsOpen(Fish, Table, now)
-            ? new CatchWindowState(true, TimeSpan.Zero, FishWindow.Left(Fish, Table, now, Horizon))
-            : new CatchWindowState(false, FishWindow.UntilOpen(Fish, Table, now, Horizon), TimeSpan.Zero);
+        if (!Restricted) return CatchWindowState.Always;
+        return IsOpen(now)
+            ? new CatchWindowState(true, TimeSpan.Zero, Left(now, Horizon))
+            : new CatchWindowState(false, NextOpen(now, Horizon) is { } open ? open - now : null, TimeSpan.Zero);
+    }
+
+    private IEnumerable<FishInfo> Fishes()
+    {
+        yield return Fish;
+        foreach (var link in Links) yield return link;
     }
 }
 
@@ -163,6 +224,14 @@ public sealed record CatchWindow(FishInfo Fish, IReadOnlyList<(uint Weather, int
 /// <see cref="CatchDecider"/>. The intent of AutoHook's FishSolver and SolverPresetBuilder (BSD-3,
 /// Puni.sh), rebuilt from our own fish data.
 /// </summary>
+/// <param name="Window">When the target can be caught: its own window, narrowed by its mooch chain's.</param>
+/// <param name="PredatorWindows">The windows of the predators that have one (their own, or their mooch chain's), by fish.</param>
+/// <param name="PrepLead">How long before the window opens to start on the predators.</param>
+/// <param name="LastCatchLead">
+/// With the window closed, the last predator catch (it brings Fisher's Intuition) waits until the window opens
+/// within this: the intuition less a margin, so it lasts into the window.
+/// </param>
+/// <param name="EarlyLimit">A closed window that opens later than this ends the session (the run comes back in time).</param>
 public sealed record CatchPlan(
     FishInfo Target,
     CatchRoute TargetRoute,
@@ -173,6 +242,7 @@ public sealed record CatchPlan(
     CatchWindow Window,
     IReadOnlyDictionary<uint, CatchWindow> PredatorWindows,
     TimeSpan PrepLead,
+    TimeSpan LastCatchLead,
     TimeSpan EarlyLimit,
     CatchProblem? Problem)
 {

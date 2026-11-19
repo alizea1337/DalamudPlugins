@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Gui.Toast;
+using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Lumina.Excel.Sheets;
 
@@ -32,8 +33,9 @@ internal enum RodMessage
 
 /// <summary>
 /// Watches the messages that matter while fishing. Log messages come by LogMessage id (the same in every
-/// language); toasts and chat lines are compared with the LogMessage sheet's texts, read once in the
-/// client's language (as GatherBuddy Reborn does for wary and amiss). A lure fish announces itself with
+/// language); toasts and the game's own chat lines (system, error and gathering lines, never players' chat)
+/// are compared with the LogMessage sheet's texts, read once in the client's language (as GatherBuddy Reborn
+/// does for wary and amiss). A lure fish announces itself with
 /// its own line from the FishParameter sheet (the text AutoHook reads as Unknown_70_1).
 /// Ported from AutoHook (BSD-3, Puni.sh); wary/amiss follow GatherBuddy Reborn (Apache-2.0).
 /// </summary>
@@ -152,8 +154,14 @@ internal sealed class RodMessages : IDisposable
     }
 
     // Log messages come by id above; text catches the same lines shown as toasts or printed without an id
-    // (the lure fish's arrival is such a line).
-    private void OnChatMessage(IChatMessage message) => OnText(message.Message);
+    // (the lure fish's arrival is such a line). Only the game's own lines: players' chat (say, shout, party,
+    // tells, linkshells...) and echoes can quote these texts word for word. The watched LogMessage rows are
+    // kinds 57, 60 and 67; lure fish arrive in Gathering (67), as AutoHook's LureChatComponent reads them.
+    private void OnChatMessage(IChatMessage message)
+    {
+        if (message.LogKind is XivChatType.SystemMessage or XivChatType.GatheringSystemMessage or XivChatType.ErrorMessage or XivChatType.Gathering)
+            OnText(message.Message);
+    }
 
     private void OnText(SeString message)
     {

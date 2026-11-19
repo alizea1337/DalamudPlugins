@@ -165,7 +165,10 @@ internal sealed unsafe class Angler : IDisposable
     public bool Active { get; private set; }
     /// <summary>The fisher stance is up (the rod is out: <c>ConditionFlag.Fishing</c>).</summary>
     public bool RodOut => Services.Condition[ConditionFlag.Fishing];
-    /// <summary>Waiting at the stand with the rod in: the target's window opens soon and nothing has to be caught first.</summary>
+    /// <summary>
+    /// Waiting at the stand with the rod in for a window: the target's opens soon and nothing has to be caught
+    /// first, or the fish Fisher's Intuition needs first are out of theirs. Not fishing time.
+    /// </summary>
     public bool WaitingForWindow { get; private set; }
     /// <summary>Waiting at the stand for GP the catch plan can't do without.</summary>
     public bool WaitingForGp { get; private set; }
@@ -224,7 +227,8 @@ internal sealed unsafe class Angler : IDisposable
         Status = $"Fishing for {Name(job.Target.ItemId)}";
         Services.Log.Information($"[Angler] Fishing for {Name(job.Target.ItemId)} at {job.Spot.Name} ({job.Spot.Id}) with {Name(plan.TargetRoute.Bait)}: "
             + $"chain [{string.Join(", ", plan.TargetRoute.Chain.Select(f => f.ItemId))}], predators [{string.Join(", ", plan.Predators.Select(p => $"{p.Fish.ItemId}x{p.Count}"))}], "
-            + $"lead {plan.PrepLead.TotalSeconds:0} s, GP target {plan.Buffs.GpTarget}");
+            + $"chain windows [{string.Join(", ", plan.Window.Links.Select(f => f.ItemId))}], predator windows [{string.Join(", ", plan.PredatorWindows.Keys)}], "
+            + $"lead {plan.PrepLead.TotalSeconds:0} s (last catch {plan.LastCatchLead.TotalSeconds:0} s), GP target {plan.Buffs.GpTarget}");
     }
 
     /// <summary>Every frame.</summary>
@@ -346,6 +350,19 @@ internal sealed unsafe class Angler : IDisposable
         else
         {
             if (now < lockUntil) return;
+            // Entering battle cancels fishing (LogMessage 1113) and no line goes out until the fight is over:
+            // wait it out between casts instead of counting it against this stand. Ending (a pause or a stop)
+            // still goes on.
+            if (ending == CatchEnd.None && phase is (RodPhase.Ready or RodPhase.Idle) && c[ConditionFlag.InCombat])
+            {
+                ForgetPendingCast();
+                castBlockedSince = null;
+                failedCasts = 0;
+                // A window that opens (and closes) during the fight still counts as seen.
+                if (plan!.Window.IsOpen(DateTimeOffset.UtcNow)) windowSeenOpen = true;
+                Status = "In combat; fishing after the fight";
+                return;
+            }
             if (castSentUntil is { } until)
             {
                 if (phase is RodPhase.Ready or RodPhase.Idle && now < until) return;
@@ -455,6 +472,7 @@ internal sealed unsafe class Angler : IDisposable
         var at = DateTimeOffset.UtcNow;
         var window = plan!.Window.At(at);
         if (window.Open) windowSeenOpen = true;
+        var predatorWindows = plan.PredatorWindows.ToDictionary(kv => kv.Key, kv => kv.Value.At(at));
         if (read.Bait == baitTried) baitTries = 0;
         var useCordials = job!.UseCordials && plan.Buffs.Cordials;
         var moochGone = moochWaitSince is { } waited && now - waited > MoochWaitLimit;
@@ -481,7 +499,7 @@ internal sealed unsafe class Angler : IDisposable
             Progress = new Dictionary<uint, int>(progress),
             Window = window,
             WindowSeenOpen = windowSeenOpen,
-            PredatorOpen = id => !plan.PredatorWindows.TryGetValue(id, out var w) || FishWindow.IsOpen(w.Fish, w.Table, at),
+            PredatorWindow = id => predatorWindows.TryGetValue(id, out var w) ? w : CatchWindowState.Always,
             Cast = cast,
             SinceCast = (now - castAt).TotalSeconds,
             Tug = tug,
@@ -499,7 +517,7 @@ internal sealed unsafe class Angler : IDisposable
     {
         if (move.End != CatchEnd.None) BeginEnding(move.End);
         if (move.End == CatchEnd.NoBait && move.Fish != 0) MissingBait = move.Fish;
-        WaitingForWindow = move.Kind == RodMoveKind.Wait && move.Wait == RodWait.Window;
+        WaitingForWindow = move.Kind == RodMoveKind.Wait && move.Wait is RodWait.Window or RodWait.Predator;
         WaitingForGp = move.Kind == RodMoveKind.Wait && move.Wait == RodWait.Gp;
         if (move is not { Kind: RodMoveKind.Wait, Wait: RodWait.Action }) castBlockedSince = null;
         if (move is not { Kind: RodMoveKind.Wait, Wait: RodWait.Action, Id: FishingIds.Mooch or FishingIds.MoochII }) moochWaitSince = null;
@@ -553,9 +571,11 @@ internal sealed unsafe class Angler : IDisposable
                 Lock(now);
                 return;
             case RodMoveKind.Cast or RodMoveKind.Mooch:
+                var failedBefore = failedCasts;
                 if (!RodGame.Use(move.Id))
                 {
-                    CastDidntGoOut("the game refused it");
+                    // Once, also when the game already said so while the action was pressed.
+                    if (failedCasts == failedBefore) CastDidntGoOut("the game refused it");
                     nextDecision = now + TimeSpan.FromSeconds(1);
                     return;
                 }
@@ -610,8 +630,10 @@ internal sealed unsafe class Angler : IDisposable
         Status = move.Wait switch
         {
             RodWait.Window when s.Intuition => $"Holding Fisher's Intuition until {target} bites ({Until(s.Window.OpensIn)})",
+            // The last catch for Fisher's Intuition waits until the intuition would last into the window.
+            RodWait.Window when move.Fish != 0 && move.Fish != plan.Target.ItemId => $"Holding back the last {Name(move.Fish)} for Fisher's Intuition: {target} bites {Until(s.Window.OpensIn)}",
             RodWait.Window => $"Waiting for {target} to bite ({Until(s.Window.OpensIn)})",
-            RodWait.Predator => $"Waiting for the fish for Fisher's Intuition to bite ({target})",
+            RodWait.Predator => $"Waiting for {Name(move.Fish)} to bite ({Until(s.PredatorWindow(move.Fish).OpensIn)}), caught first for Fisher's Intuition",
             RodWait.Intuition => "Waiting for Fisher's Intuition",
             RodWait.Gp => $"Waiting for GP for the lure ({s.Gp} GP)",
             RodWait.Action when move.Id == FishingIds.Quit => "Stowing the rod",
@@ -622,8 +644,14 @@ internal sealed unsafe class Angler : IDisposable
         };
     }
 
+    /// <summary>"in 8 min", "in under a minute", "in 2 h 05 min" (a mooch chain's or a predator's window can be hours away).</summary>
     private static string Until(TimeSpan? opensIn)
-        => opensIn is not { } t ? "not soon" : t < TimeSpan.FromMinutes(1) ? "in under a minute" : $"in {(int)Math.Ceiling(t.TotalMinutes)} min";
+    {
+        if (opensIn is not { } t) return "not soon";
+        if (t < TimeSpan.FromMinutes(1)) return "in under a minute";
+        var minutes = (int)Math.Ceiling(t.TotalMinutes);
+        return minutes < 60 ? $"in {minutes} min" : $"in {minutes / 60} h {minutes % 60:00} min";
+    }
 
     private string CastStatus(uint fish, RodSnapshot s)
     {
@@ -668,12 +696,22 @@ internal sealed unsafe class Angler : IDisposable
             Fail("Rod fishing can't read the bites (the bite animation hook isn't working; the game may have been updated).");
     }
 
+    /// <summary>A cast that didn't go out counts once toward <see cref="MaxFailedCasts"/> (the 4-second check doesn't count it again).</summary>
     private void CastDidntGoOut(string why)
     {
         Services.Log.Debug($"[Angler] Cast failed: {why}");
+        ForgetPendingCast();
+        // A fight stops every cast (LogMessage 1113); that says nothing about this stand.
+        if (Services.Condition[ConditionFlag.InCombat]) return;
+        if (++failedCasts >= MaxFailedCasts && ending == CatchEnd.None) BeginEnding(CatchEnd.CantCast);
+    }
+
+    /// <summary>A cast sent but not seen going out is dropped: its bite timer and the fish it would have mooched.</summary>
+    private void ForgetPendingCast()
+    {
+        castSentUntil = null;
         castFromAction = false;
         moochedFish = 0;
-        if (++failedCasts >= MaxFailedCasts && ending == CatchEnd.None) BeginEnding(CatchEnd.CantCast);
     }
 
     private void Lock(DateTime now) => lockUntil = now + TimeSpan.FromMilliseconds(rng.Next(LockMin, LockMax + 1));
@@ -732,10 +770,14 @@ internal sealed unsafe class Angler : IDisposable
                 BeginEnding(CatchEnd.CantCast);
                 break;
             case RodMessage.CastFailed:
-                CastDidntGoOut("unable to fish at this time");
+                // Only for a cast still waiting to go out: one already counted (refused, or timed out) isn't counted again.
+                if (castSentUntil != null) CastDidntGoOut("unable to fish at this time");
                 break;
             case RodMessage.BaitTooHigh:
-                Fail($"Your Fisher level is too low for {Name(RodGame.Read().Bait is var b and not 0 ? b : job?.Bait ?? 0)}.");
+                // The refused change leaves the old bait on the line: name the one that was being put on.
+                var equipped = RodGame.Read().Bait;
+                var tooHigh = baitTried != 0 && baitTried != equipped ? baitTried : equipped != 0 ? equipped : job?.Bait ?? 0;
+                Fail($"Your Fisher level is too low for {Name(tooHigh)}.");
                 break;
             case RodMessage.LureHit:
                 // The lure's general success counts only when the lure fish's own line is unknown.
