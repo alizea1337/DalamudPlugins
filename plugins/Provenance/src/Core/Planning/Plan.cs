@@ -130,6 +130,17 @@ public sealed class Plan
 
     public bool CanStart => lines.Count > 0 && Missing.Count == 0;
 
+    /// <summary>Ordered items whose recipe tree uses this item (or that are the item), in order.</summary>
+    public IReadOnlyList<uint> TargetsNeeding(uint itemId)
+    {
+        var result = new List<uint>();
+        foreach (var root in Tree)
+            if (Uses(root) && !result.Contains(root.ItemId)) result.Add(root.ItemId);
+        return result;
+
+        bool Uses(PlanTreeNode node) => node.ItemId == itemId || node.Children.Any(Uses);
+    }
+
     public PlanLine? this[uint itemId] => lines.GetValueOrDefault(itemId);
 
     public int Count(Supply supply) => lines.Values.Count(l => l.Supply == supply && l.Remaining > 0);

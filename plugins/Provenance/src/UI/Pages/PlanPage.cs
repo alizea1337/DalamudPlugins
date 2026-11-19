@@ -248,7 +248,7 @@ internal sealed class PlanPage : Page
         Ui.EndCard();
     }
 
-    private static void DrawMissing(Plan plan, GameCatalog catalog)
+    private void DrawMissing(Plan plan, GameCatalog catalog)
     {
         var missing = plan.Missing.Where(l => l.Supply != Supply.Learn).ToList();
         if (missing.Count == 0) return;
@@ -259,8 +259,21 @@ internal sealed class PlanPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Get these yourself before starting", Palette.Danger);
         Ui.Wrapped("The run can't get these by itself. Put them in your inventory or saddlebag and this list updates on its own.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        var row = 0;
         foreach (var line in missing)
         {
+            var targets = plan.TargetsNeeding(line.ItemId);
+            if (targets.Count > 0)
+            {
+                var bw = Ui.ButtonWidth("Remove", FontAwesomeIcon.Times);
+                var rowY = ImGui.GetCursorPosY();
+                ImGui.SetCursorPosX(ImGui.GetContentRegionMax().X - bw);
+                if (Ui.Button("Remove", Ui.Kind.Ghost, FontAwesomeIcon.Times,
+                        tooltip: $"Takes {Names(targets, catalog)} out of the order" + (targets.Contains(line.ItemId) ? "." : $" (they need {catalog.ItemName(line.ItemId)})."),
+                        id: "##missingremove" + row++))
+                    RemoveFromOrder(targets, catalog);
+                ImGui.SetCursorPosY(rowY);
+            }
             Ui.ItemIcon(catalog.ItemIcon(line.ItemId), 28);
             ImGui.SameLine(0, 10 * s);
             ImGui.BeginGroup();
@@ -293,9 +306,37 @@ internal sealed class PlanPage : Page
             ImGui.SameLine(0, 10 * s);
         }
         if (Ui.Button("Check character", Ui.Kind.Ghost, FontAwesomeIcon.Sync, id: "##readycheck")) Plans.CheckCharacter();
+
+        // Remove what the character can't do: the ordered items that need it.
+        var plan = Plans.Plan;
+        var allBlocked = issues.Where(i => i.Blocking && i.ItemId != 0).SelectMany(i => plan.TargetsNeeding(i.ItemId)).Distinct().ToList();
+        if (allBlocked.Count > 0)
+        {
+            ImGui.SameLine(0, 10 * s);
+            if (Ui.Button($"Remove all ({allBlocked.Count})", Ui.Kind.Danger, FontAwesomeIcon.TrashAlt,
+                    tooltip: "Takes these out of the order: " + Names(allBlocked, catalog) + ".", id: "##readyremoveall"))
+                RemoveFromOrder(allBlocked, catalog);
+        }
         ImGui.Dummy(new Vector2(0, 2 * s));
+        var index = 0;
         foreach (var issue in issues.OrderByDescending(i => i.Blocking))
         {
+            index++;
+            var targets = issue.ItemId != 0 ? plan.TargetsNeeding(issue.ItemId) : Array.Empty<uint>();
+            if (targets.Count > 0)
+            {
+                // The remove button sits at the right end of the row.
+                var label = "Remove";
+                var bw = Ui.ButtonWidth(label, FontAwesomeIcon.Times);
+                var rowY = ImGui.GetCursorPosY();
+                ImGui.SetCursorPosX(ImGui.GetContentRegionMax().X - bw);
+                var tip = targets.Count == 1 && targets[0] == issue.ItemId
+                    ? $"Takes {catalog.ItemName(issue.ItemId)} out of the order."
+                    : $"Takes {Names(targets, catalog)} out of the order (they need {catalog.ItemName(issue.ItemId)}).";
+                if (Ui.Button(label, Ui.Kind.Ghost, FontAwesomeIcon.Times, tooltip: tip, id: "##readyremove" + index))
+                    RemoveFromOrder(targets, catalog);
+                ImGui.SetCursorPosY(rowY);
+            }
             if (issue.ItemId != 0)
             {
                 Ui.ItemIcon(catalog.ItemIcon(issue.ItemId), 28);
@@ -315,6 +356,18 @@ internal sealed class PlanPage : Page
             ImGui.EndGroup();
         }
         Ui.EndCard();
+    }
+
+    private static string Names(IReadOnlyList<uint> items, GameCatalog catalog)
+        => string.Join(", ", items.Take(5).Select(catalog.ItemName)) + (items.Count > 5 ? $" and {items.Count - 5} more" : "");
+
+    /// <summary>Takes ordered items out of the order and plans again.</summary>
+    private void RemoveFromOrder(IReadOnlyList<uint> items, GameCatalog catalog)
+    {
+        var removed = Config.Order.Lines.RemoveAll(l => items.Contains(l.ItemId));
+        if (removed == 0) return;
+        Changed();
+        Services.Chat.Print($"[Provenance] Removed from the order: {Names(items, catalog)}.");
     }
 
     // ------------------------------------------------------------------ what is being made

@@ -50,6 +50,16 @@ public class PlannerTests
     }
 
     [Fact]
+    public void Finds_the_ordered_items_that_need_a_material()
+    {
+        var plan = Build(OrderOf((Bow, 1), (Shield, 1), (Ore, 5)));
+        Assert.Equal(new[] { Bow, Shield }, plan.TargetsNeeding(Rivets));   // both use rivets
+        Assert.Equal(new[] { Bow, Shield, Ore }, plan.TargetsNeeding(Ore)); // ore deep down, and ordered itself
+        Assert.Equal(new[] { Shield }, plan.TargetsNeeding(Shield));
+        Assert.Empty(plan.TargetsNeeding(Log + 999));
+    }
+
+    [Fact]
     public void Craft_steps_put_ingredients_before_products()
     {
         var plan = Build(OrderOf((Bow, 1)));

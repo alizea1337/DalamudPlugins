@@ -9,6 +9,9 @@
   without the specialist actions, then without Manipulation, and only "no solution" keeps a run
   from starting. A craft that needs no quality and still can't be planned is finished with Basic
   Synthesis instead of stopping the run.
+- Plan page: "Your character can't do this yet" and "Get these yourself" rows have a Remove button
+  that takes the ordered items needing that material out of the order (the tooltip names them),
+  plus "Remove all" for everything the character can't do.
 
 ## 0.6.0
 
