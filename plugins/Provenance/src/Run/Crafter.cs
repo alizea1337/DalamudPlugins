@@ -372,7 +372,16 @@ internal sealed unsafe class Crafter
         solving = null;
         if (!task.IsCompletedSuccessfully)
         {
-            Fail("Raphael couldn't plan this craft: " + (task.Exception?.GetBaseException().Message ?? "cancelled"));
+            var why = task.Exception?.GetBaseException().Message ?? "cancelled";
+            // No quality wanted: Basic Synthesis finishes the item just the same.
+            if ((Current.Quality ?? (Current.Hq ? -1 : 0)) == 0)
+            {
+                log($"{why} Finishing {plugin.Plans.Catalog!.ItemName(r.ItemId)} with Basic Synthesis instead.", true);
+                macro = new List<uint> { BasicSynthesis };
+                Go(Step.OpenRecipe);
+                return;
+            }
+            Fail("Raphael couldn't plan this craft: " + why);
             return;
         }
         macro = task.Result;

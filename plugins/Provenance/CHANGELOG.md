@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1
+
+- Specialist crafters: intermediates no longer fail with "Raphael found no rotation". raphael-cli
+  crashes when offered Heart and Soul / Quick Innovation for a rotation that needs no quality, so
+  those are only offered when quality is wanted.
+- Raphael errors show the real reason instead of Rust's backtrace hint; an internal error is retried
+  without the specialist actions, then without Manipulation, and only "no solution" keeps a run
+  from starting. A craft that needs no quality and still can't be planned is finished with Basic
+  Synthesis instead of stopping the run.
+
 ## 0.6.0
 
 Scrips, monster drops, travel and security.

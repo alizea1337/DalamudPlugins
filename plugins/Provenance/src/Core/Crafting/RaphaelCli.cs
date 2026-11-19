@@ -28,7 +28,9 @@ public static class RaphaelCli
         var a = new StringBuilder();
         a.Append(CultureInfo.InvariantCulture, $"solve --recipe-id {r.RecipeId} --level {r.Level} --stats {r.Craftsmanship} {r.Control} {r.Cp}");
         if (r.Manipulation) a.Append(" --manipulation");
-        if (r.Specialist) a.Append(" --heart-and-soul --quick-innovation");
+        // Heart and Soul / Quick Innovation only add quality; with no quality wanted raphael-cli even
+        // fails with an internal error when they are offered, so leave them out.
+        if (r.Specialist && r.TargetQuality != 0) a.Append(" --heart-and-soul --quick-innovation");
         if (r.TargetQuality is { } q) a.Append(CultureInfo.InvariantCulture, $" --target-quality {Math.Max(0, q)}");
         a.Append(" --output-variables action_ids");
         return a.ToString();

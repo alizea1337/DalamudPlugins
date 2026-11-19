@@ -11,8 +11,12 @@ public class RaphaelTests
         var full = RaphaelCli.Arguments(new RaphaelRequest(38104, 100, 5844, 5182, 572, true, false, null));
         Assert.Equal("solve --recipe-id 38104 --level 100 --stats 5844 5182 572 --manipulation --output-variables action_ids", full);
 
+        // No quality wanted: the specialist actions are left out (raphael-cli fails with them, and they only add quality).
         var fast = RaphaelCli.Arguments(new RaphaelRequest(153, 100, 5844, 5182, 572, false, true, 0));
-        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --heart-and-soul --quick-innovation --target-quality 0 --output-variables action_ids", fast);
+        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --target-quality 0 --output-variables action_ids", fast);
+
+        var hq = RaphaelCli.Arguments(new RaphaelRequest(153, 100, 5844, 5182, 572, false, true, null));
+        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --heart-and-soul --quick-innovation --output-variables action_ids", hq);
     }
 
     [Fact]

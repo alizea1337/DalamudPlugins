@@ -70,9 +70,26 @@ internal sealed class Raphael
     private static async Task<List<uint>> Run(RaphaelRequest request)
     {
         await Gate.WaitAsync().ConfigureAwait(false);
-        try { return await RunOne(request).ConfigureAwait(false); }
+        try
+        {
+            // raphael-cli sometimes fails with an internal error for some option sets: try again with
+            // fewer options (no specialist actions, then no Manipulation) before giving up.
+            try { return await RunOne(request).ConfigureAwait(false); }
+            catch (RaphaelInternalError) when (request.Specialist)
+            {
+                request = request with { Specialist = false };
+            }
+            try { return await RunOne(request).ConfigureAwait(false); }
+            catch (RaphaelInternalError) when (request.Manipulation)
+            {
+                return await RunOne(request with { Manipulation = false }).ConfigureAwait(false);
+            }
+        }
         finally { Gate.Release(); }
     }
+
+    /// <summary>raphael-cli failed for a reason other than "no solution" (it crashed or rejected the options).</summary>
+    public sealed class RaphaelInternalError(string message) : Exception(message);
 
     private static async Task<List<uint>> RunOne(RaphaelRequest request)
     {
@@ -109,7 +126,15 @@ internal sealed class Raphael
         if (ids.Count == 0)
         {
             var error = (await stderr.ConfigureAwait(false)).Trim();
-            throw new InvalidOperationException("Raphael found no rotation" + (error.Length > 0 ? ": " + error.Split('\n')[^1].Trim() : "."));
+            // The useful line is "Failed to solve: <reason>"; the last line is only Rust's backtrace hint.
+            var lines = error.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+            var reason = lines.FirstOrDefault(l => l.Contains("Failed to solve", StringComparison.OrdinalIgnoreCase))
+                         ?? lines.FirstOrDefault(l => !l.StartsWith("note:", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("thread ", StringComparison.OrdinalIgnoreCase))
+                         ?? "";
+            Services.Log.Warning("Raphael failed for {Args}: {Error}", args, error);
+            if (reason.Contains("NoSolution", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Raphael found no rotation.");
+            throw new RaphaelInternalError("Raphael couldn't plan this craft" + (reason.Length > 0 ? " (" + reason + ")" : "") + ".");
         }
         Services.Log.Information("Raphael solved recipe {Recipe} in {Steps} steps", request.RecipeId, ids.Count);
         return ids;
