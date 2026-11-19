@@ -47,6 +47,23 @@ internal sealed class GatherData
     public IEnumerable<FishInfo> AllFish => fish.Values;
     public FishingSpotInfo? Spot(uint id) => spots.GetValueOrDefault(id);
 
+    private readonly Dictionary<uint, List<FishInfo>> fishAt = new();
+
+    /// <summary>Every fish that lives at a fishing hole or spearfishing spot (from the fish data's spot lists).</summary>
+    public IReadOnlyList<FishInfo> FishAt(uint spotId) => fishAt.TryGetValue(spotId, out var l) ? l : Array.Empty<FishInfo>();
+
+    private readonly Dictionary<uint, uint[]> pointsOfBase = new();
+
+    /// <summary>The GatheringPoint rows of a gathering point base: a spearfishing spot's nodes (one is up at a time per row).</summary>
+    public IReadOnlyList<uint> PointsOfBase(uint pointBase)
+    {
+        if (pointBase == 0) return Array.Empty<uint>();
+        if (pointsOfBase.TryGetValue(pointBase, out var known)) return known;
+        var rows = Services.Data.GetExcelSheet<GatheringPoint>().Where(p => p.GatheringPointBase.RowId == pointBase).Select(p => p.RowId).ToArray();
+        pointsOfBase[pointBase] = rows;
+        return rows;
+    }
+
     /// <summary>A zone's weather table: weathers with their chances in percent.</summary>
     public IReadOnlyList<(uint Weather, int Rate)> WeatherTable(uint territoryId)
     {
@@ -74,6 +91,65 @@ internal sealed class GatherData
         if (!learned.TryGetValue(gatheringPoint, out var mine)) learned[gatheringPoint] = mine = new List<Vector3>();
         mine.Add(position);
         return true;
+    }
+
+    /// <summary>Stands where this player's own casts worked, per fishing spot (saved next to the config, never uploaded).</summary>
+    private readonly Dictionary<uint, List<(float X, float Y, float Z, float Facing)>> learnedStands = new();
+    private static string LearnedStandsPath => Path.Combine(Services.PluginInterface.GetPluginConfigDirectory(), "learned_stands.json");
+
+    /// <summary>
+    /// Places to stand at a fishing hole: the ones learned in this player's own runs first, then the shipped ones.
+    /// Spearfishing spots have none (their nodes are gathering points).
+    /// </summary>
+    public IReadOnlyList<(float X, float Y, float Z, float Facing)> StandsFor(uint spotId)
+    {
+        var shipped = spots.GetValueOrDefault(spotId)?.Stands ?? Array.Empty<(float, float, float, float)>();
+        if (!learnedStands.TryGetValue(spotId, out var mine) || mine.Count == 0) return shipped;
+        return mine.Concat(shipped.Where(s => mine.All(m => Dist2(m, s) >= 4f))).ToList();
+    }
+
+    /// <summary>Remembers a stand where a cast worked. True when it was new (2 yalms or more from every known one).</summary>
+    public bool LearnStand(uint spotId, Vector3 position, float facing)
+    {
+        var stand = (MathF.Round(position.X, 1), MathF.Round(position.Y, 1), MathF.Round(position.Z, 1), MathF.Round(facing, 3));
+        if (StandsFor(spotId).Any(s => Dist2(s, stand) < 4f)) return false;
+        if (!learnedStands.TryGetValue(spotId, out var mine)) learnedStands[spotId] = mine = new();
+        mine.Add(stand);
+        return true;
+    }
+
+    private static float Dist2((float X, float Y, float Z, float Facing) a, (float X, float Y, float Z, float Facing) b)
+        => (a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z);
+
+    /// <summary>Writes the learned stands to the plugin's config folder (this PC only).</summary>
+    public void SaveLearnedStands()
+    {
+        try
+        {
+            var data = learnedStands.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.Select(p => new[] { p.X, p.Y, p.Z, p.Facing }).ToList());
+            File.WriteAllText(LearnedStandsPath, JsonSerializer.Serialize(data));
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't save learned fishing stands");
+        }
+    }
+
+    private void LoadLearnedStands()
+    {
+        try
+        {
+            if (!File.Exists(LearnedStandsPath)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(LearnedStandsPath));
+            foreach (var p in doc.RootElement.EnumerateObject())
+                if (uint.TryParse(p.Name, out var id))
+                    foreach (var a in p.Value.EnumerateArray().Select(e => e.EnumerateArray().Select(x => x.GetSingle()).ToArray()).Where(a => a.Length >= 4))
+                        LearnStand(id, new Vector3(a[0], a[1], a[2]), a[3]);
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't read learned fishing stands");
+        }
     }
 
     /// <summary>Writes the learned positions to the plugin's config folder (this PC only).</summary>
@@ -145,7 +221,14 @@ internal sealed class GatherData
         {
             Services.Log.Error(e, "Couldn't read the gathering and fishing data");
         }
+        foreach (var f in d.fish.Values)
+            foreach (var spotId in f.Spots)
+            {
+                if (!d.fishAt.TryGetValue(spotId, out var l)) d.fishAt[spotId] = l = new List<FishInfo>();
+                l.Add(f);
+            }
         d.LoadLearned();
+        d.LoadLearnedStands();
         return d;
     }
 
@@ -215,7 +298,23 @@ internal sealed class GatherData
         var stands = s.GetProperty("stand").EnumerateArray()
             .Select(p => { var a = p.EnumerateArray().Select(x => x.GetSingle()).ToArray(); return (a[0], a[1], a[2], a[3]); })
             .ToArray();
-        return new FishingSpotInfo(id, s.GetProperty("territory").GetUInt32(), s.GetProperty("spear").GetBoolean(),
-            map[0], map[1], map[2], stands, s.TryGetProperty("pointBase", out var pb) ? pb.GetUInt32() : 0);
+        var spear = s.GetProperty("spear").GetBoolean();
+        int level = 0;
+        var name = "";
+        if (spear)
+        {
+            if (Services.Data.GetExcelSheet<SpearfishingNotebook>().GetRowOrDefault(id - FishingSpotInfo.SpearOffset) is { } note)
+            {
+                level = note.GatheringLevel;
+                name = note.PlaceName.ValueNullable?.Name.ExtractText() ?? "";
+            }
+        }
+        else if (Services.Data.GetExcelSheet<FishingSpot>().GetRowOrDefault(id) is { } row)
+        {
+            level = row.GatheringLevel;
+            name = row.PlaceName.ValueNullable?.Name.ExtractText() ?? "";
+        }
+        return new FishingSpotInfo(id, s.GetProperty("territory").GetUInt32(), spear,
+            map[0], map[1], map[2], stands, s.TryGetProperty("pointBase", out var pb) ? pb.GetUInt32() : 0, level, name);
     }
 }

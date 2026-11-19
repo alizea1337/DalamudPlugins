@@ -77,4 +77,28 @@ public class TimingTests
         // 10:00: up now.
         Assert.Equal(GatherMode.Gather, Interleave.Decide(targets, AtEorzeaHour(10), TimeSpan.FromMinutes(2), true).Mode);
     }
+
+    [Fact]
+    public void Fish_windows_count_like_timed_nodes()
+    {
+        var now = AtEorzeaHour(1);
+        // A fish that bites in 20 minutes: craft meanwhile, and the next window is the fish's.
+        var fish = new ScheduledTarget(3, Supply.Fish, 2, 0, TimeSpan.FromMinutes(20));
+        var d = Interleave.Decide(new[] { fish }, now, TimeSpan.FromMinutes(2), canCraft: true);
+        Assert.Equal(GatherMode.CraftMeanwhile, d.Mode);
+        Assert.Equal(TimeSpan.FromMinutes(20), d.NextWindow);
+
+        // The earlier of a timed node and a fish wins.
+        d = Interleave.Decide(new[] { fish with { Wait = TimeSpan.FromMinutes(90) }, new ScheduledTarget(2, Supply.GatherTimed, 3, NineToNoon) },
+            now, TimeSpan.FromMinutes(2), canCraft: false);
+        Assert.Equal(GatherMode.Wait, d.Mode);
+        Assert.True(d.NextWindow < TimeSpan.FromMinutes(90));
+
+        // Biting now, or a fish without a window: keep going.
+        Assert.Equal(GatherMode.Gather, Interleave.Decide(new[] { fish with { Wait = TimeSpan.Zero } }, now, TimeSpan.FromMinutes(2), true).Mode);
+        Assert.Equal(GatherMode.Gather, Interleave.Decide(new[] { fish with { Wait = null } }, now, TimeSpan.FromMinutes(2), true).Mode);
+
+        // Not within the forecast: no window to wait for.
+        Assert.Null(Interleave.Decide(new[] { fish with { Wait = TimeSpan.MaxValue } }, now, TimeSpan.FromMinutes(2), true).NextWindow);
+    }
 }

@@ -47,6 +47,28 @@ public sealed class PlannerOptions
 
     /// <summary>How a run could buy a book or tome (by item id) at an exchange; null when no exchange sells it.</summary>
     public System.Func<uint, BookPurchase?>? BuyBook { get; init; }
+
+    /// <summary>
+    /// The bait a fish uses up per catch, by fish item id: its own bait (for a mooched fish, the tackle the
+    /// chain starts with) and the bait of the fish caught first for Fisher's Intuition. Null or empty: no
+    /// bait (spearfishing, or nothing known). Bait becomes plan lines under the fish (never crafted).
+    /// </summary>
+    public System.Func<uint, IReadOnlyList<(uint Bait, double PerCatch)>>? FishBaits { get; init; }
+
+    /// <summary>Bait planned on top of the estimate, per kind of bait.</summary>
+    public int SpareBait { get; init; }
+
+    /// <summary>
+    /// Bait planned instead when a fish's own bait can't be bought from a gil vendor under the price cap and
+    /// the bags don't hold enough (Versatile Lure). 0: no stand-in, the missing bait is for the player to get.
+    /// </summary>
+    public uint FallbackBait { get; init; }
+
+    /// <summary>
+    /// How many of a bait the run can cast with (the main bags; bait in the saddlebag can't be used).
+    /// Null: bait counts like any owned item.
+    /// </summary>
+    public System.Func<uint, int>? BaitOnHand { get; init; }
 }
 
 /// <summary>A book or tome sold at a scrip or token exchange.</summary>

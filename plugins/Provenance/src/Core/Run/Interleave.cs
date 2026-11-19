@@ -18,7 +18,15 @@ public enum GatherMode
 
 /// <summary>A gathering target as the scheduler sees it.</summary>
 /// <param name="Mask">Uptime mask for timed items (see <see cref="Eorzea"/>); 0 for items always up.</param>
-public readonly record struct ScheduledTarget(uint ItemId, Supply Supply, int Left, uint Mask);
+/// <param name="Wait">
+/// Fish with a time or weather window: real time until it bites at the best spot (zero when it bites now,
+/// <see cref="TimeSpan.MaxValue"/> when not within the forecast). Null for anything without a window.
+/// </param>
+public readonly record struct ScheduledTarget(uint ItemId, Supply Supply, int Left, uint Mask, TimeSpan? Wait = null)
+{
+    /// <summary>Tied to a window: a timed node, or a fish that only bites at some hours or in some weather.</summary>
+    public bool Timed => Wait != null || (Supply == Supply.GatherTimed && Mask != 0);
+}
 
 public sealed record GatherDecision(GatherMode Mode, TimeSpan? NextWindow);
 
@@ -30,10 +38,11 @@ public static class Interleave
         var open = targets.Where(t => t.Left > 0).ToList();
         if (open.Count == 0) return new GatherDecision(GatherMode.Gather, null);
 
-        // Anything that isn't tied to a window keeps GatherBuddy Reborn busy.
-        if (open.Any(t => t.Supply != Supply.GatherTimed || t.Mask == 0)) return new GatherDecision(GatherMode.Gather, null);
+        // Anything that isn't tied to a window keeps the gatherer busy.
+        if (open.Any(t => !t.Timed)) return new GatherDecision(GatherMode.Gather, null);
 
-        var waits = open.Select(t => Eorzea.UntilOpen(t.Mask, now)).Where(w => w != null).Select(w => w!.Value).ToList();
+        var waits = open.Select(t => t.Wait ?? Eorzea.UntilOpen(t.Mask, now))
+            .Where(w => w != null && w.Value != TimeSpan.MaxValue).Select(w => w!.Value).ToList();
         if (waits.Count == 0) return new GatherDecision(GatherMode.Gather, null);
         var next = waits.Min();
         if (next <= lead) return new GatherDecision(GatherMode.Gather, next);

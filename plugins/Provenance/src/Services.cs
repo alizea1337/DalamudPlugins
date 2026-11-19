@@ -21,4 +21,11 @@ internal sealed class Services
     [PluginService] internal static IChatGui Chat { get; private set; } = null!;
     [PluginService] internal static INotificationManager Notifications { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    /// <summary>Hooks for fishing (the bite animation, the catch, casting).</summary>
+    [PluginService] internal static IGameInteropProvider GameInterop { get; private set; } = null!;
+    /// <summary>Quest toasts carry the fishing hole's warnings ("the fish sense something amiss").</summary>
+    [PluginService] internal static IToastGui Toasts { get; private set; } = null!;
+    [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
+    [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
 }

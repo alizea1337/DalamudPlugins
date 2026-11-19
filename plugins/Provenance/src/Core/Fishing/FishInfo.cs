@@ -52,10 +52,18 @@ public sealed record FishInfo(
 }
 
 /// <summary>A fishing hole or spearfishing spot: its zone, the map circle, and recorded places to stand.</summary>
+/// <param name="Id">FishingSpot row id; spearfishing spots are 0x80000000 + SpearfishingNotebook row id.</param>
+/// <param name="MapX">Map units (GatherBuddy Reborn's integral coordinates), not world coordinates.</param>
 /// <param name="Stands">World X, Y, Z and the facing to cast in (radians), from recorded catches.</param>
 /// <param name="PointBase">Spearfishing: the GatheringPointBase whose points are the spot's nodes.</param>
+/// <param name="Level">Fisher level the spot needs (FishingSpot / SpearfishingNotebook GatheringLevel); 0 when unknown.</param>
+/// <param name="Name">The spot's place name in the client's language ("Mistbeard Cove").</param>
 public sealed record FishingSpotInfo(uint Id, uint TerritoryId, bool Spear, int MapX, int MapY, int Radius,
-    IReadOnlyList<(float X, float Y, float Z, float Facing)> Stands, uint PointBase);
+    IReadOnlyList<(float X, float Y, float Z, float Facing)> Stands, uint PointBase, int Level = 0, string Name = "")
+{
+    /// <summary>Spearfishing spot ids start here (0x80000000 + SpearfishingNotebook row id).</summary>
+    public const uint SpearOffset = 0x80000000;
+}
 
 /// <summary>
 /// A repeating real-time window: up for <see cref="On"/> milliseconds, then down for <see cref="Off"/>,

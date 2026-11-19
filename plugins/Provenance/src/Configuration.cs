@@ -21,6 +21,7 @@ public sealed class Configuration : IPluginConfiguration
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();
+    public FishingSettings Fishing { get; set; } = new();
     public CombatSettings Combat { get; set; } = new();
     public AfterOrderSettings AfterOrder { get; set; } = new();
     public SecuritySettings Security { get; set; } = new();
@@ -50,6 +51,9 @@ public sealed class Configuration : IPluginConfiguration
         c.Consumables ??= new();
         c.Crafting ??= new();
         c.Run ??= new();
+        c.Fishing ??= new();
+        c.Fishing.SpareBait = Math.Clamp(c.Fishing.SpareBait, 0, 999);
+        c.Fishing.WindowLeadMinutes = Math.Clamp(c.Fishing.WindowLeadMinutes, 0, 30);
         c.Combat ??= new();
         c.AfterOrder ??= new();
         c.Security ??= new();
@@ -127,6 +131,26 @@ public sealed class RunSettings
     public bool ReduceCollectables { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
+}
+
+/// <summary>Fishing in a run: bait, buffs and what happens to fish caught on the side.</summary>
+[Serializable]
+public sealed class FishingSettings
+{
+    /// <summary>Buy the bait a fish needs from a gil vendor before fishing, and again when it runs out.</summary>
+    public bool BuyBait { get; set; } = true;
+    /// <summary>Bait bought on top of the estimate, per kind.</summary>
+    public int SpareBait { get; set; } = 20;
+    /// <summary>When a fish's own bait can't be bought for gil (scrips, crafted), fish with Versatile Lure instead.</summary>
+    public bool VersatileLureFallback { get; set; } = true;
+    /// <summary>Use Chum, Patience, Surface Slap, Identical Cast and the lures when the catch plan calls for them.</summary>
+    public bool UseBuffs { get; set; } = true;
+    /// <summary>Drink cordials for fishing GP.</summary>
+    public bool UseCordials { get; set; } = true;
+    /// <summary>Real minutes before a fish's window opens to be at the spot (catching the fish for Fisher's Intuition comes on top).</summary>
+    public int WindowLeadMinutes { get; set; } = 3;
+    /// <summary>After fishing, throw away fish caught on the side that the order doesn't need (main bags only).</summary>
+    public bool DiscardByCatch { get; set; } = true;
 }
 
 /// <summary>The Security tab: getting unstuck, trades, and limits for a run.</summary>
