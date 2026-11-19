@@ -41,6 +41,9 @@ Adapted files:
   `AutoGather.FishingBuffs.cs`, `AutoGather.FishingCollectable.cs`, `AutoGather.Spearfishing.cs`).
 - `src/Core/Fishing/FishWindow.cs`: when a fish bites, from the time and weather rules in
   `GatherBuddy/Plugin/UptimeManager.cs`.
+- `src/Core/Fishing/CatchPlan.cs` (`CatchWindow`): narrowing a fish's window to the times the fish of its
+  mooch chain bite too, an idea from the mooch uptime intersection in
+  `GatherBuddy/AutoGather/Lists/ActiveItemList.cs`. The code is new and searches the whole forecast.
 - `src/Integrations/Fishing/SpearGame.cs`: finding and recognising spearfishing nodes, from
   `GatherBuddy/AutoGather/AutoGather.Spearfishing.cs`; and `src/Integrations/Fishing/RodMessages.cs`:
   matching the wary and amiss warnings, from `GatherBuddy/AutoGather/AutoGather.cs`.

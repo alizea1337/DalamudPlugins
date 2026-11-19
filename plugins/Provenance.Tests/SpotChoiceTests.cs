@@ -26,10 +26,12 @@ public class SpotChoiceTests
     private static SpotCandidate Always(uint item, uint spot, bool here = true, int cost = 0)
         => new(item, spot, false, TimeSpan.Zero, TimeSpan.MaxValue, here, cost);
 
+    private static CatchWindow W(FishInfo fish, IReadOnlyList<(uint, int)> table) => new(fish, table);
+
     [Fact]
     public void Fish_without_a_window_always_bite()
     {
-        var (wait, bites) = SpotChoice.Window(Fish(), Mixed, At(1_700_000_000_000), SpotChoice.Horizon);
+        var (wait, bites) = SpotChoice.Window(W(Fish(), Mixed), At(1_700_000_000_000), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.Zero, wait);
         Assert.Equal(TimeSpan.MaxValue, bites);
     }
@@ -38,12 +40,12 @@ public class SpotChoiceTests
     public void A_time_window_gives_the_wait_and_its_length()
     {
         var f = Fish(window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour)); // 9:00-15:00 ET
-        var (wait, bites) = SpotChoice.Window(f, Mixed, At(8 * Hour), SpotChoice.Horizon);
+        var (wait, bites) = SpotChoice.Window(W(f, Mixed), At(8 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.FromMilliseconds(Hour), wait);
         Assert.Equal(TimeSpan.FromMilliseconds(6 * Hour), bites);
 
         // Open now: no wait, the rest of the window.
-        (wait, bites) = SpotChoice.Window(f, Mixed, At(10 * Hour), SpotChoice.Horizon);
+        (wait, bites) = SpotChoice.Window(W(f, Mixed), At(10 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.Zero, wait);
         Assert.Equal(TimeSpan.FromMilliseconds(5 * Hour), bites);
     }
@@ -52,7 +54,7 @@ public class SpotChoiceTests
     public void A_window_past_the_forecast_has_no_wait()
     {
         var only = new (uint, int)[] { (4, 100) };
-        var (wait, _) = SpotChoice.Window(Fish(weather: new uint[] { 5 }), only, At(1_700_000_000_000), SpotChoice.Horizon);
+        var (wait, _) = SpotChoice.Window(W(Fish(weather: new uint[] { 5 }), only), At(1_700_000_000_000), SpotChoice.Horizon);
         Assert.Null(wait);
     }
 
@@ -87,30 +89,30 @@ public class SpotChoiceTests
     {
         var fish = Fish(window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour));          // 9:00-15:00 ET
         var predator = Fish(2, window: new Uptime(6 * Hour, 18 * Hour, 12 * Hour));  // 12:00-18:00 ET
-        var (wait, bites) = SpotChoice.Window(fish, Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon);
+        var (wait, bites) = SpotChoice.Window(W(fish, Mixed), W(predator, Mixed), At(8 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.FromMilliseconds(4 * Hour), wait);
         Assert.Equal(TimeSpan.FromMilliseconds(3 * Hour), bites); // until the fish's own window closes at 15:00
 
         // Both bite now: the shorter of what's left.
-        (wait, bites) = SpotChoice.Window(fish, Mixed, predator, Mixed, At(13 * Hour), SpotChoice.Horizon);
+        (wait, bites) = SpotChoice.Window(W(fish, Mixed), W(predator, Mixed), At(13 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.Zero, wait);
         Assert.Equal(TimeSpan.FromMilliseconds(2 * Hour), bites);
 
         // Windows that never meet.
         var evening = Fish(3, window: new Uptime(4 * Hour, 20 * Hour, 16 * Hour));   // 16:00-20:00 ET
-        Assert.Null(SpotChoice.Window(fish, Mixed, evening, Mixed, At(8 * Hour), SpotChoice.Horizon).Wait);
+        Assert.Null(SpotChoice.Window(W(fish, Mixed), W(evening, Mixed), At(8 * Hour), SpotChoice.Horizon).Wait);
     }
 
     [Fact]
     public void A_fish_without_a_window_bites_while_its_predator_does()
     {
         var predator = Fish(2, window: new Uptime(6 * Hour, 18 * Hour, 12 * Hour)); // 12:00-18:00 ET
-        var (wait, bites) = SpotChoice.Window(Fish(), Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon);
+        var (wait, bites) = SpotChoice.Window(W(Fish(), Mixed), W(predator, Mixed), At(8 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.FromMilliseconds(4 * Hour), wait);
         Assert.Equal(TimeSpan.FromMilliseconds(6 * Hour), bites);
 
         // Neither has a window: always.
-        (wait, bites) = SpotChoice.Window(Fish(), Mixed, Fish(2), Mixed, At(8 * Hour), SpotChoice.Horizon);
+        (wait, bites) = SpotChoice.Window(W(Fish(), Mixed), W(Fish(2), Mixed), At(8 * Hour), SpotChoice.Horizon);
         Assert.Equal(TimeSpan.Zero, wait);
         Assert.Equal(TimeSpan.MaxValue, bites);
     }
@@ -122,8 +124,8 @@ public class SpotChoiceTests
         var fish = Fish(window: new Uptime(6 * Hour, 18 * Hour, 9 * Hour)); // 9:00-15:00 ET
         var predator = Fish(2, weather: new uint[] { 9 });
         var always9 = new (uint, int)[] { (9, 100) };
-        Assert.Equal(TimeSpan.FromMilliseconds(Hour), SpotChoice.Window(fish, Mixed, predator, always9, At(8 * Hour), SpotChoice.Horizon).Wait);
-        Assert.Null(SpotChoice.Window(fish, Mixed, predator, Mixed, At(8 * Hour), SpotChoice.Horizon).Wait);
+        Assert.Equal(TimeSpan.FromMilliseconds(Hour), SpotChoice.Window(W(fish, Mixed), W(predator, always9), At(8 * Hour), SpotChoice.Horizon).Wait);
+        Assert.Null(SpotChoice.Window(W(fish, Mixed), W(predator, Mixed), At(8 * Hour), SpotChoice.Horizon).Wait);
     }
 
     [Fact]
@@ -179,6 +181,18 @@ public class SpotChoiceTests
         var opensSoon = Timed(4, 13, 2, 4); // closes in 6 minutes
         var ranked = SpotChoice.Rank(new[] { always, closesLate, closesSoon, opensSoon }, 0).Select(c => c.ItemId).ToList();
         Assert.Equal(new uint[] { 4, 3, 2, 1 }, ranked);
+    }
+
+    [Fact]
+    public void A_fish_bound_to_a_predator_s_window_is_a_timed_pick()
+    {
+        // No window of its own, but restricted at this spot by the predator its swimming shadows wait for: it goes
+        // before the fish being worked that always bites (the fisher is called away for it), whatever its own data says.
+        var shadows = Timed(21180, 10, 2, 29);
+        var always = Always(2, 11);
+        Assert.True(shadows.Timed);
+        Assert.False(always.Timed);
+        Assert.Equal(new uint[] { 21180, 2 }, SpotChoice.Rank(new[] { always, shadows }, currentSpot: 11).Select(c => c.ItemId));
     }
 
     [Fact]

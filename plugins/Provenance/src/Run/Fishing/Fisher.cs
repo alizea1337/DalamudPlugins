@@ -139,8 +139,9 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// <summary>Waiting at the stand for GP the catch can't do without.</summary>
     public bool WaitingForGp => step == Step.Fish && angler.Active && angler.WaitingForGp;
     /// <summary>
-    /// At the stand with the rod in, waiting for the fish's window to open (the fisher goes early by the lead);
-    /// not fishing time. Stays the active work: <see cref="HasWorkNow"/> is true then.
+    /// At the stand with the rod in, waiting for the fish's window to open (the fisher goes early by the lead), for
+    /// the window of a fish Fisher's Intuition needs, or to catch the last of those; not fishing time. The session
+    /// stays the active work (<see cref="Busy"/>).
     /// </summary>
     public bool WaitingForWindow => step == Step.Fish && angler.Active && angler.WaitingForWindow;
     /// <summary>
@@ -246,9 +247,18 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// </summary>
     /// <remarks>
     /// The raw wait until it bites; the fisher sets out earlier by <see cref="LeadFor"/>. MaxValue also when the
-    /// fish can't be fished at all (see <see cref="Unreachable"/>).
+    /// fish can't be fished at all (see <see cref="Unreachable"/>). The window is the one it can be caught in (see
+    /// <see cref="Windowed"/>): a fish mooched from one that bites at some hours waits for those, and one caught
+    /// under Fisher's Intuition with no window of its own waits for the soonest of its predators' windows.
     /// </remarks>
     public TimeSpan? WaitFor(uint itemId) => WindowWait(itemId);
+
+    /// <summary>
+    /// The fish only bites in a window: at some hours or in some weather, its own or that of the mooch chain it's
+    /// caught along, or a predator's (caught first for Fisher's Intuition, or gigged first for its swimming
+    /// shadows). False for an item that isn't a known fish.
+    /// </summary>
+    public bool Windowed(uint itemId) => plugin.Plans.Catalog != null && Data.Fish(itemId) != null && Places(itemId).Windowed;
 
     /// <summary>
     /// Every frame while fishing is the active work, and whenever <see cref="Busy"/> (a pause or a stop reels in
@@ -713,16 +723,21 @@ internal sealed unsafe partial class Fisher : IDisposable
         return minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60:00} min";
     }
 
+    /// <summary>The fish whose weather a window waits for: the fish, or (without a rule of its own) the first link of its mooch chain with one.</summary>
+    private FishInfo WeatherFish(FishInfo f)
+        => f.Weather.Count > 0 || f.PreviousWeather.Count > 0 ? f
+            : CatchWindow.For(f, Data.Fish, AnyWeather).Links.FirstOrDefault(l => l.Weather.Count > 0 || l.PreviousWeather.Count > 0) ?? f;
+
     /// <summary>
-    /// "Bites for 12 more minutes", "Bites in 8 min (in Fog)", or "" for a fish without a window. Swimming shadows
-    /// waiting for a predator's window: "Ichimonji bites in 40 min, for the swimming shadows".
-    /// <paramref name="lower"/> starts it in lower case, for the middle of a sentence.
+    /// "Bites for 12 more minutes", "Bites in 8 min (in Fog)", or "" for a fish without a window. Waiting for a
+    /// predator's window: "Ichimonji bites in 40 min, for the swimming shadows", "Giant Takitaro bites in 40 min (in
+    /// Thunder), for Fisher's Intuition". <paramref name="lower"/> starts it in lower case, for the middle of a sentence.
     /// </summary>
     private string WindowText(FishInfo f, FishingSpotInfo s, bool lower)
     {
         var place = PlaceAt(f, s.Id);
+        if (!(place?.Timed ?? Places(f.ItemId).Windowed)) return "";
         var predator = place?.Predator ?? 0;
-        if (!f.Restricted && predator == 0) return "";
         var now = DateTimeOffset.UtcNow;
         string text;
         if (place is not { Opens: { } opens }) text = "doesn't bite within the forecast";
@@ -734,9 +749,9 @@ internal sealed unsafe partial class Fisher : IDisposable
                 : minutes < 60 ? $"bites for {minutes} more {(minutes == 1 ? "minute" : "minutes")}"
                 : $"bites for {Span(open)} more";
         }
-        else text = $"bites in {Span(opens - now)}{WeatherNote(predator != 0 && Data.Fish(predator) is { } p ? p : f)}";
+        else text = $"bites in {Span(opens - now)}{WeatherNote(WeatherFish(predator != 0 && Data.Fish(predator) is { } p ? p : f))}";
         // The predator's name starts it, whatever the case asked for.
-        if (predator != 0) return $"{Name(predator)} {text}, for the swimming shadows";
+        if (predator != 0) return $"{Name(predator)} {text}, {(f.Spear ? "for the swimming shadows" : "for Fisher's Intuition")}";
         return lower ? text : char.ToUpperInvariant(text[0]) + text[1..];
     }
 

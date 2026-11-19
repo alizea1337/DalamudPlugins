@@ -116,10 +116,8 @@ internal sealed class RunEngine : IDisposable
     private static readonly TimeSpan ReelInPatience = TimeSpan.FromMinutes(2);
     /// <summary>After fishing stops with the rod out, the fisher keeps its ticks this long to reel in.</summary>
     private static readonly TimeSpan WindDown = TimeSpan.FromSeconds(30);
-    /// <summary>The trip to a fishing hole, on top of the settings' lead, when deciding to go for a fish window.</summary>
+    /// <summary>The trip to a fishing hole, on top of the fisher's lead, when deciding to go for a fish window.</summary>
     private static readonly TimeSpan FishTrip = TimeSpan.FromMinutes(1.5);
-    /// <summary>Fishing time spent on the predators for Fisher's Intuition is counted up to this much.</summary>
-    private const double MaxPrepMinutes = 15;
 
     /// <summary>The worker ticked every frame in the gathering stage.</summary>
     private Worker worker = Worker.Land;
@@ -1601,19 +1599,11 @@ internal sealed class RunEngine : IDisposable
     }
 
     /// <summary>
-    /// How early the fisher takes over for a fish with a window: the minutes to be at the spot before it
-    /// opens (Settings), the trip there, and catching the fish for Fisher's Intuition first.
+    /// How early the fisher takes over for a fish with a window: its own lead (the minutes to be at the spot
+    /// before it opens, and catching the fish for Fisher's Intuition first, as early as the angler starts on them;
+    /// <see cref="Fishing.Fisher.LeadFor"/>) and the trip there.
     /// </summary>
-    private TimeSpan FishLead(uint itemId)
-    {
-        var lead = TimeSpan.FromMinutes(plugin.Config.Fishing.WindowLeadMinutes) + FishTrip;
-        if (plugin.Plans.Catalog?.Gather.Fish(itemId) is { Predators.Count: > 0 } fish)
-        {
-            var catches = fish.Predators.Sum(p => Math.Max(1, p.Count));
-            lead += TimeSpan.FromMinutes(Math.Min(MaxPrepMinutes, catches / Math.Max(0.05, plugin.Config.Timings.FishPerMinute)));
-        }
-        return lead;
-    }
+    private TimeSpan FishLead(uint itemId) => Fish.LeadFor(itemId) + FishTrip;
 
     /// <summary>Asks the fisher when each fish still needed bites, and when the last of them can be in.</summary>
     private void UpdateFishWaits()
@@ -1811,8 +1801,9 @@ internal sealed class RunEngine : IDisposable
             if (tripSpot == null && Gather.Running && !Gather.Waiting && !Gather.WaitingForGp) landActiveSeconds += seconds;
             return;
         }
-        // Rod fishing only; standing at the water before the window opens isn't fishing time.
-        if (Fish.Waiting || Fish.WaitingForGp || Fish.View is not { Spear: false, Fish: not 0 } view) return;
+        // Rod fishing only; standing at the water before the window opens (the fish's, or that of a fish Fisher's
+        // Intuition needs) or holding back the last of those isn't fishing time.
+        if (Fish.Waiting || Fish.WaitingForGp || Fish.WaitingForWindow || Fish.View is not { Spear: false, Fish: not 0 } view) return;
         if (FishWait(view.Fish) is not { } wait || wait == TimeSpan.Zero) fishActiveSeconds += seconds;
     }
 
@@ -1883,9 +1874,12 @@ internal sealed class RunEngine : IDisposable
         if (GameState.CanUse(action, FishAccess.Quit)) GameState.Use(action, FishAccess.Quit);
     }
 
-    /// <summary>Timed nodes, and fish that only bite at some hours or in some weather ("Also from timed nodes and rare fish").</summary>
+    /// <summary>
+    /// Timed nodes, and fish that only bite at some hours or in some weather: their own, their mooch chain's, or a
+    /// predator's (<see cref="Fishing.Fisher.Windowed"/>; "Also from timed nodes and rare fish").
+    /// </summary>
     private bool Windowed(GatherTarget t)
-        => t.Supply == Supply.GatherTimed || (t.Supply == Supply.Fish && plugin.Plans.Catalog?.Gather.Fish(t.ItemId) is { Restricted: true });
+        => t.Supply == Supply.GatherTimed || (t.Supply == Supply.Fish && Fish.Windowed(t.ItemId));
 
     /// <summary>
     /// The gathered targets whose extras the clean-up throws away (Settings), each with how many to keep.
