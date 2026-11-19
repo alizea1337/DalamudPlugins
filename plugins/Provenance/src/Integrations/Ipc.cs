@@ -71,19 +71,6 @@ internal static class Ipc
     }
 }
 
-/// <summary>GatherBuddy Reborn's public IPC: switch auto-gather on and off, and read its state.</summary>
-internal static class GatherBuddyIpc
-{
-    public const string InternalName = "GatherBuddyReborn";
-
-    public static bool Available => Ipc.IsLoaded(InternalName);
-    public static bool Enabled => Ipc.Func("GatherBuddyReborn.IsAutoGatherEnabled", false);
-    public static bool Waiting => Ipc.Func("GatherBuddyReborn.IsAutoGatherWaiting", false);
-    public static string Status => Ipc.Func("GatherBuddyReborn.GetAutoGatherStatusText", "") ?? "";
-
-    public static bool SetEnabled(bool on) => Ipc.Action("GatherBuddyReborn.SetAutoGatherEnabled", on);
-}
-
 /// <summary>vnavmesh: pathfinding and movement.</summary>
 internal static class Vnav
 {

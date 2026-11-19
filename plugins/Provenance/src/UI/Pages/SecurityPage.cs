@@ -24,7 +24,7 @@ internal sealed class SecurityPage : Page
         // Unstuck
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Getting unstuck");
-        Ui.Wrapped("Applies to Provenance's own walking (vendors, exchanges, bells, monsters, timed nodes). GatherBuddy Reborn has its own unstuck while it gathers.");
+        Ui.Wrapped("Applies to all of Provenance's walking and flying: gathering nodes, vendors, exchanges, bells, monsters and inns.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         var v = c.AdvancedUnstuck;
         if (Ui.Checkbox("Advanced unstuck", ref v, "Stuck once: find another path. Twice: jump and back off. Three times: side-step to a nearby spot. Then teleport to the zone's aetheryte, and only then give up. Off: find another path, teleport, give up."))

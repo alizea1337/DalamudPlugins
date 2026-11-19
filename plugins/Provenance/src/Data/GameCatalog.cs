@@ -20,6 +20,14 @@ internal readonly record struct RecipeNeeds(int Craftsmanship, int Control, bool
 /// <summary>What gathering or fishing an item takes: the job, the lowest node level, and the Perception the item asks for.</summary>
 internal readonly record struct GatherNeeds(uint ClassJobId, int Level, int Perception);
 
+/// <summary>
+/// One gathering point an item can come from: the GatheringPoint row (exact positions are in
+/// <see cref="GatherData"/>), its base (the node), zone, the gatherer job, node level, whether it is
+/// timed (and when), the folklore tome it needs, and the item's gathering item level.
+/// </summary>
+internal sealed record GatherPoint(uint PointId, uint BaseId, uint TerritoryId, uint ClassJobId, int Level, bool Timed, uint Mask,
+    uint Tome, uint GatheringItemLevel, bool Hidden);
+
 internal sealed record TimedSpot(uint TerritoryId, System.Numerics.Vector2 Position, float Radius, uint Mask);
 
 /// <summary>One row of the recipe browser.</summary>
@@ -186,6 +194,9 @@ internal sealed class GameCatalog : IGameCatalog
                 var itemId = gi.Item.RowId;
                 if (itemId == 0 || itemId >= 1_000_000) continue;
                 Add(itemId, timed ? Obtain.GatherTimed : Obtain.Gather);
+                if (!gatherPoints.TryGetValue(itemId, out var pointList)) gatherPoints[itemId] = pointList = new List<GatherPoint>(2);
+                pointList.Add(new GatherPoint(point.RowId, pointBase.RowId, point.TerritoryType.RowId, job, pointBase.GatheringLevel, timed, mask, tome,
+                    gi.GatheringItemLevel.RowId, gi.IsHidden));
                 if (gi.PerceptionReq > 0)
                     perception[itemId] = perception.TryGetValue(itemId, out var p) ? Math.Min(p, gi.PerceptionReq) : gi.PerceptionReq;
                 if (timed) timedMasks[itemId] = timedMasks.GetValueOrDefault(itemId) | mask;
@@ -217,6 +228,10 @@ internal sealed class GameCatalog : IGameCatalog
     }
 
     private readonly Dictionary<uint, uint> timedMasks = new();
+    private readonly Dictionary<uint, List<GatherPoint>> gatherPoints = new();
+
+    /// <summary>Every gathering point an item comes from (regular and timed; spearfishing excluded).</summary>
+    public IReadOnlyList<GatherPoint> GatherPoints(uint itemId) => gatherPoints.TryGetValue(itemId, out var l) ? l : Array.Empty<GatherPoint>();
     private readonly Dictionary<uint, RecipeNeeds> recipeNeeds = new();
     private readonly Dictionary<uint, int> perception = new();
 

@@ -18,6 +18,16 @@ Adapted files:
 - `src/Run/BookBuyer.cs`: the exchange window callbacks (inclusion shop page, subpage and item;
   plain exchange rows; confirmation dialogs) and where the windows keep their item lists, from
   `GatherBuddy/Vulcan/Vendors/VendorInteractionHelper.cs` and `VendorPurchaseManager.cs`.
+- `src/Core/Gathering/GatherSolver.cs`: the gathering rotation solver, from
+  `GatherBuddy/AutoGather/Helpers/RotationSolver.cs`. Changed to be pure and to leave out the Diadem.
+- `src/Core/Gathering/CollectableRotation.cs`: the collectable rotation, from
+  `GatherBuddy/AutoGather/AutoGather.Collectables.cs`.
+- `src/Run/Gathering/GatherActions.cs`, `GatheringWindows.cs`, `Upkeep.cs` and `Gatherer.cs`:
+  gathering action ids and statuses, the gathering and collectable window layouts, materia
+  extraction and aetherial reduction, and the approach of the auto-gather loop, from
+  `GatherBuddy/AutoGather/`.
+- `Resources/ilvconvert.csv`: base Gathering and Perception per gathering item level, from
+  `GatherBuddy/CustomInfo/IlvConvertTable.csv`.
 - `src/Run/Appraiser.cs`: the collectable appraiser window callbacks (job tab, row, submit, the
   scrip-cap prompt) and reading its item list, from `GatherBuddy/AutoGather/Collectables/`.
 - `tools/VendorTable`: corrected positions of two collectable appraisers, from

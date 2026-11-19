@@ -124,6 +124,9 @@ Write("fishspots.json", new
     generated = today,
     spots = spots.ToDictionary(kv => kv.Key.ToString(CultureInfo.InvariantCulture), kv => kv.Value),
 });
+// ---- ilvconvert.csv: base Gathering/Perception per gathering item level (Bountiful bonus, boon chance)
+File.Copy(Path.Combine(custom, "IlvConvertTable.csv"), Path.Combine(outDir, "ilvconvert.csv"), true);
+
 Console.WriteLine($"fish {fish.Count} ({bites.Count} with bite times), spots {spots.Count} ({stands.Count} with stand positions), node points {world.Count}");
 return 0;
 

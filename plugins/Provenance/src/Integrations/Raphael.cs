@@ -34,10 +34,10 @@ internal sealed class Raphael
             // Dalamud keeps installed plugins in XIVLauncher\installedPlugins\<name>\<version>\
             // (plugin assemblies are loaded from memory, so their own Location is empty).
             var launcher = new DirectoryInfo(Services.PluginInterface.ConfigDirectory.FullName).Parent?.Parent;
-            var gbrDir = launcher == null ? null : new DirectoryInfo(Path.Combine(launcher.FullName, "installedPlugins", GatherBuddyIpc.InternalName));
+            var gbrDir = launcher == null ? null : new DirectoryInfo(Path.Combine(launcher.FullName, "installedPlugins", "GatherBuddyReborn"));
             if (gbrDir is { Exists: true })
             {
-                var loaded = Services.PluginInterface.InstalledPlugins.FirstOrDefault(p => p.InternalName == GatherBuddyIpc.InternalName)?.Version?.ToString();
+                var loaded = Services.PluginInterface.InstalledPlugins.FirstOrDefault(p => p.InternalName == "GatherBuddyReborn")?.Version?.ToString();
                 var candidates = gbrDir.GetDirectories()
                     .OrderByDescending(d => d.Name == loaded)
                     .ThenByDescending(d => d.LastWriteTimeUtc)
@@ -93,7 +93,7 @@ internal sealed class Raphael
 
     private static async Task<List<uint>> RunOne(RaphaelRequest request)
     {
-        var exe = ExecutablePath() ?? throw new FileNotFoundException("raphael-cli.exe wasn't found next to Provenance or GatherBuddy Reborn.");
+        var exe = ExecutablePath() ?? throw new FileNotFoundException("raphael-cli.exe wasn't found next to Provenance.");
         var args = RaphaelCli.Arguments(request);
         Services.Log.Debug("Raphael: {Args}", args);
         using var process = new Process

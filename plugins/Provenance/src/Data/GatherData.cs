@@ -24,6 +24,11 @@ internal sealed class GatherData
     private readonly Dictionary<uint, FishingSpotInfo> spots = new();
     private readonly Dictionary<uint, List<(uint Weather, int Rate)>> weatherTables = new();
 
+    private readonly Dictionary<int, (int Gathering, int Perception)> baseStats = new();
+
+    /// <summary>Base Gathering and Perception for a gathering item level (Bountiful's bonus and boon chance scale against these).</summary>
+    public (int Gathering, int Perception) BaseStats(int gatheringItemLevel) => baseStats.GetValueOrDefault(gatheringItemLevel);
+
     public int PointCount => points.Count;
     public int FishCount => fish.Count;
 
@@ -55,13 +60,51 @@ internal sealed class GatherData
         return table;
     }
 
-    /// <summary>Adds a node position seen during a run (kept for this session; saved by the caller).</summary>
+    /// <summary>Positions learned during the player's own runs (saved next to the plugin's config, never uploaded).</summary>
+    private readonly Dictionary<uint, List<Vector3>> learned = new();
+
+    private static string LearnedPath => Path.Combine(Services.PluginInterface.GetPluginConfigDirectory(), "learned_nodes.json");
+
+    /// <summary>Adds a node position seen during a run. True when it was new.</summary>
     public bool Learn(uint gatheringPoint, Vector3 position)
     {
         if (!points.TryGetValue(gatheringPoint, out var list)) points[gatheringPoint] = list = new List<Vector3>();
         if (list.Any(p => Vector3.DistanceSquared(p, position) < 4f)) return false;
         list.Add(position);
+        if (!learned.TryGetValue(gatheringPoint, out var mine)) learned[gatheringPoint] = mine = new List<Vector3>();
+        mine.Add(position);
         return true;
+    }
+
+    /// <summary>Writes the learned positions to the plugin's config folder (this PC only).</summary>
+    public void SaveLearned()
+    {
+        try
+        {
+            var data = learned.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.Select(p => new[] { MathF.Round(p.X, 1), MathF.Round(p.Y, 1), MathF.Round(p.Z, 1) }).ToList());
+            File.WriteAllText(LearnedPath, JsonSerializer.Serialize(data));
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't save learned node positions");
+        }
+    }
+
+    private void LoadLearned()
+    {
+        try
+        {
+            if (!File.Exists(LearnedPath)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(LearnedPath));
+            foreach (var p in doc.RootElement.EnumerateObject())
+                if (uint.TryParse(p.Name, out var id))
+                    foreach (var pos in p.Value.EnumerateArray().Select(V3))
+                        Learn(id, pos);
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't read learned node positions");
+        }
     }
 
     public static GatherData Load()
@@ -83,6 +126,17 @@ internal sealed class GatherData
             using (var fishDoc = Open("fish.json"))
                 foreach (var f in fishDoc.RootElement.GetProperty("fish").EnumerateObject())
                     if (uint.TryParse(f.Name, out var id)) d.fish[id] = ReadFish(id, f.Value);
+            using (var stream = typeof(GatherData).Assembly.GetManifestResourceStream("Provenance.Resources.ilvconvert.csv"))
+            using (var reader = new StreamReader(stream ?? throw new FileNotFoundException("ilvconvert.csv is missing from the plugin")))
+            {
+                reader.ReadLine();
+                while (reader.ReadLine() is { } line)
+                {
+                    var parts = line.Split(',');
+                    if (parts.Length >= 3 && int.TryParse(parts[0], out var glvl) && int.TryParse(parts[1], out var gat) && int.TryParse(parts[2], out var per))
+                        d.baseStats[glvl] = (gat, per);
+                }
+            }
             using (var spotDoc = Open("fishspots.json"))
                 foreach (var s in spotDoc.RootElement.GetProperty("spots").EnumerateObject())
                     if (uint.TryParse(s.Name, out var id)) d.spots[id] = ReadSpot(id, s.Value);
@@ -91,6 +145,7 @@ internal sealed class GatherData
         {
             Services.Log.Error(e, "Couldn't read the gathering and fishing data");
         }
+        d.LoadLearned();
         return d;
     }
 

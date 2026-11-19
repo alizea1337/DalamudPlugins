@@ -76,7 +76,7 @@ internal static class Readiness
             if (stats[1] < needs.Perception)
                 issues.Add(job.Source == StatSource.GearOnly
                     ? new ReadinessIssue(line.ItemId, needs.ClassJobId, $"Needs {needs.Perception:N0} Perception; your {abbr} gear alone has {stats[1]:N0} (switch to it once and check your character again).", false)
-                    : new ReadinessIssue(line.ItemId, needs.ClassJobId, $"Needs {needs.Perception:N0} Perception; your {abbr} gearset has {stats[1]:N0}. GatherBuddy Reborn won't start without it.", true));
+                    : new ReadinessIssue(line.ItemId, needs.ClassJobId, $"Needs {needs.Perception:N0} Perception; your {abbr} gearset has {stats[1]:N0}. The item can't be gathered without it.", true));
         }
 
         if (profile == null)

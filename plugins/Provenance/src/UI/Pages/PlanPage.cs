@@ -73,7 +73,7 @@ internal sealed class PlanPage : Page
             }
             var why = runs.StartBlocker();
             yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => { runs.Start(); Go<RunPage>(); },
-                Enabled: why == null, Tooltip: why ?? "Gathers everything this order needs with GatherBuddy Reborn. Buying, monster drops and crafting follow in the next milestones.");
+                Enabled: why == null, Tooltip: why ?? "Gets everything this order needs (retainers, books, vendors, monsters, gathering) and crafts it.");
         }
     }
 

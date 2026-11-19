@@ -12,9 +12,7 @@ internal sealed class SettingsPage : Page
 {
     private static readonly (string InternalName, string Name, string Role)[] Dependencies =
     {
-        ("GatherBuddyReborn", "GatherBuddy Reborn", "Gathers materials, including timed nodes, and fishes through AutoHook."),
         ("vnavmesh", "vnavmesh", "Walks and flies to vendors, summoning bells and monsters."),
-        ("AutoHook", "AutoHook", "Used by GatherBuddy Reborn for fishing."),
     };
 
     public SettingsPage(Plugin plugin) : base(plugin) { }
@@ -294,6 +292,10 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 4 * s));
         v = rs.DiscardExtras;
         if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
+        v = rs.ExtractMateria;
+        if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
+        v = rs.ReduceCollectables;
+        if (Ui.Checkbox("Reduce spare collectables", ref v, "When the bags run low on space, aetherially reduces collectables the order doesn't need. Never runs while a collectable the order or the scrip earning needs is in the bags.")) { rs.ReduceCollectables = v; Config.Save(); }
         Ui.EndCard();
 
         // After the order

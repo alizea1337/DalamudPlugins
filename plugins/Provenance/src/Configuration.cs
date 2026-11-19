@@ -111,6 +111,10 @@ public sealed class RunSettings
     public bool DiscardExtras { get; set; } = true;
     /// <summary>When a needed master book or folklore tome costs more scrips than you have, earn them first with collectables.</summary>
     public bool EarnScrips { get; set; } = true;
+    /// <summary>Extract materia from fully spiritbonded gear between nodes.</summary>
+    public bool ExtractMateria { get; set; } = true;
+    /// <summary>Aetherially reduce spare collectables when the bags fill up (never ones the order needs).</summary>
+    public bool ReduceCollectables { get; set; } = true;
     /// <summary>Aetheryte to teleport to for a summoning bell when none is nearby (8 = Limsa Lominsa Lower Decks).</summary>
     public uint BellAetheryte { get; set; } = 8;
 }

@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (testing)
 
+Gathering without GatherBuddy Reborn.
+
+- Provenance gathers by itself now; GatherBuddy Reborn is no longer needed. It picks the next node
+  (timed nodes while up, then the current zone, then the cheapest teleport), changes into the
+  gatherer's best gearset, uses Prospect/Triangulate and Stealth, travels and flies to the node's
+  known spawn spots, opens the node and works it with a rotation solver ported from GatherBuddy
+  Reborn (King's Yield, Bountiful, Gift of the Land, Tidings, Solid Reason, Wise to the World,
+  Twelve's Bounty, The Giving Land; best yield on timed nodes, best yield per GP on regular ones)
+  or the collectable rotation (Scour, Brazen, Meticulous, Scrutiny), always to the end of the node.
+- Between nodes: materia extraction from fully spiritbonded gear, and aetherial reduction of spare
+  collectables when the bags run low (never while a collectable the order needs is in the bags).
+  Both in Settings.
+- Node positions seen during runs are remembered on this PC (never uploaded).
+- Fishing isn't in this testing build yet; orders with fish can't start until it arrives.
 - Groundwork for gathering and fishing without GatherBuddy Reborn and AutoHook: exact node
   positions, the fish database (bait, mooch chains, intuition, time and weather windows, hooks,
   bite times) and fishing spots with places to stand ship with the plugin (tools/GbrExport), plus

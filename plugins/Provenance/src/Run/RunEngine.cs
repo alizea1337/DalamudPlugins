@@ -38,7 +38,7 @@ internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn,
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
 /// <summary>
-/// Runs an order from start to finish. Books first; then gathering through GatherBuddy Reborn, and
+/// Runs an order from start to finish. Books first; then gathering with Provenance's own gatherer, and
 /// when only timed nodes are left and none is up for a while, crafting what already can be crafted,
 /// handing back to gathering shortly before the next window; then everything left is crafted.
 /// Watches the stop rules throughout: knock-outs (with retries), a nearly full inventory, plugins
@@ -60,7 +60,7 @@ internal sealed class RunEngine : IDisposable
     private static readonly TimeSpan CheckEvery = TimeSpan.FromMilliseconds(500);
 
     private readonly Plugin plugin;
-    private readonly GatherBuddyLists lists = new();
+
     private readonly List<RunLogEntry> log = new();
     private readonly Queue<uint> toLearn = new();
     /// <summary>Gathered materials used up by crafting during the run; they count as gathered.</summary>
@@ -90,7 +90,7 @@ internal sealed class RunEngine : IDisposable
     private uint tripItem;
     private DateTime nextTripCheck;
     private readonly HashSet<TimedSpot> tripFailed = new();
-    /// <summary>Closer to the window than this, GatherBuddy Reborn goes on its own.</summary>
+    /// <summary>Closer to the window than this, the gatherer goes on its own.</summary>
     private static readonly TimeSpan TripCutoff = TimeSpan.FromSeconds(20);
 
     private readonly ExtrasCleanup cleanup;
@@ -112,6 +112,7 @@ internal sealed class RunEngine : IDisposable
         TurnIn = new Appraiser(plugin, Add);
         Hunt = new Hunter(plugin, Add);
         Home = new Homecoming(plugin, Add);
+        Gather = new Gathering.Gatherer(plugin, Add);
         cleanup = new ExtrasCleanup(Add, id => plugin.Plans.Catalog?.ItemName(id) ?? "item " + id);
     }
 
@@ -128,6 +129,16 @@ internal sealed class RunEngine : IDisposable
     public BookBuyer Books { get; }
     public Hunter Hunt { get; }
     public Homecoming Home { get; }
+    /// <summary>Provenance's own gatherer (nodes, the gathering window, collectables, upkeep).</summary>
+    public Gathering.Gatherer Gather { get; }
+
+    /// <summary>Collectables the order or the scrip earning needs: never aetherially reduced.</summary>
+    private IReadOnlySet<uint> NeededCollectables()
+    {
+        var set = plugin.Plans.ScripTasks.Select(t => t.Option.ItemId).ToHashSet();
+        foreach (var t in Targets) set.Add(t.ItemId);
+        return set;
+    }
     /// <summary>Where the run was started (for "back to where the run started").</summary>
     private (uint Territory, System.Numerics.Vector3 Position)? startedAt;
     /// <summary>The finished order's result, shown once the trip home is over.</summary>
@@ -180,15 +191,16 @@ internal sealed class RunEngine : IDisposable
         var gather = GatherTargets.Build(plan, BagNq).Count > 0;
         var craft = plan.CraftSteps.Any(l => l.Crafts > 0);
         if (!gather && !craft && plan.Learn.Count == 0 && plan.Count(Supply.Vendor) == 0 && plan.Count(Supply.Drop) == 0) return "Nothing to gather, buy or craft for this order.";
-        if (gather && !GatherBuddyIpc.Available) return "GatherBuddy Reborn isn't loaded.";
+
         if (gather && !Vnav.Available) return "vnavmesh isn't loaded.";
-        if (gather && plan.Count(Supply.Fish) > 0 && !Ipc.IsLoaded("AutoHook")) return "AutoHook isn't loaded; this order has fish to catch.";
+        if (plan.Lines.Any(l => l.Supply == Supply.Fish && l.Remaining > 0))
+            return "This testing build can't fish yet (that comes next); take the fish out of the order or get them yourself.";
         if ((plan.Count(Supply.Vendor) > 0 || plan.Learn.Any(l => l.WillBuy) || (plugin.Config.Stock.Retainers && RetainerWork().Count > 0)) && !Vnav.Available)
             return "vnavmesh isn't loaded; it walks to vendors, exchanges and summoning bells.";
         if (HuntBlocker() is { } hunt) return hunt;
         if (UnreachableVendorItem() is { } unreachable)
             return $"No vendor you can reach sells {plugin.Plans.Catalog!.ItemName(unreachable)} under your price cap; get it yourself, or attune to more aetherytes and aethernet shards.";
-        if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance (or install GatherBuddy Reborn, which ships it).";
+        if (craft && Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found; reinstall Provenance.";
         return null;
     }
 
@@ -456,18 +468,6 @@ internal sealed class RunEngine : IDisposable
     private void StartGathering(List<GatherTarget> targets)
     {
         Stage = RunStage.Gather;
-        var unknown = lists.Install(targets);
-        if (lists.Error != null)
-        {
-            End(RunPhase.Stopped, "Couldn't start", lists.Error, true);
-            return;
-        }
-        if (unknown.Count > 0)
-        {
-            var catalog = plugin.Plans.Catalog!;
-            Add($"GatherBuddy Reborn doesn't list {string.Join(", ", unknown.Select(catalog.ItemName))} as gatherable; get them yourself.", true);
-            targets = targets.Where(t => !unknown.Contains(t.ItemId)).ToList();
-        }
         Targets = targets;
         gatherActiveSeconds = 0;
         lastGatherTick = DateTime.UtcNow;
@@ -479,9 +479,9 @@ internal sealed class RunEngine : IDisposable
         Crafter.DeferMissing = true;
         Crafter.RequestPause();
 
-        GatherBuddyIpc.SetEnabled(true);
+        Gather.Begin(targets, Left, NeededCollectables);
         Headline = "Gathering";
-        Add($"Gathering {targets.Count} {(targets.Count == 1 ? "item" : "items")} with GatherBuddy Reborn.", false);
+        Add($"Gathering {targets.Count} {(targets.Count == 1 ? "item" : "items")}.", false);
     }
 
     /// <summary>Everything gathered: craft whatever is left (or all of it when nothing was gathered).</summary>
@@ -571,8 +571,8 @@ internal sealed class RunEngine : IDisposable
             Add("Stopping once the current craft is finished.", problem);
             return;
         }
-        GatherBuddyIpc.SetEnabled(false);
-        lists.Uninstall();
+        Gather.Pause();
+        Gather.Stop();
         CancelNodeTrip();
         cleanup.Cancel();
         cleaning = false;
@@ -602,8 +602,8 @@ internal sealed class RunEngine : IDisposable
         }
         if (scripPhase) { StartTurnIn(); return; }
         CancelNodeTrip();
-        GatherBuddyIpc.SetEnabled(false);
-        lists.Uninstall();
+        Gather.Pause();
+        Gather.Stop();
         var skipped = Crafter.History.Where(h => h.Skipped != null).ToList();
         var detail = skipped.Count == 0
             ? "Everything for this order is gathered and crafted."
@@ -650,8 +650,8 @@ internal sealed class RunEngine : IDisposable
     private void StartTurnIn()
     {
         CancelNodeTrip();
-        GatherBuddyIpc.SetEnabled(false);
-        lists.Uninstall();
+        Gather.Pause();
+        Gather.Stop();
         Stage = RunStage.TurnIn;
         Headline = "Turning in collectables";
         TurnIn.Begin(plugin.Plans.ScripTasks.Select(t => t.Option.ItemId));
@@ -720,6 +720,7 @@ internal sealed class RunEngine : IDisposable
         if (working && Stage == RunStage.Retainers) Retainers.Tick();
         if (working && Stage == RunStage.TurnIn) TurnIn.Tick();
         if (working && Stage == RunStage.Hunt) Hunt.Tick();
+        if (working && Stage == RunStage.Gather && !craftingBetween && tripSpot == null) Gather.Tick();
         if (Stage == RunStage.Return && !pausedForDuty && !knockedOut) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
@@ -764,7 +765,7 @@ internal sealed class RunEngine : IDisposable
                 knockedOut = true;
                 knockedOutAt = DateTime.UtcNow;
                 knockOuts++;
-                GatherBuddyIpc.SetEnabled(false);
+                Gather.Pause();
                 Vnav.Stop();
                 if (knockOuts > MaxKnockOuts)
                 {
@@ -786,7 +787,7 @@ internal sealed class RunEngine : IDisposable
         knockedOut = false;
         revivedAt = default;
         Add("Back up; carrying on.", false);
-        if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) GatherBuddyIpc.SetEnabled(true);
+        if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) Gather.Resume();
         return false;
     }
 
@@ -797,7 +798,7 @@ internal sealed class RunEngine : IDisposable
         if (inDuty && !pausedForDuty)
         {
             pausedForDuty = true;
-            GatherBuddyIpc.SetEnabled(false);
+            Gather.Pause();
             Headline = "Paused for a duty";
             Add("Duty started; the run waits until it ends.", false);
             return true;
@@ -806,7 +807,7 @@ internal sealed class RunEngine : IDisposable
         if (inDuty) return true;
         pausedForDuty = false;
         Add("Duty over; carrying on.", false);
-        if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) { GatherBuddyIpc.SetEnabled(true); Headline = "Gathering"; }
+        if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) { Gather.Resume(); Headline = "Gathering"; }
         return false;
     }
 
@@ -872,12 +873,12 @@ internal sealed class RunEngine : IDisposable
 
     private void TickGathering()
     {
-        if (!GatherBuddyIpc.Available) { Stop("GatherBuddy Reborn was unloaded.", true, now: true); return; }
+        if (Gather.Failure is { } failure) { Stop(failure, true, now: true); return; }
         if (!Vnav.Available) { Stop("vnavmesh was unloaded.", true, now: true); return; }
 
         // Time actually spent gathering (not paused, not waiting, not crafting), for the gathering rate.
         var now = DateTime.UtcNow;
-        if (Phase == RunPhase.Running && !craftingBetween && !GatherBuddyIpc.Waiting) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
+        if (Phase == RunPhase.Running && !craftingBetween && !Gather.Waiting) gatherActiveSeconds += (now - lastGatherTick).TotalSeconds;
         lastGatherTick = now;
 
         if (cleaning)
@@ -894,15 +895,15 @@ internal sealed class RunEngine : IDisposable
         if (GatherTargets.AllDone(Targets, CountedAsGathered))
         {
             if (craftingBetween && Crafter.MidCraft) return; // let the craft finish first
-            // The amount is in, but a node is gathered to the end; GatherBuddy Reborn takes the rest.
+            // The amount is in, but a node is gathered to the end.
             if (!craftingBetween && Services.Condition[ConditionFlag.Gathering])
             {
                 Headline = "Finishing this node";
                 Detail = "The order's amount is in; gathering what's left on the node.";
                 return;
             }
-            GatherBuddyIpc.SetEnabled(false);
-            lists.Uninstall();
+            Gather.Pause();
+            Gather.Stop();
             CancelNodeTrip();
             LearnGatheringRate();
             NextWindow = null;
@@ -934,7 +935,7 @@ internal sealed class RunEngine : IDisposable
         {
             case RunPhase.Pausing when !busy:
                 CancelNodeTrip();
-                GatherBuddyIpc.SetEnabled(false);
+                Gather.Pause();
                 Phase = RunPhase.Paused;
                 Headline = "Paused";
                 Detail = "Resume to carry on.";
@@ -952,7 +953,7 @@ internal sealed class RunEngine : IDisposable
         if (decision.Mode == GatherMode.CraftMeanwhile && !busy)
         {
             // Only timed nodes left, none up for a while: craft what can be crafted until shortly before.
-            GatherBuddyIpc.SetEnabled(false);
+            Gather.Pause();
             craftingBetween = true;
             yielding = false;
             Crafter.DeferMissing = true;
@@ -962,11 +963,10 @@ internal sealed class RunEngine : IDisposable
             return;
         }
 
-        Detail = GatherBuddyIpc.Status;
-        Headline = decision.Mode == GatherMode.Wait || GatherBuddyIpc.Waiting
+        Detail = Gather.Status;
+        Headline = decision.Mode == GatherMode.Wait || Gather.Waiting
             ? "Waiting for a timed node" + (decision.NextWindow is { } w && w > TimeSpan.Zero ? $" (opens in {Estimator.Describe(w).Replace("about ", "")})" : "")
             : "Gathering";
-        WatchGatherBuddy();
     }
 
     /// <summary>Crafting between timed windows: hand back in time, or when nothing more can be crafted.</summary>
@@ -1012,14 +1012,14 @@ internal sealed class RunEngine : IDisposable
                 EndNodeTrip();
                 return false;
             }
-            if (GatherBuddyIpc.Enabled) GatherBuddyIpc.SetEnabled(false);
+            if (Gather.Running) Gather.Pause();
             nodeTrip.Tick();
             Headline = $"Heading to the {name} node (opens in {Estimator.Describe(left).Replace("about ", "")})";
             Detail = nodeTrip.Status;
             if (nodeTrip.Current == Travel.State.Failed)
             {
                 tripFailed.Add(spot);
-                Add($"Couldn't get to the {name} node ahead of time ({nodeTrip.Failure}); GatherBuddy Reborn goes there when it opens.", true);
+                Add($"Couldn't get to the {name} node ahead of time ({nodeTrip.Failure}); the gatherer goes there when it opens.", true);
                 EndNodeTrip();
                 return false;
             }
@@ -1035,7 +1035,7 @@ internal sealed class RunEngine : IDisposable
         if (NextTimedSpot() is not { } next) return false;
         if (Near(next.Spot)) return false;
 
-        GatherBuddyIpc.SetEnabled(false);
+        Gather.Pause();
         tripSpot = next.Spot;
         tripItem = next.ItemId;
         // Aim for the middle of the spawn area; anywhere well inside it is close enough.
@@ -1070,11 +1070,11 @@ internal sealed class RunEngine : IDisposable
         return System.Numerics.Vector2.Distance(new System.Numerics.Vector2(me.Position.X, me.Position.Z), spot.Position) <= Math.Max(spot.Radius, 40f) + 20f;
     }
 
-    /// <summary>Trip over (arrived, gave up, or the window is near): GatherBuddy Reborn carries on.</summary>
+    /// <summary>Trip over (arrived, gave up, or the window is near): the gatherer carries on.</summary>
     private void EndNodeTrip()
     {
         CancelNodeTrip();
-        GatherBuddyIpc.SetEnabled(true);
+        Gather.Resume();
         gbrOffSince = DateTime.MinValue;
     }
 
@@ -1089,9 +1089,7 @@ internal sealed class RunEngine : IDisposable
     {
         craftingBetween = false;
         yielding = false;
-        // Crafting used some gathered materials: lower GatherBuddy Reborn's targets by that much.
-        lists.UpdateTargets(Targets.Select(t => (t.ItemId, (uint)Math.Max(1, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))));
-        GatherBuddyIpc.SetEnabled(true);
+        Gather.Resume();
         gbrOffSince = DateTime.MinValue;
         Headline = "Gathering";
         if (log) Add("Back to gathering for the timed nodes.", false);
@@ -1163,35 +1161,12 @@ internal sealed class RunEngine : IDisposable
         return TimeSpan.FromMinutes(left / Math.Max(0.1, t.GatheredPerMinute) + fish / Math.Max(0.05, t.FishPerMinute)) + wait + crafting;
     }
 
-    /// <summary>GatherBuddy Reborn can switch itself off; turn it back on a few times before giving up.</summary>
-    private void WatchGatherBuddy()
-    {
-        if (GatherBuddyIpc.Enabled)
-        {
-            gbrOffSince = DateTime.MinValue;
-            return;
-        }
-        if (gbrOffSince == DateTime.MinValue) { gbrOffSince = DateTime.UtcNow; return; }
-        if (DateTime.UtcNow - gbrOffSince < TimeSpan.FromSeconds(5)) return;
-
-        var status = GatherBuddyIpc.Status;
-        if (reEnables >= 3)
-        {
-            Stop("GatherBuddy Reborn keeps switching auto-gather off" + (status.Length > 0 ? ": " + status : "."), true);
-            return;
-        }
-        reEnables++;
-        gbrOffSince = DateTime.MinValue;
-        Add("GatherBuddy Reborn switched auto-gather off" + (status.Length > 0 ? $" ({status})" : "") + "; switching it back on.", true);
-        GatherBuddyIpc.SetEnabled(true);
-    }
-
     /// <summary>Still to gather for one target: bags plus what crafting already used, against the target.</summary>
     public int Left(GatherTarget t) => GatherTargets.Left(t, CountedAsGathered);
 
     private int CountedAsGathered(uint itemId) => BagNq(itemId) + consumed.GetValueOrDefault(itemId);
 
-    /// <summary>What GatherBuddy Reborn counts: normal-quality items in the main bags.</summary>
+    /// <summary>What counts as gathered: normal-quality items in the main bags.</summary>
     private static int BagNq(uint itemId) => GameState.BagCount(itemId, false);
 
     private void Add(string text, bool problem)
@@ -1214,7 +1189,7 @@ internal sealed class RunEngine : IDisposable
     public void Dispose()
     {
         if (!Active) return;
-        GatherBuddyIpc.SetEnabled(false);
-        lists.Uninstall();
+        Gather.Pause();
+        Gather.Stop();
     }
 }

@@ -34,12 +34,15 @@ Open it with `/provenance` (or `/prov`).
   *get it yourself*, with the reason. Food and medicine for crafting and for gathering are picked here
   too; every stat shows what they add in brackets, for example `5,844 (+92)`.
 
-- **Run (gathering)**: *Start* hands the order's gathering list to GatherBuddy Reborn as a list
-  named "Provenance" (your own lists are paused for the run and switched back on afterwards),
-  turns auto-gather on and stops once the plan needs nothing more to gather. *Pause* finishes the
-  current node first. The run stops on its own when you are knocked out, when only 2 inventory
-  slots are left, or when GatherBuddy Reborn or vnavmesh is unloaded; a duty pauses it until the
-  duty ends. Every stop shows a notification and a chat line.
+- **Run (gathering)**: Provenance gathers by itself. It picks the next node (timed nodes while
+  they are up, then the current zone, then the cheapest teleport), changes into the gatherer's
+  best gearset, travels and flies there, finds the node among its known spawn spots, and works the
+  gathering window with a rotation solver (ported from GatherBuddy Reborn) or the collectable
+  rotation, always to the end of the node. Between nodes it extracts materia and reduces spare
+  collectables. Node positions it sees are remembered on your PC (never uploaded). *Pause*
+  finishes the current node first. The run stops on its own when you are knocked out, when only a
+  few inventory slots are left, or when vnavmesh is unloaded; a duty pauses it until the duty ends.
+  Every stop shows a notification and a chat line.
 - **Run (crafting)**: after gathering, every recipe is crafted, intermediates first, on the job's
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
   (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
@@ -66,7 +69,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 
 | Milestone | Scope |
 |---|---|
-| M2 | Gathering through GatherBuddy Reborn, movement with vnavmesh, own teleport (done) |
+| M2 | Gathering, movement with vnavmesh, own teleport (done; own gathering engine since 0.7) |
 | M3 | Crafting: a port of GatherBuddy Reborn's Vulcan with the Raphael solver (done) |
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules (done) |
 | M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
@@ -81,12 +84,13 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 - Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone).
 - The Diadem: gathering there, including clouded and umbral nodes.
 - Several orders in a queue.
-- An IPC for gathering lists in GatherBuddy Reborn (pull request upstream), instead of reflection.
+- Own fishing and spearfishing (in progress), then own navigation instead of vnavmesh.
 
 ## Requirements for a run
 
-GatherBuddy Reborn, vnavmesh and AutoHook (for fishing). Planning works without them; the
-settings page shows which ones are loaded.
+vnavmesh. Planning works without it; the settings page shows whether it is loaded. GatherBuddy
+Reborn and AutoHook are no longer needed. This testing build can't fish yet; orders with fish
+can't start until fishing arrives.
 
 ## License
 
