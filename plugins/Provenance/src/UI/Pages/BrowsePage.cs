@@ -66,12 +66,14 @@ internal sealed class BrowsePage : Page
             ImGui.GetWindowDrawList().AddText(searchMin + new Vector2(14 * s, (searchH - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.TextFaint), icon);
         }
 
-        // Job chips: all, the eight crafters, then the three gatherers.
+        // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow.
         var b = Config.Browse;
+        var jobsRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
         if (Ui.ToggleChip("##job_all", "All jobs", Palette.Accent, b.JobMask == 0)) { b.JobMask = 0; Config.Save(); }
         foreach (var job in ClassJobs.Crafters.Concat(ClassJobs.Gatherers))
         {
-            ImGui.SameLine(0, job == ClassJobs.Gatherers[0] ? 18 * s : 6 * s);
+            var gap = (job == ClassJobs.Gatherers[0] ? 18 : 6) * s;
+            if (ImGui.GetItemRectMax().X + gap + Ui.ToggleChipWidth(ClassJobs.Abbreviation(job), job) <= jobsRight) ImGui.SameLine(0, gap);
             JobChip(job, b);
         }
 
@@ -150,7 +152,7 @@ internal sealed class BrowsePage : Page
     private void JobChip(uint job, BrowseSettings b)
     {
         var bit = 1 << (int)(job - 8);
-        if (Ui.ToggleChip("##job_" + job, ClassJobs.Abbreviation(job), Palette.ClassJobColor(job), (b.JobMask & bit) != 0)) { b.JobMask ^= bit; Config.Save(); }
+        if (Ui.ToggleChip("##job_" + job, ClassJobs.Abbreviation(job), Palette.ClassJobColor(job), (b.JobMask & bit) != 0, job)) { b.JobMask ^= bit; Config.Save(); }
         var lvl = PlanService.JobLevel(job);
         var name = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(job)?.Name.ExtractText() ?? ClassJobs.Abbreviation(job);
         Ui.Tooltip(lvl > 0 ? $"{name}, your level {lvl}" : name);
@@ -170,7 +172,7 @@ internal sealed class BrowsePage : Page
             dl.AddText(new Vector2(tx, pos.Y + 7 * s), Palette.U32(Palette.Text), e.Yield > 1 ? $"{e.Name}  ×{e.Yield}" : e.Name);
 
         ImGui.SetCursorScreenPos(new Vector2(tx, pos.Y + 28 * s));
-        Ui.Chip(ClassJobs.Abbreviation(e.ClassJobId), Palette.ClassJobColor(e.ClassJobId));
+        Ui.Chip(ClassJobs.Abbreviation(e.ClassJobId), Palette.ClassJobColor(e.ClassJobId), job: e.ClassJobId);
         ImGui.SameLine(0, 6 * s);
         Ui.Chip("level " + e.Level, Palette.TextMuted);
         switch (e.Kind)

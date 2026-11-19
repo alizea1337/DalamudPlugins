@@ -162,6 +162,7 @@ public sealed class Plugin : IDalamudPlugin
         windows.RemoveAllWindows();
         Runs.Dispose();
         Plans.Dispose();
+        UI.JobIcons.Dispose();
         fonts.Dispose();
         ECommons.ECommonsMain.Dispose();
     }

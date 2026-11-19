@@ -114,12 +114,12 @@ internal sealed class SettingsPage : Page
         var c = Config.Combat;
         var picked = c.ClassJob != 0;
         if (Ui.DropdownField("##combatjob", picked ? JobName(c.ClassJob) : null, "Pick a combat job", 340 * s, FontAwesomeIcon.FistRaised,
-                dot: picked ? Palette.ClassJobColor(c.ClassJob) : null, detail: picked ? $"level {Data.PlanService.JobLevel(c.ClassJob)}" : null))
+                job: c.ClassJob, detail: picked ? $"level {Data.PlanService.JobLevel(c.ClassJob)}" : null))
         {
             combatJobs = Combat.BasicCombo.Jobs.Where(j => Integrations.GameState.BestGearset(j) >= 0)
                 .OrderBy(j => Core.Character.ClassJobs.RoleOf(j)).ThenBy(JobName).ToList();
             combatJobItems = combatJobs.Select(j => new DropdownItem(JobName(j), $"level {Data.PlanService.JobLevel(j)}",
-                Dot: Palette.ClassJobColor(j), Keywords: Core.Character.ClassJobs.Abbreviation(j))).ToList();
+                Keywords: Core.Character.ClassJobs.Abbreviation(j), Job: j)).ToList();
         }
         var pick = Ui.DropdownList("##combatjob", combatJobItems, combatJobs.IndexOf(c.ClassJob), "Save a gearset for a combat job first.");
         if (pick >= 0) { c.ClassJob = combatJobs[pick]; Config.Save(); }

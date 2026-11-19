@@ -228,7 +228,7 @@ internal sealed class PlanPage : Page
             ImGui.BeginGroup();
             Ui.Text($"{t.Count}× {catalog.ItemName(t.Option.ItemId)}");
             ImGui.SameLine(0, 8 * s);
-            Ui.Chip(Core.Character.ClassJobs.Abbreviation(t.Option.ClassJobId), Palette.ClassJobColor(t.Option.ClassJobId));
+            Ui.Chip(Core.Character.ClassJobs.Abbreviation(t.Option.ClassJobId), Palette.ClassJobColor(t.Option.ClassJobId), job: t.Option.ClassJobId);
             using (Ui.F.Small.Push())
                 Ui.Muted($"At least {t.Expected:N0} {catalog.ItemNamePlural(t.Option.Currency)} (collectability {t.Option.LowCollectability}+), " +
                          $"{t.Option.HighReward * t.Count:N0} at {t.Option.HighCollectability}+. Leftover materials become more collectables.");
@@ -327,7 +327,7 @@ internal sealed class PlanPage : Page
                     if (issue.ClassJobId != 0)
                     {
                         ImGui.SameLine(0, 8 * s);
-                        Ui.Chip(Core.Character.ClassJobs.Abbreviation(issue.ClassJobId), Palette.ClassJobColor(issue.ClassJobId));
+                        Ui.Chip(Core.Character.ClassJobs.Abbreviation(issue.ClassJobId), Palette.ClassJobColor(issue.ClassJobId), job: issue.ClassJobId);
                     }
                 }
                 using (Ui.F.Small.Push()) Ui.Wrapped(issue.Text, issue.Blocking ? Palette.Text : Palette.TextMuted, width - (issue.ItemId != 0 ? 38 * s : 0));

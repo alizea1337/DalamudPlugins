@@ -15,8 +15,9 @@ namespace Provenance.UI;
 /// <param name="Dot">A colour dot before the label (a job's colour).</param>
 /// <param name="GameIcon">A game icon before the label (an item).</param>
 /// <param name="Keywords">More text the search matches but nobody sees (a job's abbreviation).</param>
+/// <param name="Job">A ClassJob row: its glyph, in the job's colour, leads the label.</param>
 internal sealed record DropdownItem(string Label, string? Detail = null, string? Sub = null, string? Badge = null,
-    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null);
+    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null, uint Job = 0);
 
 /// <summary>
 /// The select field and its list. The field is a pill with the current choice and a chevron; the list
@@ -28,6 +29,10 @@ internal static partial class Ui
     private const int DropdownSearchFrom = 9;
     private const float DropdownMaxRows = 8.5f;
 
+    /// <summary>The list fades in and slides this far from the field, over this many seconds.</summary>
+    private const float DropdownSlide = 8f;
+    private const double DropdownOpenSeconds = 0.16;
+
     private sealed class DropdownState
     {
         public string PopupId = "";
@@ -35,6 +40,7 @@ internal static partial class Ui
         public string Search = "";
         public int Active;
         public bool Scroll;
+        public double OpenedAt;
     }
 
     private static readonly Dictionary<string, DropdownState> Dropdowns = new();
@@ -52,9 +58,10 @@ internal static partial class Ui
     /// <param name="width">0 fits the content.</param>
     /// <param name="prefix">A muted label inside the pill, before the choice ("Food").</param>
     /// <param name="detail">Muted text after the choice ("level 100").</param>
+    /// <param name="job">A ClassJob row: its glyph, in the job's colour, leads the choice.</param>
     /// <returns>True on the frame the list opens: build what it shows then.</returns>
     public static bool DropdownField(string id, string? value, string placeholder, float width = 0, FontAwesomeIcon? icon = null,
-        Vector4? dot = null, uint gameIcon = 0, bool hq = false, string? prefix = null, string? detail = null)
+        Vector4? dot = null, uint gameIcon = 0, bool hq = false, string? prefix = null, string? detail = null, uint job = 0)
     {
         var s = S;
         var h = 34 * s;
@@ -68,7 +75,7 @@ internal static partial class Ui
         float textW, detailW = 0;
         using (F.Strong.Push()) textW = ImGui.CalcTextSize(text).X;
         if (detail != null) using (F.Small.Push()) detailW = ImGui.CalcTextSize(detail).X + 8 * s;
-        var leadW = gameIcon != 0 ? 26 * s : dot != null ? 16 * s : icon is { } ic ? IconSize(ic, true).X + 9 * s : 0;
+        var leadW = gameIcon != 0 ? 26 * s : job != 0 ? 26 * s : dot != null ? 16 * s : icon is { } ic ? IconSize(ic, true).X + 9 * s : 0;
         var chevW = IconSize(FontAwesomeIcon.ChevronDown, true).X;
         var natural = 14 * s + prefixW + leadW + textW + detailW + 14 * s + chevW + 14 * s;
         var w = MathF.Min(width > 0 ? width : MathF.Max(natural, 180 * s), RemainingWidth());
@@ -82,6 +89,7 @@ internal static partial class Ui
         if (opening)
         {
             st.Search = "";
+            st.OpenedAt = ImGui.GetTime();
             ImGui.OpenPopup(st.PopupId);
         }
 
@@ -100,6 +108,7 @@ internal static partial class Ui
             x += prefixW;
         }
         if (gameIcon != 0) DrawItemIcon(dl, gameIcon, new Vector2(x, mid - 10 * s), 20 * s, hq);
+        else if (job != 0) JobIcons.Draw(dl, job, new Vector2(x + 9 * s, mid), 20 * s);
         else if (dot is { } d) dl.AddCircleFilled(new Vector2(x + 4 * s, mid), 4 * s, Palette.U32(d));
         else if (icon is { } i)
         {
@@ -163,11 +172,18 @@ internal static partial class Ui
         var vp = ImGui.GetMainViewport();
         var below = vp.WorkPos.Y + vp.WorkSize.Y - st.Max.Y - 8 * s;
         var above = st.Min.Y - vp.WorkPos.Y - 8 * s;
-        var y = size.Y <= below || below >= above ? st.Max.Y + 6 * s : st.Min.Y - 6 * s - size.Y;
+        var down = size.Y <= below || below >= above;
+        var y = down ? st.Max.Y + 6 * s : st.Min.Y - 6 * s - size.Y;
         var x = MathF.Max(vp.WorkPos.X, MathF.Min(st.Min.X, vp.WorkPos.X + vp.WorkSize.X - size.X - 4 * s));
+
+        // Opening: fades in and slides out of the field (ease-out), in a sixth of a second.
+        var t = (float)Math.Clamp((ImGui.GetTime() - st.OpenedAt) / DropdownOpenSeconds, 0, 1);
+        var eased = 1f - MathF.Pow(1f - t, 3f);
+        y += (down ? -1 : 1) * (1f - eased) * DropdownSlide * s;
         ImGui.SetNextWindowPos(new Vector2(x, y));
         ImGui.SetNextWindowSize(size);
 
+        ImGui.PushStyleVar(ImGuiStyleVar.Alpha, MathF.Max(0.01f, eased));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(pad));
         ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 12 * s);
         ImGui.PushStyleVar(ImGuiStyleVar.PopupBorderSize, 1f);
@@ -260,7 +276,7 @@ internal static partial class Ui
             ImGui.EndPopup();
         }
         ImGui.PopStyleColor(2);
-        ImGui.PopStyleVar(4);
+        ImGui.PopStyleVar(5);
         return picked;
     }
 
@@ -305,6 +321,11 @@ internal static partial class Ui
             var d = twoLine ? 30 * s : 22 * s;
             DrawItemIcon(dl, item.GameIcon, new Vector2(x, pos.Y + (rowH - d) / 2), d, item.Hq);
             x += d + 10 * s;
+        }
+        else if (item.Job != 0)
+        {
+            JobIcons.Draw(dl, item.Job, new Vector2(x + 10 * s, top + bodyH / 2), 20 * s);
+            x += 30 * s;
         }
         else if (item.Dot is { } c)
         {

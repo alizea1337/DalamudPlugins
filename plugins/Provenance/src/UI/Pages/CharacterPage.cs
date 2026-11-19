@@ -156,7 +156,10 @@ internal sealed class CharacterPage : Page
         var x = pos.X + pad;
         var y = pos.Y + 14 * s;
         using (Ui.F.Strong.Push())
-            dl.AddText(new Vector2(x, y), Palette.U32(color), ClassJobs.Abbreviation(job));
+        {
+            JobIcons.Draw(dl, job, new Vector2(x + 10 * s, y + ImGui.GetTextLineHeight() / 2), 20 * s);
+            dl.AddText(new Vector2(x + 26 * s, y), Palette.U32(color), ClassJobs.Abbreviation(job));
+        }
         var level = js?.Level ?? 0;
         var levelText = level > 0 ? "level " + level : "not unlocked";
         float lw;
@@ -242,11 +245,14 @@ internal sealed class CharacterPage : Page
         var color = Palette.ClassJobColor(job);
         var textY = start.Y + (h - ImGui.GetTextLineHeight()) / 2;
         using (Ui.F.Strong.Push())
-            dl.AddText(new Vector2(start.X + 10 * s, textY), Palette.U32(color), ClassJobs.Abbreviation(job));
+        {
+            JobIcons.Draw(dl, job, new Vector2(start.X + 19 * s, start.Y + h / 2), 18 * s);
+            dl.AddText(new Vector2(start.X + 34 * s, textY), Palette.U32(color), ClassJobs.Abbreviation(job));
+        }
         var count = have == total ? $"all {total}" : $"{have} of {total}";
-        dl.AddText(new Vector2(start.X + 64 * s, textY), Palette.U32(have == total ? Palette.Accent : Palette.Text), count);
-        ImGui.SetCursorScreenPos(new Vector2(start.X + 150 * s, start.Y + (h - 6 * s) / 2));
-        Ui.Bar("##bookbar" + job, total == 0 ? 0 : have / (float)total, have == total ? Palette.Accent : color, MathF.Min(260 * s, width - 300 * s));
+        dl.AddText(new Vector2(start.X + 88 * s, textY), Palette.U32(have == total ? Palette.Accent : Palette.Text), count);
+        ImGui.SetCursorScreenPos(new Vector2(start.X + 174 * s, start.Y + (h - 6 * s) / 2));
+        Ui.Bar("##bookbar" + job, total == 0 ? 0 : have / (float)total, have == total ? Palette.Accent : color, MathF.Min(260 * s, width - 324 * s));
         if (canOpen)
         {
             var hint = isOpen ? "hide missing" : $"{missing.Count} missing";
@@ -259,7 +265,7 @@ internal sealed class CharacterPage : Page
         ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h + 2 * s));
         if (isOpen && canOpen)
         {
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 64 * s);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 88 * s);
             Ui.Wrapped(string.Join(", ", missing), Palette.TextMuted, width - 80 * s);
             ImGui.Dummy(new Vector2(0, 2 * s));
         }

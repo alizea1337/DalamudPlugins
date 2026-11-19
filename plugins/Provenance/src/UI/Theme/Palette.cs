@@ -88,7 +88,8 @@ internal static class Palette
 
     public static Vector4 Mix(Vector4 a, Vector4 b, float t) => Vector4.Lerp(a, b, Math.Clamp(t, 0f, 1f));
 
-    public static uint U32(Vector4 c) => ImGui.ColorConvertFloat4ToU32(c);
+    /// <summary>Packed colour, faded with the style's alpha (a list fading in, a disabled block).</summary>
+    public static uint U32(Vector4 c) => ImGui.GetColorU32(c);
 
     private static Vector4 Hex(uint rgb) => new(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f, 1f);
 }

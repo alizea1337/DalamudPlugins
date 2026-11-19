@@ -409,24 +409,32 @@ internal static partial class Ui
 
     // ------------------------------------------------------------------ chips, icons, bars
 
-    public static float ChipWidth(string text, FontAwesomeIcon? icon = null)
+    /// <param name="job">A ClassJob row: its glyph leads the chip (instead of <paramref name="icon"/>).</param>
+    public static float ChipWidth(string text, FontAwesomeIcon? icon = null, uint job = 0)
     {
         float tw;
         using (F.Small.Push()) tw = ImGui.CalcTextSize(text).X;
-        return tw + 16 * S + (icon != null ? IconSize(icon.Value, true).X + 5 * S : 0);
+        var lead = job != 0 ? 14 * S + 4 * S : icon != null ? IconSize(icon.Value, true).X + 5 * S : 0;
+        return tw + 16 * S + lead;
     }
 
     /// <summary>A small tinted pill label. Colour is never the only signal: chips always carry text.</summary>
-    public static void Chip(string text, Vector4 color, FontAwesomeIcon? icon = null)
+    /// <param name="job">A ClassJob row: its glyph, in the chip's colour, leads the text.</param>
+    public static void Chip(string text, Vector4 color, FontAwesomeIcon? icon = null, uint job = 0)
     {
         var s = S;
         var h = 20 * s;
-        var w = ChipWidth(text, icon);
+        var w = ChipWidth(text, icon, job);
         var pos = ImGui.GetCursorScreenPos();
         var dl = ImGui.GetWindowDrawList();
         dl.AddRectFilled(pos, pos + new Vector2(w, h), Palette.U32(Palette.WithAlpha(color, 0.16f)), h / 2);
         var x = pos.X + 8 * s;
-        if (icon != null)
+        if (job != 0)
+        {
+            JobIcons.Draw(dl, job, new Vector2(x + 7 * s, pos.Y + h / 2), 14 * s);
+            x += 18 * s;
+        }
+        else if (icon != null)
         {
             var isz = IconSize(icon.Value, true);
             using (F.IconSmall.Push()) dl.AddText(new Vector2(x, pos.Y + (h - isz.Y) / 2), Palette.U32(color), icon.Value.ToIconString());
@@ -437,26 +445,37 @@ internal static partial class Ui
         ImGui.Dummy(new Vector2(w, h));
     }
 
-    public static float ToggleChipWidth(string text)
+    public static float ToggleChipWidth(string text, uint job = 0)
     {
-        using (F.Strong.Push()) return ImGui.CalcTextSize(text).X + 34 * S;
+        using (F.Strong.Push()) return ImGui.CalcTextSize(text).X + (job != 0 ? 40 : 34) * S;
     }
 
     /// <summary>A chip that toggles; used for the browser's filters.</summary>
-    public static bool ToggleChip(string id, string text, Vector4 color, bool on)
+    /// <param name="job">A ClassJob row: its glyph takes the place of the colour dot.</param>
+    public static bool ToggleChip(string id, string text, Vector4 color, bool on, uint job = 0)
     {
         var s = S;
         var h = 30 * s;
-        var w = ToggleChipWidth(text);
+        var w = ToggleChipWidth(text, job);
         var pos = ImGui.GetCursorScreenPos();
         var pressed = ImGui.InvisibleButton(id, new Vector2(w, h));
         var hovered = ImGui.IsItemHovered();
         var dl = ImGui.GetWindowDrawList();
         var bg = on ? Palette.WithAlpha(color, 0.22f) : hovered ? Palette.RaisedHover : Palette.Raised;
         dl.AddRectFilled(pos, pos + new Vector2(w, h), Palette.U32(bg), h / 2);
-        dl.AddCircleFilled(pos + new Vector2(14 * s, h / 2), 4 * s, Palette.U32(on ? color : Palette.WithAlpha(color, 0.55f)));
+        float textX;
+        if (job != 0)
+        {
+            JobIcons.Draw(dl, job, pos + new Vector2(18 * s, h / 2), 18 * s, on || hovered ? 1f : 0.7f);
+            textX = 31 * s;
+        }
+        else
+        {
+            dl.AddCircleFilled(pos + new Vector2(14 * s, h / 2), 4 * s, Palette.U32(on ? color : Palette.WithAlpha(color, 0.55f)));
+            textX = 24 * s;
+        }
         using (F.Strong.Push())
-            dl.AddText(pos + new Vector2(24 * s, (h - ImGui.GetTextLineHeight()) / 2), Palette.U32(on ? color : Palette.TextMuted), text);
+            dl.AddText(pos + new Vector2(textX, (h - ImGui.GetTextLineHeight()) / 2), Palette.U32(on ? color : Palette.TextMuted), text);
         return pressed;
     }
 
@@ -475,7 +494,7 @@ internal static partial class Ui
         if (iconId != 0 && Services.Textures.TryGetFromGameIcon(new GameIconLookup(iconId, hq), out var tex)
             && tex.TryGetWrap(out var wrap, out _) && wrap != null)
         {
-            dl.AddImageRounded(wrap.Handle, pos, pos + new Vector2(d), Vector2.Zero, Vector2.One, 0xFFFFFFFF, radius);
+            dl.AddImageRounded(wrap.Handle, pos, pos + new Vector2(d), Vector2.Zero, Vector2.One, Palette.U32(Vector4.One), radius);
             return;
         }
         dl.AddRectFilled(pos, pos + new Vector2(d), Palette.U32(Palette.Raised), radius);
