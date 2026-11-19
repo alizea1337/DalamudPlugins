@@ -91,6 +91,23 @@ internal static unsafe class GameState
         return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
     }
 
+    private static readonly Dictionary<uint, bool> AlwaysCollectableCache = new();
+
+    /// <summary>Items that only ever come as collectables (the "Rarefied" ones): the game's item count skips them.</summary>
+    public static bool AlwaysCollectable(uint itemId)
+    {
+        if (!AlwaysCollectableCache.TryGetValue(itemId, out var always))
+            AlwaysCollectableCache[itemId] = always = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId)?.AlwaysCollectable == true;
+        return always;
+    }
+
+    /// <summary>
+    /// What a run counts as gathered: normal-quality items in the main bags, and for items that only
+    /// come as collectables, the collectables (any collectability).
+    /// </summary>
+    public static int GatheredInBags(uint itemId)
+        => BagCount(itemId, false) + (AlwaysCollectable(itemId) ? Collectables(itemId).Count : 0);
+
     /// <summary>Collectability of each collectable of an item in the main bags (collectables don't count as normal items).</summary>
     public static List<int> Collectables(uint itemId)
     {

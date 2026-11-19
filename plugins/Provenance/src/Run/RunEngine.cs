@@ -1159,8 +1159,8 @@ internal sealed class RunEngine : IDisposable
 
     private int CountedAsGathered(uint itemId) => BagNq(itemId) + consumed.GetValueOrDefault(itemId);
 
-    /// <summary>What counts as gathered: normal-quality items in the main bags.</summary>
-    private static int BagNq(uint itemId) => GameState.BagCount(itemId, false);
+    /// <summary>What counts as gathered: normal-quality items in the main bags, and the collectables of items that only come as collectables.</summary>
+    private static int BagNq(uint itemId) => GameState.GatheredInBags(itemId);
 
     private void Add(string text, bool problem)
     {

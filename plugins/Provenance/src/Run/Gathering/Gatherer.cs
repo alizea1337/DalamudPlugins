@@ -57,6 +57,9 @@ internal sealed unsafe class Gatherer
     private int interactTries;
     private int approachWalks;
     private DateTime walkUntil;
+    /// <summary>Opening from the mount failed: land before trying again.</summary>
+    private bool mustLand;
+    private int landPresses, landMoves;
     private bool wasOnNode;
     private Vector3 lastNodePosition;
 
@@ -290,6 +293,8 @@ internal sealed unsafe class Gatherer
         {
             interactTries = 0;
             approachWalks = 0;
+            landPresses = landMoves = 0;
+            mustLand = false;
             Go(Step.Approach);
             return;
         }
@@ -306,23 +311,26 @@ internal sealed unsafe class Gatherer
     private static bool InReach(Vector3 node, Vector3 me)
         => Vector2.Distance(new Vector2(node.X, node.Z), new Vector2(me.X, me.Z)) < 3.2f && MathF.Abs(node.Y - me.Y) < 2.7f;
 
-    /// <summary>The last yalms: land, then walk up to the node until the game lets it open.</summary>
+    /// <summary>
+    /// The last yalms. In reach: open it (from the mount too; opening lands and dismounts by itself).
+    /// Otherwise land, then walk up to the node until the game lets it open.
+    /// </summary>
     private void ApproachTick(IGameObject me)
     {
         var live = LiveNode();
         if (live == null || Vector3.Distance(live.Position, me.Position) > NodeHere) { Vnav.Stop(); Go(Step.Choose); return; }
-        if (InReach(live.Position, me.Position))
+        var c = Services.Condition;
+        var mounted = c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted];
+        if (!mounted) mustLand = false;
+        if (!mustLand && InReach(live.Position, me.Position))
         {
             Vnav.Stop();
             Go(Step.Interact);
             return;
         }
-        var c = Services.Condition;
-        if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted])
+        if (mounted)
         {
-            Status = "Landing";
-            ActionManager.Instance()->UseAction(ActionType.GeneralAction, LandOrDismount);
-            Wait(1);
+            Land(me, live);
             return;
         }
         if (Vnav.Busy && DateTime.UtcNow < walkUntil) return;
@@ -342,6 +350,46 @@ internal sealed unsafe class Gatherer
         Wait(0.5);
     }
 
+    /// <summary>
+    /// Lands and gets off the mount. The game won't land against a wall or over a ledge: after two
+    /// presses that change nothing, fly down onto the walkable ground below, then onto ground a few
+    /// yalms away from the node, and press again; after that, try another of the node's spots.
+    /// </summary>
+    private void Land(IGameObject me, IGameObject live)
+    {
+        if (Vnav.Busy && DateTime.UtcNow < walkUntil) { Status = "Flying down to the ground"; return; }
+        if (!Services.Condition[ConditionFlag.InFlight] || landPresses < 2)
+        {
+            if (++landPresses > 8) { GiveUpLanding(live); return; }
+            Status = Services.Condition[ConditionFlag.InFlight] ? "Landing" : "Dismounting";
+            ActionManager.Instance()->UseAction(ActionType.GeneralAction, LandOrDismount);
+            Wait(1.2);
+            return;
+        }
+        if (landMoves >= 2) { GiveUpLanding(live); return; }
+        var away = new Vector2(me.Position.X - live.Position.X, me.Position.Z - live.Position.Z);
+        away = away.LengthSquared() > 0.01f ? Vector2.Normalize(away) : Vector2.UnitX;
+        var near = landMoves == 0 ? me.Position : me.Position + new Vector3(away.X, 0, away.Y) * 5f;
+        landMoves++;
+        landPresses = 0;
+        if (Vnav.NearestPoint(near, 5f, 10f) is { } floor)
+        {
+            Status = "Flying down to the ground";
+            Vnav.MoveTo(floor, true);
+            walkUntil = DateTime.UtcNow.AddSeconds(5);
+        }
+        Wait(0.5);
+    }
+
+    private void GiveUpLanding(IGameObject live)
+    {
+        Vnav.Stop();
+        log($"Couldn't land next to the {Catalog.ItemName(current!.Value.ItemId)} node; trying another spot.", false);
+        visited.Add((node!.PointId, (int)live.Position.X, (int)live.Position.Z));
+        mustLand = false;
+        Go(Step.Choose, 1);
+    }
+
     private void InteractTick(IGameObject me)
     {
         var live = LiveNode();
@@ -349,11 +397,12 @@ internal sealed unsafe class Gatherer
         // Drifted out of reach (a landing that slid down a slope): walk up again first.
         if (!InReach(live.Position, me.Position) && approachWalks < ApproachWalks) { Go(Step.Approach); return; }
         var c = Services.Condition;
-        if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted])
+        if ((c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted]) && interactTries >= 2)
         {
-            Status = "Landing";
-            ActionManager.Instance()->UseAction(ActionType.GeneralAction, LandOrDismount);
-            Wait(1);
+            // Opening didn't land us (too high, or over ground the game won't land on): land first.
+            mustLand = true;
+            landPresses = landMoves = 0;
+            Go(Step.Approach);
             return;
         }
         if (++interactTries > 4) { visited.Add((node!.PointId, (int)live.Position.X, (int)live.Position.Z)); Go(Step.Choose); return; }
