@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, gathering through GatherBuddy Reborn including timed nodes, and crafting with Raphael rotations. No market board. Requires GatherBuddy Reborn and vnavmesh (AutoHook for fishing). Open /provenance to get started.",
-    "Changelog": "- Specialist crafters: intermediates no longer fail with \"Raphael found no rotation\". raphael-cli\n  crashes when offered Heart and Soul / Quick Innovation for a rotation that needs no quality, so\n  those are only offered when quality is wanted.\n- Raphael errors show the real reason instead of Rust's backtrace hint; an internal error is retried\n  without the specialist actions, then without Manipulation, and only \"no solution\" keeps a run\n  from starting. A craft that needs no quality and still can't be planned is finished with Basic\n  Synthesis instead of stopping the run.\n- Plan page: \"Your character can't do this yet\" and \"Get these yourself\" rows have a Remove button\n  that takes the ordered items needing that material out of the order (the tooltip names them),\n  plus \"Remove all\" for everything the character can't do.\r\n",
+    "Changelog": "- Plan page: quieter remove actions. Each row in \"Get these yourself\" and \"Your character can't do\n  this yet\" has a small round trash button, centred on the row, muted until hovered; hovering a row\n  highlights it, and the tooltip names what gets removed. \"Remove all\" sits in the card's title line\n  as a quiet red action, lined up with the trash column. \"Check again\" for the stats sits on the\n  stats line.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -61,12 +61,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.6.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.1/latest.zip",
+    "AssemblyVersion": "0.6.2.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.6.2/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795075606
+    "LastUpdate": 1795076249
   }
 ]
