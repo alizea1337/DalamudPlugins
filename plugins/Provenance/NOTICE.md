@@ -32,6 +32,16 @@ Adapted files:
   scrip-cap prompt) and reading its item list, from `GatherBuddy/AutoGather/Collectables/`.
 - `tools/VendorTable`: corrected positions of two collectable appraisers, from
   `GatherBuddy/Vulcan/Vendors/VendorNpcLocationCache.cs`.
+- `src/Run/Fishing/` (the fishing driver) and the stand and spot helpers in `src/Core/Fishing/`:
+  choosing the fish and its spot by time and weather window, the Fisher gearset, bait in the bags and
+  buying more, travel to a recorded place to stand, landing, facing the water and checking that a
+  cast works, moving on when the fish turn wary or sense something amiss, cordials, and going from
+  node to node when spearfishing, from `GatherBuddy/AutoGather/` (`AutoGather.cs`,
+  `AutoGather.Movement.cs`, `AutoGather.Actions.cs`, `AutoGather.FishingBuffs.cs`,
+  `AutoGather.FishingCollectable.cs`, `AutoGather.Spearfishing.cs`) and the uptime rules in
+  `GatherBuddy/Plugin/UptimeManager.cs`.
+- `src/Integrations/Fishing/`: finding, opening and recognising spearfishing nodes, from
+  `GatherBuddy/AutoGather/AutoGather.Spearfishing.cs` and `GatherBuddy/Spearfishing/`.
 
 Bundled data, built by `tools/GbrExport` from GatherBuddy Reborn's data (Apache License 2.0):
 
@@ -46,8 +56,57 @@ A copy of the Apache License 2.0 is at <https://www.apache.org/licenses/LICENSE-
 ## AutoHook
 
 <https://github.com/PunishXIV/AutoHook>, BSD 3-Clause License, Copyright (c) 2024, Puni.sh.
+
+Ported logic:
+
+- `src/Integrations/Fishing/` (the rod engine): the fishing state the game keeps, the hooks on
+  casting, the bite and the catch, the one-action-per-tick executor and its delays, changing bait,
+  hooking by tug and bite time with the right hookset and resting on the rest, mooching, the buffs
+  (Patience, Chum, Surface Slap, Identical Cast, the lures and others), cordials between casts, the
+  warnings when the fish turn wary or sense something amiss or the bait runs out, the collectable
+  prompt, and AutoGig (gigging in the spearfishing window), from `AutoHook/Modules/Rod/`,
+  `AutoHook/Modules/FishingSessionManager.cs`, `AutoHook/Modules/AutoCollectables.cs`,
+  `AutoHook/World/UpdateModules/` (`HooksUpdateModule.cs`, `FishingUpdateModule.cs`,
+  `SpearfishingUpdateModule.cs`), `AutoHook/Actions/`, `AutoHook/Spearfishing/AutoGig.cs` and
+  `AutoHook/Modules/Gig/`.
+- `src/Core/Fishing/` (the catch planner and per-cast decisions): bait and mooch chains, the fish
+  caught first for Fisher's Intuition, which tug and bite window to hook in each cast, and when the
+  buffs pay off; recognising spearfish by size and speed and timing the gig, from
+  `AutoHook.FishSolver/` and `AutoHook/FishSolverIntegration/`.
+
 Per-fish bite times in `Resources/fish.json` come from AutoHook's `fish_list.json`, which is built
 from Teamcraft's fishing data (MIT).
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2024, Puni.sh
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## Vulcan / Artisan (crafting)
 

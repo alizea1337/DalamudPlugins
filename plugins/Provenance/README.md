@@ -2,7 +2,7 @@
 
 Turns a Teamcraft list into finished items. Provenance works out every material down to the
 crystals, shows where each one comes from, and then gets it all and crafts it for you: retainers,
-books, vendors, monster drops, gathering and crafting in one run.
+books, vendors, monster drops, gathering, fishing and crafting in one run.
 
 Open it with `/provenance` (or `/prov`).
 
@@ -20,7 +20,7 @@ Open it with `/provenance` (or `/prov`).
 - **Browse** every recipe and gatherable (mining, botany, fishing) with a name search, job filter and job-level range, and add
   recipes to the order.
 - **Plan** lists what you're making, then every material once with its total for the whole
-  order, grouped by how it is obtained: to gather (timed nodes marked), to fish, to buy, monster
+  order, grouped by how it is obtained: to gather (timed nodes marked), to fish, to buy (with the bait the fish need), monster
   drops, and intermediates to craft first, plus the crystals. Each row shows how many are still
   to get and how many you have against how many the order needs. Owned items count from your inventory, crystals and
   saddlebag; the armoury chest never counts. The plan lists anything the run can't get on its
@@ -40,9 +40,22 @@ Open it with `/provenance` (or `/prov`).
   gathering window with a rotation solver (ported from GatherBuddy Reborn) or the collectable
   rotation, always to the end of the node. Between nodes it extracts materia and reduces spare
   collectables. Node positions it sees are remembered on your PC (never uploaded). *Pause*
-  finishes the current node first. The run stops on its own when you are knocked out, when only a
+  finishes the current node (or catch) first. The run stops on its own when you are knocked out, when only a
   few inventory slots are left, or when vnavmesh is unloaded; a duty pauses it until the duty ends.
   Every stop shows a notification and a chat line.
+- **Run (fishing)**: Provenance fishes by itself too, rod fishing and spearfishing, with logic ported
+  from AutoHook and GatherBuddy Reborn (neither plugin is needed). It picks the fishing hole by the
+  fish's time and weather window, your Fisher level and where you can teleport, changes into your
+  Fisher gearset, goes to a recorded place to stand and faces the water. Only the fish the order
+  needs are hooked, with the right hookset, plus whatever leads to them: mooch chains, and the fish
+  for Fisher's Intuition timed to the window. Patience, Chum, Surface Slap, Identical Cast and the
+  lures are used when the catch calls for them, with cordials for GP. When the fish turn wary it moves
+  to another stand; when they sense something amiss it tries another spot. Spearfishing goes from
+  node to node and gigs only the wanted fish. Fish come in as normal items (Collect stays off), and
+  fish caught on the side are thrown away once gathering is done (a setting; Release is never used).
+  Gathering and fishing share the run: a fish whose window is open comes first, then nodes, then fish
+  that always bite, and a switch waits for the node or catch under way. Places to stand that work are
+  remembered on your PC (never uploaded).
 - **Run (crafting)**: after gathering, every recipe is crafted, intermediates first, on the job's
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
   (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
@@ -75,6 +88,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
 | M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
 | Scrips | Buying books at exchanges, earning scrips with collectables (done) |
+| Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (testing in 0.8) |
 
 ### To do
 
@@ -84,15 +98,28 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 - Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone).
 - The Diadem: gathering there, including clouded and umbral nodes.
 - Several orders in a queue.
-- Own fishing and spearfishing (in progress), then own navigation instead of vnavmesh.
+- Own navigation instead of vnavmesh.
 
 ## Requirements for a run
 
 vnavmesh. Planning works without it; the settings page shows whether it is loaded. GatherBuddy
-Reborn and AutoHook are no longer needed. This testing build can't fish yet; orders with fish
-can't start until fishing arrives.
+Reborn and AutoHook are no longer needed.
+
+Orders with fish also need:
+
+- a gearset saved for Fisher, and the Fisher level the fishing holes ask for (the plan says what's
+  missing);
+- the actions a fish needs: Mooch for mooch chains, Snagging, Ambitious or Modest Lure, and Gig
+  for spearfishing;
+- bait: the run buys bait sold for gil, under the price cap in Settings. Bait only sold for scrips
+  or crafted has to be in your bags, unless *Versatile Lure when the bait can't be bought* is on
+  (Settings), which buys Versatile Lure in Limsa Lominsa Lower Decks instead.
+
+Fish that only live in a housing district need a house or apartment there in your teleport list
+(yours, your free company's or a shared one); Provenance doesn't travel between wards. Ocean
+Fishing and the Diadem aren't covered: their fish are listed under "Get these yourself".
 
 ## License
 
-MIT. Parts are adapted from GatherBuddy Reborn (Apache 2.0); Nunito is under the SIL Open Font
-License. See [NOTICE.md](NOTICE.md).
+MIT. Parts are adapted from GatherBuddy Reborn (Apache 2.0) and AutoHook (BSD 3-Clause); Nunito is
+under the SIL Open Font License. See [NOTICE.md](NOTICE.md).

@@ -317,8 +317,9 @@ internal sealed class MainWindow : Window
         var targets = runs.Targets;
         if (targets.Count > 0)
         {
+            // Kinds of materials done: "2 of 3 gathered", "1 of 2 caught", "3 of 5 gathered or caught".
             var got = targets.Count(t => runs.Left(t) == 0);
-            return (dot, runs.Headline, runs.Detail, got / (float)targets.Count, $"{got} of {targets.Count} gathered" + TimeLeftText());
+            return (dot, runs.Headline, runs.Detail, got / (float)targets.Count, $"{got} of {targets.Count} {Run.RunEngine.GotWord(targets)}" + TimeLeftText());
         }
         return (dot, runs.Headline, runs.Detail, null, "");
     }

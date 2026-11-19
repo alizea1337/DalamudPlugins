@@ -160,7 +160,9 @@ public sealed class Plugin : IDalamudPlugin
         Services.Commands.RemoveHandler(Alias);
         Config.Save();
         windows.RemoveAllWindows();
-        Runs.Dispose();
+        // The run owns the fishing hooks; whatever happens there, the rest still unloads.
+        try { Runs.Dispose(); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the run on unload failed"); }
         Plans.Dispose();
         UI.JobIcons.Dispose();
         fonts.Dispose();

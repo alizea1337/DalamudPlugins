@@ -12,7 +12,7 @@ internal sealed class SettingsPage : Page
 {
     private static readonly (string InternalName, string Name, string Role)[] Dependencies =
     {
-        ("vnavmesh", "vnavmesh", "Walks and flies to vendors, summoning bells and monsters."),
+        ("vnavmesh", "vnavmesh", "Walks and flies to vendors, summoning bells, nodes, fishing spots and monsters."),
     };
 
     public SettingsPage(Plugin plugin) : base(plugin) { }
@@ -165,6 +165,47 @@ internal sealed class SettingsPage : Page
         Ui.EndCard();
     }
 
+    /// <summary>Rod fishing and spearfishing in a run: buying bait, the Versatile Lure stand-in, buffs and cordials, fish windows, by-catch.</summary>
+    private void DrawFishing(float w)
+    {
+        var s = Ui.S;
+        var f = Config.Fishing;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Fishing");
+        Ui.Wrapped("Fish are caught from recorded places to stand, with the bait each one bites on. Only the fish the order needs, and the ones that lead to them (mooching, Fisher's Intuition), are hooked; anything else is let go.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var v = f.BuyBait;
+        if (Ui.Checkbox("Buy bait", ref v, "Buys the bait each fish needs from a gil vendor before fishing (up to the price cap under Vendors), and more if it runs out during the run.")) { f.BuyBait = v; Changed(); }
+        if (f.BuyBait)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            Ui.Text("Spare bait");
+            ImGui.SameLine(0, 10 * s);
+            var spare = f.SpareBait;
+            ImGui.SetNextItemWidth(160 * s);
+            if (ImGui.InputInt("##sparebait", ref spare, 5, 20)) { f.SpareBait = Math.Clamp(spare, 0, 999); Changed(); }
+            ImGui.SameLine(0, 10 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 6 * s);
+            Ui.Muted("per kind, on top of what the catches need");
+        }
+        v = f.VersatileLureFallback;
+        if (Ui.Checkbox("Versatile Lure when the bait can't be bought", ref v, "Some bait is only sold for scrips or has to be crafted. With this on, those fish are caught with Versatile Lure from Limsa Lominsa Lower Decks instead; bites can come more slowly. Off: that bait has to be in your bags.")) { f.VersatileLureFallback = v; Changed(); }
+        v = f.UseBuffs;
+        if (Ui.Checkbox("Use fishing buffs", ref v, "Patience, Chum, Surface Slap, Identical Cast and the lures, when the catch needs them and there's GP.")) { f.UseBuffs = v; Config.Save(); }
+        v = f.UseCordials;
+        if (Ui.Checkbox("Drink cordials for GP", ref v, "Uses a Hi-Cordial, Cordial or Watered Cordial from your bags when a buff the catch needs is short of GP. Never buys any.")) { f.UseCordials = v; Config.Save(); }
+        Ui.Text("Be at the fishing hole");
+        ImGui.SameLine(0, 10 * s);
+        var lead = f.WindowLeadMinutes;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##fishlead", ref lead, 0, 30, "%d min before")) { f.WindowLeadMinutes = lead; Config.Save(); }
+        Ui.Wrapped("Real minutes before a fish's time or weather window opens. Catching the fish for Fisher's Intuition comes on top.", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        v = f.DiscardByCatch;
+        if (Ui.Checkbox("Throw away fish caught on the side", ref v, "Fish the order doesn't need are kept while fishing and thrown away once gathering is done: main bags only, never anything the order uses, never what you had before.")) { f.DiscardByCatch = v; Config.Save(); }
+        Ui.EndCard();
+    }
+
     private static string Ago(DateTime utc)
     {
         var span = DateTime.UtcNow - utc;
@@ -262,7 +303,7 @@ internal sealed class SettingsPage : Page
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
             v = rs.DiscardTimedExtras;
-            if (Ui.Checkbox("Also from timed nodes", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
+            if (Ui.Checkbox("Also from timed nodes and rare fish", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Rare fish are the ones that only bite at some hours or in some weather. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
         }
         v = rs.WaitForCollectableGp;
         if (Ui.Checkbox("Wait for GP before collectables", ref v, "The top reward needs the full collectable rotation (Scrutiny, Solid Reason), which takes 600 GP. On regular nodes the run waits next to the node until the GP is back; timed nodes are never waited for.")) { rs.WaitForCollectableGp = v; Config.Save(); }
@@ -277,6 +318,9 @@ internal sealed class SettingsPage : Page
         v = rs.ReduceCollectables;
         if (Ui.Checkbox("Reduce spare collectables", ref v, "When the bags run low on space, aetherially reduces collectables the order doesn't need. Never runs while a collectable the order or the scrip earning needs is in the bags.")) { rs.ReduceCollectables = v; Config.Save(); }
         Ui.EndCard();
+
+        // Fishing
+        DrawFishing(w);
 
         // After the order
         DrawAfterOrder(w);

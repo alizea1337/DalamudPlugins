@@ -87,7 +87,8 @@ internal sealed unsafe class Upkeep
         needed = neededCollectables;
         var s = plugin.Config.Run;
         var c = Services.Condition;
-        if (c[ConditionFlag.Mounted] || c[ConditionFlag.Gathering] || c[ConditionFlag.InCombat] || c[ConditionFlag.BetweenAreas]) return false;
+        // Never with the rod out: extraction and reduction with the fishing stance up aren't checked in game.
+        if (c[ConditionFlag.Mounted] || c[ConditionFlag.Gathering] || c[ConditionFlag.Fishing] || c[ConditionFlag.InCombat] || c[ConditionFlag.BetweenAreas]) return false;
         if (s.ExtractMateria && FullySpiritbonded() > 0 && QuestDone(MateriaQuest))
         {
             step = Step.Materia;

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.8.0 (testing)
+
+Fishing and spearfishing without AutoHook.
+
+- Orders with fish run now. Provenance fishes by itself, rod fishing and spearfishing; AutoHook and
+  GatherBuddy Reborn aren't needed. The catching is ported from AutoHook, getting to the water from
+  GatherBuddy Reborn.
+- Getting there: the run picks the fishing hole by the fish's time and weather window, your Fisher
+  level and the zones you can teleport to, changes into your Fisher gearset, travels to a recorded
+  place to stand, lands, faces the water and checks that a cast works (stepping forward a little
+  when it doesn't). Places to stand that work are remembered on this PC (never uploaded).
+- Catching: only the fish the order needs are hooked, with the right hookset; everything else is let
+  go. Mooch chains and the fish for Fisher's Intuition are caught along the way, timed so Intuition
+  is up when the window opens. Patience, Chum, Surface Slap, Identical Cast and the lures are used
+  when the catch calls for them, with cordials for GP. Fish come in as normal items: the Collect
+  toggle stays off.
+- When the fish turn wary, the run moves to another place to stand at least 10 yalms away; when they
+  sense something amiss, it tries another spot.
+- Bait: the plan lists the bait the fish need, and the run buys it from a gil vendor before fishing,
+  and again if it runs out. Bait only sold for scrips or crafted has to be in your bags, unless
+  "Versatile Lure when the bait can't be bought" is on (the default): those fish are then caught
+  with Versatile Lure, bought in Limsa Lominsa Lower Decks.
+- Spearfishing: the run goes from node to node at the spot (never straight back to the last two)
+  and gigs only the wanted fish.
+- Gathering and fishing share the run: a fish whose window is open comes first, then nodes, then fish
+  that always bite, and a switch waits for the node or catch under way. While only closed windows are
+  left, the run crafts in the meantime, as it does for timed nodes, and is back at the water in time
+  ("Be at the fishing hole" in Settings, 3 minutes before by default, plus the time to catch the fish
+  for Fisher's Intuition).
+- Pause finishes the catch under way and reels in; Stop reels in. The rod is put away before a
+  teleport, before crafting and when the run ends.
+- Fish caught on the side are kept while fishing and thrown away once gathering is done ("Throw away
+  fish caught on the side" in Settings, on by default): main bags only, never anything the order
+  uses, never what you had before. Release is never used. "Also from timed nodes" is now "Also from
+  timed nodes and rare fish": extra fish that only bite at some hours or in some weather follow it too.
+- Run page: a Fishing card shows the fish and its fishing hole, catches and casts (nodes when
+  spearfishing), when it bites, Fisher's Intuition, and the bait with how much is left. Fish in the
+  list say when they bite ("fish, bites in 12 min"), progress says "caught" for fish, and the
+  headline names the fish the run is waiting for.
+- Plan page: the bait the fish need is listed with what to buy, fish rows say when they bite and with
+  which bait, and the check of what your character can do covers fishing (Fisher gearset, a fishing
+  hole you can use, the actions a fish needs), with a heads-up for big fish, long or weather-bound
+  windows and Fisher's Intuition.
+- Settings: a new Fishing section for buying bait and how much spare, the Versatile Lure stand-in,
+  fishing buffs, cordials, how early to be at the fishing hole, and throwing away fish caught on the
+  side.
+- Time left counts the waits for fish windows, and how fast you fish is learned from your own runs.
+- A run with fish only starts when every fish can be caught, and otherwise says which one and why:
+  Fisher level, a fishing hole you can't reach, a missing action such as Mooch or Snagging, or no
+  Fisher gearset. Fish that only live in a housing district need a house or apartment there in your
+  teleport list (yours, your free company's or a shared one); Provenance doesn't travel between
+  wards. Ocean Fishing and the Diadem stay "get it yourself".
+- Earning scrips no longer waits forever when a collectable's materials include fish.
+
 ## 0.7.0 (testing)
 
 Gathering without GatherBuddy Reborn.
