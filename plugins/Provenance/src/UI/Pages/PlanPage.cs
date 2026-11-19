@@ -658,20 +658,21 @@ internal sealed class PlanPage : Page
 
     /// <summary>
     /// A fish's window ("bites 18:00–06:00 ET in Fog, opens in 12 min"), live, and what it is cast with
-    /// (spearfishing needs no bait).
+    /// (spearfishing needs no bait). A fish mooched from one that keeps hours or weather shows that one's window.
     /// </summary>
     private void FishChips(PlanLine line, GameCatalog catalog, List<ChipText> chips)
     {
         if (Plans.Outlook(line.ItemId) is not { } outlook) return;
         var fish = outlook.Fish;
-        if (fish.Restricted)
+        if (outlook.Restricted)
         {
             var (status, brief) = WindowStatus(outlook, DateTimeOffset.UtcNow);
-            chips.Add(new ChipText(new[] { $"bites {BiteRule(fish)}, {status}", brief }, Palette.SupplyColor(Supply.Fish),
-                fish.Window != null ? FontAwesomeIcon.Clock : FontAwesomeIcon.CloudSun));
+            var rule = Rule(fish, outlook.Times.Links);
+            chips.Add(new ChipText(new[] { $"bites {rule.Text}, {status}", brief }, Palette.SupplyColor(Supply.Fish),
+                rule.Hours ? FontAwesomeIcon.Clock : FontAwesomeIcon.CloudSun));
         }
         if (fish.Spear) chips.Add(new ChipText(new[] { "spearfishing" }, Palette.TextMuted, FontAwesomeIcon.Water));
-        else if (CastWith(line.ItemId, fish) is { } bait) chips.Add(new ChipText(new[] { catalog.ItemName(bait) }, Palette.TextMuted, FontAwesomeIcon.Worm));
+        else if (CastWith(line.ItemId, fish, catalog) is { } bait) chips.Add(new ChipText(new[] { catalog.ItemName(bait) }, Palette.TextMuted, FontAwesomeIcon.Worm));
     }
 
     /// <summary>"opens in 12 min", "9 min left" (and "biting, 9 min left" for the short chip), "biting now", or not in the forecast.</summary>
@@ -691,22 +692,24 @@ internal sealed class PlanPage : Page
     /// The bait a fish is cast with first: its own tackle, or Versatile Lure when that stands in for all of it
     /// (none in the bags and no vendor sells it under the cap). Null when there's no bait to show.
     /// </summary>
-    private uint? CastWith(uint fishId, Core.Fishing.FishInfo fish)
+    private uint? CastWith(uint fishId, Core.Fishing.FishInfo fish, GameCatalog catalog)
     {
         if (fish.Bait == 0) return null;
         var plan = Plans.Plan;
         if (fish.Bait != FishAccess.VersatileLure && plan[FishAccess.VersatileLure] is { } lure && lure.NeededFor.Contains(fishId)
-            && !CastsOwn(plan[fish.Bait]))
+            && !CastsOwn(plan[fish.Bait], catalog))
             return FishAccess.VersatileLure;
         return fish.Bait;
     }
 
     /// <summary>
     /// Some of a fish's own bait gets cast: the plan has it, or for bait crafted only after the fishing (its line
-    /// counts the crafts), the bags hold some.
+    /// counts the crafts), the bags hold some or the fisher buys it (a gil vendor sells it under the cap).
     /// </summary>
-    private static bool CastsOwn(PlanLine? bait)
-        => bait is { Supply: Supply.Craft } ? GameState.BagCount(bait.ItemId) > 0 : bait is { Needed: > 0 };
+    private bool CastsOwn(PlanLine? bait, GameCatalog catalog)
+        => bait is { Supply: Supply.Craft }
+            ? GameState.BagCount(bait.ItemId) > 0 || Planner.BuysBait(Plans.Plan, catalog, bait.ItemId, Config.Buying.VendorMaxPrice)
+            : bait is { Needed: > 0 };
 
     /// <summary>
     /// Draws chips left to right from <paramref name="x"/>, each in the fullest form that keeps them all before
@@ -756,7 +759,10 @@ internal sealed class PlanPage : Page
         return tip;
     }
 
-    /// <summary>Where and when a fish bites, its bait and chain, what comes first, and about how long it takes.</summary>
+    /// <summary>
+    /// Where and when a fish bites (its mooch chain's window included), its bait and chain, what comes first and when
+    /// that bites, and about how long it takes.
+    /// </summary>
     private string FishTip(PlanLine line, GameCatalog catalog)
     {
         if (Plans.Outlook(line.ItemId) is not { } outlook) return "";
@@ -764,24 +770,27 @@ internal sealed class PlanPage : Page
         var now = DateTimeOffset.UtcNow;
         var parts = new List<string>();
         var where = outlook.Spots.FirstOrDefault() is { } spot ? SpotName(spot) : null;
-        if (fish.Restricted)
+        if (outlook.Restricted)
         {
-            var when = outlook.OpensIn(now) is not { } wait ? $"not in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast"
-                : wait > TimeSpan.Zero ? $"next in {Short(wait)}"
-                : outlook.OpenFor(now) >= TimeSpan.FromHours(2) ? "biting now" : $"biting now, for {Short(outlook.OpenFor(now))}";
-            parts.Add($"Bites {BiteRule(fish)}{(where != null ? " at " + where : "")}: {when}.");
+            // A predator that doesn't come leaves it no window; the predator's line below says so.
+            var rule = Rule(fish, outlook.Times.Links);
+            var when = outlook.Times.PredatorBeyond != null ? "" : ": " + When(outlook.Windows, now);
+            parts.Add($"Bites {rule.Text}{(where != null ? " at " + where : "")}{when}." + MoochedFrom(rule, catalog));
         }
-        else if (where != null) parts.Add($"{(fish.Spear ? "Spearfished" : "Fished")} at {where}, any time.");
+        else if (where != null)
+            parts.Add($"{(fish.Spear ? "Spearfished" : "Fished")} at {where}{(outlook.Times.Predators.Count == 0 ? ", any time" : "")}.");
         if (!fish.Spear && fish.Bait != 0)
         {
             var chain = fish.Mooch.Count > 0 ? " Mooch chain: " + string.Join(", then ", fish.Mooch.Select(catalog.ItemName)) + ", then this fish." : "";
             parts.Add($"Bait: {catalog.ItemName(fish.Bait)}.{chain}");
-            if (CastWith(line.ItemId, fish) == FishAccess.VersatileLure && fish.Bait != FishAccess.VersatileLure)
+            if (CastWith(line.ItemId, fish, catalog) == FishAccess.VersatileLure && fish.Bait != FishAccess.VersatileLure)
                 parts.Add($"{catalog.ItemName(fish.Bait)} can't be bought for gil, so the run casts Versatile Lure instead.");
         }
+        // The fish caught first that keep hours or weather of their own, and when they bite.
         if (fish.NeedsIntuition)
             parts.Add((fish.Spear ? "Swimming shadows first: " : "Fisher's Intuition first: ")
-                      + string.Join(" and ", fish.Predators.Select(p => $"{p.Count}× {catalog.ItemName(p.ItemId)}")) + ".");
+                      + string.Join(" and ", fish.Predators.Select(p => $"{p.Count}× {catalog.ItemName(p.ItemId)}")) + "."
+                      + string.Concat(outlook.Times.Predators.Select(p => $" {catalog.ItemName(p.Fish.ItemId)} only bites {Rule(p.Fish, p.Links).Text}: {When(p.Windows, now)}.")));
         if (fish.Big) parts.Add("A big fish: expect many casts.");
         var seconds = Plans.CatchSeconds(line.ItemId) * line.Remaining;
         if (seconds > 0) parts.Add($"About {Short(TimeSpan.FromSeconds(seconds))} of fishing for {line.Remaining:N0}, from its bite time and the casts a catch usually takes.");
@@ -796,9 +805,12 @@ internal sealed class PlanPage : Page
         var spare = Math.Max(0, Config.Fishing.SpareBait);
         var fish = Names(line.NeededFor, catalog);
         var they = line.NeededFor.Count == 1 ? "it usually takes" : "they usually take";
+        var cap = Config.Buying.VendorMaxPrice;
         parts.Add(line.Supply == Supply.Craft
-            ? $"Also bait for {fish}, but the run crafts it only after the fishing, so it casts what's in your bags"
-              + (Plans.Plan[FishAccess.VersatileLure] is { } stand && line.NeededFor.Any(f => stand.NeededFor.Contains(f)) ? ", then Versatile Lure." : ".")
+            ? Planner.BuysBait(Plans.Plan, catalog, line.ItemId, cap)
+                ? $"Also bait for {fish}, but the run crafts it only after the fishing, so it casts what's in your bags, then buys more from a vendor when it fishes."
+                : $"Also bait for {fish}, but the run crafts it only after the fishing, so it casts what's in your bags"
+                  + (Plans.Plan[FishAccess.VersatileLure] is { } stand && line.NeededFor.Any(f => stand.NeededFor.Contains(f)) ? ", then Versatile Lure." : ".")
             : line.Supply == Supply.Vendor && !line.IsTarget && line.Needed > spare && spare > 0
                 ? $"Bait for {fish}: about {line.Needed - spare:N0} for the casts {they}, plus {spare:N0} spare (Settings)."
                 : $"Bait for {fish}, for the casts {they}.");
@@ -806,7 +818,7 @@ internal sealed class PlanPage : Page
         {
             var plan = Plans.Plan;
             var replaced = line.NeededFor.SelectMany(Plans.BaitPerCatch).Select(b => b.Bait)
-                .Where(b => b != FishAccess.VersatileLure && plan[b] is not { Supply: Supply.Vendor }).Distinct().Select(catalog.ItemName).ToList();
+                .Where(b => b != FishAccess.VersatileLure && !Planner.BuysBait(plan, catalog, b, cap)).Distinct().Select(catalog.ItemName).ToList();
             if (replaced.Count > 0) parts.Add($"Stands in for {string.Join(" and ", replaced)}, which can't be bought for gil.");
         }
         var elsewhere = Plans.Owned.GetValueOrDefault(line.ItemId) - GameState.BagCount(line.ItemId);
@@ -834,16 +846,33 @@ internal sealed class PlanPage : Page
         return zone.Length > 0 ? $"{spot.Name}, {zone}" : spot.Name;
     }
 
-    /// <summary>When a fish bites, in words; worked out once per fish (weather names come from the game data).</summary>
-    private string BiteRule(Core.Fishing.FishInfo fish)
+    /// <summary>
+    /// When a fish bites, in words, with the hours or weather of the links of its mooch chain it has none of its own
+    /// (<see cref="PlanService.Rule"/>); worked out once per fish (weather names come from the game data).
+    /// </summary>
+    private BiteRuleText Rule(Core.Fishing.FishInfo fish, IReadOnlyList<Core.Fishing.FishInfo> links)
     {
         if (biteRules.TryGetValue(fish.ItemId, out var rule)) return rule;
-        rule = PlanService.BiteRule(fish);
+        rule = PlanService.Rule(fish, links);
         biteRules[fish.ItemId] = rule;
         return rule;
     }
 
-    private readonly Dictionary<uint, string> biteRules = new();
+    private readonly Dictionary<uint, BiteRuleText> biteRules = new();
+
+    /// <summary>"next in 12 min", "biting now", "biting now, for 9 min", or not in the forecast: when windows (null: any time) are open.</summary>
+    private static string When(IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>? windows, DateTimeOffset now)
+    {
+        if (FishSchedule.OpensIn(windows, now) is not { } wait) return $"not in the next {PlanService.FishHorizon.TotalDays:0} days of the weather forecast";
+        if (wait > TimeSpan.Zero) return $"next in {Short(wait)}";
+        var left = FishSchedule.OpenFor(windows, now);
+        return left >= TimeSpan.FromHours(2) ? "biting now" : $"biting now, for {Short(left)}";
+    }
+
+    /// <summary>" Mooched from Fullmoon Sardine, which only bites then." when a rule's hours or weather are a mooch link's; "" otherwise.</summary>
+    private static string MoochedFrom(BiteRuleText rule, GameCatalog catalog)
+        => rule.From.Count == 0 ? ""
+            : $" Mooched from {string.Join(" and ", rule.From.Select(l => catalog.ItemName(l.ItemId)))}, which only {(rule.From.Count == 1 ? "bites" : "bite")} then.";
 
     /// <summary>" Or let the run cast Versatile Lure instead (Settings)." while that stand-in is off and could be bought.</summary>
     private string StandInHint(GameCatalog catalog)

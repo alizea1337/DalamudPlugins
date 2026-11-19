@@ -357,6 +357,54 @@ public class PlannerTests
     }
 
     [Fact]
+    public void A_crafted_bait_a_vendor_also_sells_is_bought_by_the_fisher_not_stood_in_for()
+    {
+        // 3 Crow Fly ordered (one craft makes 3; a vendor sells it for 240 gil too) and 10 trout cast with it (14 casts).
+        // The fisher buys the Crow Fly it casts when it gets there: no Versatile Lure, nothing missing, and the line
+        // keeps only the 3 ordered.
+        var baits = new Dictionary<uint, (uint, double)[]> { [Trout] = new[] { (CrowFly, 1.4) } };
+        var order = OrderOf((CrowFly, 3), (Trout, 10));
+        var plan = Build(order, options: Fishing(baits, spare: 20, fallback: VersatileLure, bags: new()));
+        var fly = plan[CrowFly]!;
+        Assert.Equal(Supply.Craft, fly.Supply);
+        Assert.Equal(3, fly.Needed);
+        Assert.Equal(1, fly.Crafts);
+        Assert.Equal(0, fly.MissingBait);
+        Assert.Equal(new[] { Trout }, fly.NeededFor);
+        Assert.Null(plan[VersatileLure]);
+        Assert.DoesNotContain(VersatileLure, Assert.Single(plan.Tree, n => n.ItemId == Trout).Children.Select(c => c.ItemId));
+        Assert.Empty(plan.Missing);
+        Assert.True(plan.CanStart);
+        Assert.True(Planner.BuysBait(plan, Catalog, CrowFly, 2000));
+
+        // Without the stand-in nothing is missing either.
+        var none = Build(order, options: Fishing(baits, spare: 20, bags: new()));
+        Assert.Equal(0, none[CrowFly]!.MissingBait);
+        Assert.Null(none[VersatileLure]);
+        Assert.True(none.CanStart);
+
+        // Another fish's bait the stand-in covers leaves the Crow Fly alone.
+        var both = Build(OrderOf((CrowFly, 3), (Trout, 10), (OldLord, 2)), options: Fishing(new()
+        {
+            [Trout] = new[] { (CrowFly, 1.4) },
+            [OldLord] = new[] { (BruteLeech, 3.0) },
+        }, spare: 20, fallback: VersatileLure, bags: new()));
+        Assert.Equal(6 + 20, both[VersatileLure]!.Needed);
+        Assert.Equal(new[] { OldLord }, both[VersatileLure]!.NeededFor);
+        Assert.Equal(3, both[CrowFly]!.Needed);
+        Assert.True(Planner.BuysBait(both, Catalog, CrowFly, 2000));
+        Assert.False(Planner.BuysBait(both, Catalog, BruteLeech, 2000));
+        Assert.True(Planner.BuysBait(both, Catalog, VersatileLure, 2000));
+
+        // Over the cap it's crafted bait the run can't buy: what the bags lack is missing, and the reason says why.
+        var capped = Build(order, options: Fishing(baits, spare: 20, bags: new(), cap: 200));
+        Assert.Equal(14, capped[CrowFly]!.MissingBait);
+        Assert.Contains("vendor price 240 gil is above your cap of 200", capped[CrowFly]!.ManualReason);
+        Assert.False(capped.CanStart);
+        Assert.False(Planner.BuysBait(capped, Catalog, CrowFly, 200));
+    }
+
+    [Fact]
     public void The_stand_in_covers_what_the_bags_lack()
     {
         // 20 Brute Leech for 10 trout, 8 in the bags: those are cast first, Versatile Lure takes the other 12 (plus spare).

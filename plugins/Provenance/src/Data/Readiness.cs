@@ -117,8 +117,9 @@ internal static class Readiness
 
     /// <summary>
     /// One fish: blocking when this character can't fish it (spot level, reach, actions, no bait known), when it
-    /// doesn't bite within the weather forecast at any spot it can use, or, with buying bait off, when the bags
-    /// hold none of its bait; otherwise one note on what to expect, when there's anything worth knowing.
+    /// can't be caught within the weather forecast at any spot it can use (its own window, its mooch chain's, or
+    /// that of a fish caught first for Fisher's Intuition), or, with buying bait off, when the bags hold none of its
+    /// bait; otherwise one note on what to expect, when there's anything worth knowing.
     /// </summary>
     private static void CheckFish(List<ReadinessIssue> issues, Plan plan, PlanLine line, FishOutlook outlook, GameCatalog catalog, Configuration cfg)
     {
@@ -135,21 +136,22 @@ internal static class Readiness
         // A run waits for a window within the forecast; with none, the fisher gives the fish up and the run stops
         // before crafting. This clears by itself once a window comes into the forecast.
         var now = DateTimeOffset.UtcNow;
-        if (fish.Restricted && outlook.OpensIn(now) == null)
+        if (outlook.OpensIn(now) == null)
         {
-            issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, NoWindow(fish), true));
+            issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, NoWindow(outlook, catalog), true));
             return;
         }
         if (fish.Big) notes.Add("A big fish: it can take many casts, sometimes more than one window.");
-        if (fish.Weather.Count > 0 || fish.PreviousWeather.Count > 0)
-            notes.Add($"Only bites {PlanService.BiteRule(fish)}; that weather can take hours to come round, and the run gathers or crafts in the meantime when it can.");
-        else if (fish.Window is { On: > 0, Off: > 0 } w)
+        var rule = PlanService.Rule(fish, outlook.Times.Links);
+        if (rule.Weather)
+            notes.Add($"Only bites {rule.Text}{MoochedFrom(rule, catalog)}; that weather can take hours to come round, and the run gathers or crafts in the meantime when it can.");
+        else if (outlook.Windows is { Count: > 0 } windows)
         {
             // A short window may not fit the whole catch: say so when the fishing takes longer than one window.
             var fishing = TimeSpan.FromSeconds(line.Remaining * BaitNeeds.SecondsPerCatch(fish, catalog.Gather.Fish));
-            var open = TimeSpan.FromMilliseconds(w.On);
+            var open = windows.Max(w => w.End - w.Start);
             if (fishing > open)
-                notes.Add($"Only bites {PlanService.BiteRule(fish)}, {Short(open)} at a time; catching {line.Remaining} likely takes several windows.");
+                notes.Add($"Only bites {rule.Text}{MoochedFrom(rule, catalog)}, {Short(open)} at a time; catching {line.Remaining} likely takes several windows.");
         }
         if (fish.NeedsIntuition)
         {
@@ -157,24 +159,48 @@ internal static class Readiness
             notes.Add(fish.Spear
                 ? $"Shows up in swimming shadows after gigging {first} (the run does that first)."
                 : $"Needs Fisher's Intuition first: the run catches {first}" + (fish.IntuitionSeconds > 0 ? $", then it bites for {Short(TimeSpan.FromSeconds(fish.IntuitionSeconds))}." : "."));
+            // Predators that bite less often than the fish: the run sits waiting for them between tries.
+            var slow = outlook.Times.Predators.Where(p => p.Slows).ToList();
+            if (slow.Count > 0)
+                notes.Add(And(slow.Select(p => $"{catalog.ItemName(p.Fish.ItemId)} only bites {PlanService.Rule(p.Fish, p.Links).Text}").ToList())
+                          + $": waiting for {(slow.Count == 1 ? "it" : "them")} before each try can make catches slow.");
         }
-        if (cfg.Fishing.BuyBait && StandInFor(plan, line.ItemId, fish, catalog) is { Length: > 0 } replaced)
+        if (cfg.Fishing.BuyBait && StandInFor(plan, line.ItemId, fish, catalog, cfg) is { Length: > 0 } replaced)
             notes.Add($"{replaced} can't be bought for gil, so the run casts Versatile Lure instead once your bags run out; bites may come slower.");
         if (notes.Count > 0) issues.Add(new ReadinessIssue(line.ItemId, FishAccess.Fisher, string.Join(" ", notes), false));
     }
 
     /// <summary>
-    /// Why a fish without a window within the forecast (at the spots this character can use) blocks the start:
-    /// "Only bites in Fog after Rain; not in the next 7 days of the weather forecast, so a run can't catch it yet. …"
+    /// Why a fish that can't be caught within the forecast (at the spots this character can use) blocks the start:
+    /// "Only bites in Fog after Rain; not in the next 7 days of the weather forecast, so a run can't catch it yet. …",
+    /// or the same about a fish caught first for Fisher's Intuition that doesn't bite there.
     /// </summary>
-    private static string NoWindow(FishInfo fish)
+    private static string NoWindow(FishOutlook outlook, GameCatalog catalog)
     {
         var days = PlanService.FishHorizon.TotalDays;
-        return fish.Weather.Count > 0 || fish.PreviousWeather.Count > 0
-            ? $"Only bites {PlanService.BiteRule(fish)}; not in the next {days:0} days of the weather forecast, so a run can't catch it yet. "
-              + "Get it yourself, or start the run once that weather is in the forecast."
+        const string later = "Get it yourself, or start the run once that weather is in the forecast.";
+        if (outlook.Times.PredatorBeyond is { } p)
+        {
+            var name = catalog.ItemName(p.Fish.ItemId);
+            var theirs = PlanService.Rule(p.Fish, p.Links);
+            return theirs.Weather
+                ? $"{name}, caught first for Fisher's Intuition, only bites {theirs.Text}; not in the next {days:0} days of the weather forecast, so a run can't catch this fish yet. {later}"
+                : $"{name}, caught first for Fisher's Intuition, doesn't bite in the next {days:0} days at any spot you can use, so a run can't catch this fish. Get it yourself.";
+        }
+        var rule = PlanService.Rule(outlook.Fish, outlook.Times.Links);
+        return rule.Weather
+            ? $"Only bites {rule.Text}{MoochedFrom(rule, catalog)}; not in the next {days:0} days of the weather forecast, so a run can't catch it yet. {later}"
             : $"Doesn't bite in the next {days:0} days at any spot you can use, so a run can't catch it. Get it yourself.";
     }
+
+    /// <summary>" (mooched from Fullmoon Sardine, which only bites then)" when a rule's hours or weather are a mooch link's; "" otherwise.</summary>
+    private static string MoochedFrom(BiteRuleText rule, GameCatalog catalog)
+        => rule.From.Count == 0 ? ""
+            : $" (mooched from {And(rule.From.Select(l => catalog.ItemName(l.ItemId)).ToList())}, which only {(rule.From.Count == 1 ? "bites" : "bite")} then)";
+
+    /// <summary>"A", "A and B", "A, B and C".</summary>
+    private static string And(IReadOnlyList<string> parts)
+        => parts.Count <= 1 ? string.Concat(parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1];
 
     /// <summary>With buying bait off: blocking when the bags hold none of a bait (and no stand-in), a note when they hold less than the estimate.</summary>
     private static void CheckOwnBait(List<ReadinessIssue> issues, List<string> notes, PlanLine line, FishInfo fish, GameCatalog catalog, Configuration cfg)
@@ -200,11 +226,11 @@ internal static class Readiness
     /// The fish's bait that Versatile Lure stands in for (no vendor sells it under the cap and the bags don't hold
     /// enough), named ("Brute Leech"); "" when the fish casts its own bait.
     /// </summary>
-    private static string StandInFor(Plan plan, uint fishId, FishInfo fish, GameCatalog catalog)
+    private static string StandInFor(Plan plan, uint fishId, FishInfo fish, GameCatalog catalog, Configuration cfg)
     {
         if (plan[FishAccess.VersatileLure] is not { } lure || !lure.NeededFor.Contains(fishId)) return "";
         var replaced = BaitNeeds.PerCatch(fish, catalog.Gather.Fish)
-            .Where(b => b.Bait != FishAccess.VersatileLure && plan[b.Bait] is not { Supply: Supply.Vendor })
+            .Where(b => b.Bait != FishAccess.VersatileLure && !Planner.BuysBait(plan, catalog, b.Bait, cfg.Buying.VendorMaxPrice))
             .Select(b => catalog.ItemName(b.Bait)).ToList();
         return replaced.Count == 0 ? "" : string.Join(" and ", replaced);
     }

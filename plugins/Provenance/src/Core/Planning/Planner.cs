@@ -10,6 +10,8 @@ namespace Provenance.Core.Planning;
 /// Expands an order into every material it needs, decides how each one is obtained and in which
 /// order the recipes run. Fish lines bring the bait they are cast with (<see cref="PlannerOptions.FishBaits"/>):
 /// bought from a gil vendor before fishing, or a stand-in for bait no vendor sells under the cap, never crafted.
+/// A bait the order crafts anyway is cast from the bags, then bought by the fisher when a vendor sells it, or
+/// stood in for when none does.
 /// Pure: game data comes through <see cref="IGameCatalog"/>, stock as a dictionary.
 /// </summary>
 public static class Planner
@@ -151,11 +153,11 @@ public static class Planner
             {
                 var casts = (int)Math.Ceiling(baitDemand.GetValueOrDefault(id) - 1e-9);
                 var takenOver = id == fallback ? handedOver : 0;
-                if (casts > 0 && id != fallback && line.Supply is Supply.Manual or Supply.Craft)
+                if (casts > 0 && id != fallback && CantBuyBait(line))
                 {
-                    // Bait the run can't get before fishing: no vendor sells it under the cap, or it's crafted (for the
-                    // order or a recipe), which comes after the fishing. What the bags hold is cast first (an ordered
-                    // one is crafted on top of it), the stand-in does the rest; without one the player brings it.
+                    // Bait the run can't get before fishing: no vendor sells it under the cap, and crafting it (for the
+                    // order or a recipe) comes after the fishing. What the bags hold is cast first (an ordered one is
+                    // crafted on top of it), the stand-in does the rest; without one the player brings it.
                     var spareInBags = line.Supply == Supply.Craft && ignoreStock
                         ? Math.Max(0, options.BaitOnHand?.Invoke(id) ?? owned.GetValueOrDefault(id))
                         : Math.Max(0, stock - other);
@@ -172,10 +174,17 @@ public static class Planner
                         // The crafted ones come too late to cast: the line keeps only what's crafted.
                         line.MissingBait = casts - covered;
                         if (line.MissingBait > 0)
-                            line.ManualReason = $"Crafted ({line.Recipe?.Job.Abbreviation()}) only after the fishing, so the run can't cast the ones it makes";
+                        {
+                            var src = catalog.Sources(id);
+                            line.ManualReason = $"Crafted ({line.Recipe?.Job.Abbreviation()}) only after the fishing, so the run can't cast the ones it makes"
+                                                + (src.Has(Obtain.Vendor) ? $", and its vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}" : "");
+                        }
                         casts = 0;
                     }
                 }
+                // Crafted for the order, and a gil vendor sells it too: the fisher buys what it casts when it gets there
+                // (crafting comes after the fishing), so the line keeps only what's crafted.
+                else if (line.Supply == Supply.Craft) casts = 0;
                 // Spare only for bait the run buys; bait it can't buy only needs the estimate.
                 else if (casts + takenOver > 0 && line.Supply == Supply.Vendor) casts += Math.Max(0, options.SpareBait);
                 needed += casts + takenOver;
@@ -219,7 +228,8 @@ public static class Planner
 
         // A bait line for a fish. Bait is bought before fishing (crafting comes after it), so a new bait line
         // never picks a recipe; an item the order already has (ordered, or a recipe's ingredient) keeps its way,
-        // and when that's crafting, its casts come from the bags or the stand-in.
+        // and when that's crafting, its casts come from the bags, then the fisher's purchase when a gil vendor sells
+        // it, else the stand-in.
         void AddBait(uint bait, uint fish)
         {
             baitLines.Add(bait);
@@ -231,8 +241,8 @@ public static class Planner
                 lines[bait] = line;
                 DecideBait(line);
             }
-            // Bait no vendor sells under the cap, or only crafted after the fishing: the stand-in may have to cover it.
-            if (fallback == 0 || bait == fallback || lines[bait].Supply is not (Supply.Manual or Supply.Craft)) return;
+            // Bait no vendor sells under the cap (crafted after the fishing or not): the stand-in may have to cover it.
+            if (fallback == 0 || bait == fallback || !CantBuyBait(lines[bait])) return;
             baitLines.Add(fallback);
             if (lines.ContainsKey(fallback)) return;
             var stand = new PlanLine { ItemId = fallback };
@@ -266,7 +276,12 @@ public static class Planner
             return "Not sold by any gil vendor a run can reach";
         }
 
-        bool VendorOk(ItemSources src) => src.Has(Obtain.Vendor) && (options.VendorMaxPrice == 0 || src.VendorPrice <= options.VendorMaxPrice);
+        bool VendorOk(ItemSources src) => VendorSells(src, options.VendorMaxPrice);
+
+        // Bait the run can't buy for gil: none of its own sold under the cap, whether crafted for the order or not.
+        // A crafted one a vendor sells is bought by the fisher when it fishes (see BuysBait).
+        bool CantBuyBait(PlanLine line)
+            => line.Supply == Supply.Manual || line.Supply == Supply.Craft && !VendorOk(catalog.Sources(line.ItemId));
 
         (RecipeInfo? Recipe, string? Blocked) PickRecipe(uint itemId, uint recipeId)
         {
@@ -336,7 +351,7 @@ public static class Planner
                 {
                     var amount = (int)Math.Ceiling(quantity * perCatch - 1e-9);
                     node.Children.Add(new PlanTreeNode { ItemId = bait, Quantity = amount, Supply = lines[bait].Supply });
-                    if (fallback != 0 && bait != fallback && spilled.Contains(itemId) && lines[bait].Supply is Supply.Manual or Supply.Craft
+                    if (fallback != 0 && bait != fallback && spilled.Contains(itemId) && CantBuyBait(lines[bait])
                         && node.Children.All(c => c.ItemId != fallback))
                         node.Children.Add(new PlanTreeNode { ItemId = fallback, Quantity = amount, Supply = lines[fallback].Supply });
                 }
@@ -349,6 +364,23 @@ public static class Planner
             return node;
         }
     }
+
+    /// <summary>A gil vendor sells the item at or under <paramref name="vendorMaxPrice"/> (0: no limit).</summary>
+    public static bool VendorSells(ItemSources src, uint vendorMaxPrice)
+        => src.Has(Obtain.Vendor) && (vendorMaxPrice == 0 || src.VendorPrice <= vendorMaxPrice);
+
+    /// <summary>
+    /// The run buys a bait itself, so it casts its own rather than a stand-in: the plan buys it from a gil vendor before
+    /// the fishing, or it's crafted for the order and a gil vendor sells it under the cap, so the fisher buys what it
+    /// casts when it gets there (crafting comes after the fishing).
+    /// </summary>
+    public static bool BuysBait(Plan plan, IGameCatalog catalog, uint bait, uint vendorMaxPrice)
+        => plan[bait] switch
+        {
+            { Supply: Supply.Vendor } => true,
+            { Supply: Supply.Craft } => VendorSells(catalog.Sources(bait), vendorMaxPrice),
+            _ => false,
+        };
 
     /// <summary>"Only gathered in the Diadem, which a run can't go to."</summary>
     internal static string ElsewhereReason(ItemSources src)

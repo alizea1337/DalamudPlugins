@@ -18,41 +18,38 @@ namespace Provenance.Data;
 
 /// <summary>
 /// What a run faces fishing one item, as of <see cref="At"/>: whether this character can at all
-/// (<see cref="Blocker"/>), the spots it would fish at, and when the fish bites there.
+/// (<see cref="Blocker"/>), the spots it would fish at, and when the fish can be caught there.
 /// </summary>
 /// <param name="Blocker">Why this character can't fish it (level, reach, actions, no bait known), or null.</param>
 /// <param name="Spots">
 /// The spots a run can use, lowest level first; when there are none, the open-world spots the fish lives at
 /// (so its window can still be shown).
 /// </param>
-/// <param name="Windows">When it bites from <see cref="At"/> on, over those spots; null when it bites any time.</param>
-internal sealed record FishOutlook(FishInfo Fish, string? Blocker, IReadOnlyList<FishingSpotInfo> Spots,
-    IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>? Windows, DateTimeOffset At)
+/// <param name="Times">
+/// When it can be caught from <see cref="At"/> on, over those spots (<see cref="FishSchedule.Times"/>): its own window
+/// narrowed by its mooch chain's, and the windows of the fish caught first for Fisher's Intuition there.
+/// </param>
+internal sealed record FishOutlook(FishInfo Fish, string? Blocker, IReadOnlyList<FishingSpotInfo> Spots, CatchTimes Times, DateTimeOffset At)
 {
-    /// <summary>Time until it bites: zero when it bites now (or any time), null when not within the forecast.</summary>
-    public TimeSpan? OpensIn(DateTimeOffset now)
-    {
-        if (Windows == null) return TimeSpan.Zero;
-        foreach (var (start, end) in Windows)
-        {
-            if (end <= now) continue;
-            return start <= now ? TimeSpan.Zero : start - now;
-        }
-        return null;
-    }
+    /// <summary>When it can be caught, over those spots: null when it bites any time, empty when not within the forecast.</summary>
+    public IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)>? Windows => Times.Windows;
+
+    /// <summary>It only bites at some hours or in some weather: its own, or those of a link of its mooch chain.</summary>
+    public bool Restricted => Times.Restricted;
+
+    /// <summary>Time until it can be caught: zero when it bites now (or any time), null when not within the forecast.</summary>
+    public TimeSpan? OpensIn(DateTimeOffset now) => FishSchedule.OpensIn(Windows, now);
 
     /// <summary>Time left in the window it bites in now: zero when closed, <see cref="TimeSpan.MaxValue"/> for fish that always bite.</summary>
-    public TimeSpan OpenFor(DateTimeOffset now)
-    {
-        if (Windows == null) return TimeSpan.MaxValue;
-        foreach (var (start, end) in Windows)
-        {
-            if (end <= now) continue;
-            return start <= now ? end - now : TimeSpan.Zero;
-        }
-        return TimeSpan.Zero;
-    }
+    public TimeSpan OpenFor(DateTimeOffset now) => FishSchedule.OpenFor(Windows, now);
 }
+
+/// <summary>When a fish bites, in words (<see cref="PlanService.Rule"/>), and what that rule keeps to.</summary>
+/// <param name="Text">"18:00–06:00 ET in Fog or Rain after Clear Skies"; "" for a fish that bites any time.</param>
+/// <param name="Hours">It keeps Eorzea hours.</param>
+/// <param name="Weather">It keeps a weather (the one now, or the one before).</param>
+/// <param name="From">The links of the mooch chain whose hours or weather it names, the fish having none of its own.</param>
+internal sealed record BiteRuleText(string Text, bool Hours, bool Weather, IReadOnlyList<FishInfo> From);
 
 /// <summary>
 /// Owns the catalog (built in the background at load), the owned-item snapshot and the current plan.
@@ -334,10 +331,10 @@ internal sealed class PlanService : IDisposable
             spots = fish.Spots.Select(data.Spot).OfType<FishingSpotInfo>()
                 .Where(s => s.Spear == fish.Spear && FishAccess.OpenWorld(s.TerritoryId))
                 .OrderBy(s => s.Level).ThenBy(s => s.Id).ToList();
-        var windows = fish.Restricted
-            ? FishSchedule.Windows(fish, spots.Select(s => s.TerritoryId).Distinct().Select(data.WeatherTable), now, FishHorizon)
-            : null;
-        var outlook = new FishOutlook(fish, blocker, spots, windows, now);
+        // The weather is the spot zone's: one table per zone. A fish mooched from a fish that keeps hours or weather is
+        // only caught while that one bites, and the fish caught first for Fisher's Intuition have to bite at the same spot.
+        var tables = spots.Select(s => s.TerritoryId).Distinct().Select(data.WeatherTable);
+        var outlook = new FishOutlook(fish, blocker, spots, FishSchedule.Times(fish, data.Fish, tables, now, FishHorizon), now);
         outlooks[itemId] = outlook;
         return outlook;
     }
@@ -458,13 +455,26 @@ internal sealed class PlanService : IDisposable
         => new(id => Outlook(id) is { } o ? new FishTime(CatchSeconds(id), o.Windows) : null, DateTimeOffset.UtcNow);
 
     /// <summary>"18:00–06:00 ET in Fog or Rain after Clear Skies": when a fish bites; "" for fish that bite any time.</summary>
-    public static string BiteRule(FishInfo fish)
+    public static string BiteRule(FishInfo fish) => Rule(fish, Array.Empty<FishInfo>()).Text;
+
+    /// <summary>
+    /// When a fish can be caught, in words: its own hours and weather (<see cref="BiteRule"/>), and those it has none of
+    /// from <paramref name="links"/>, the links of its mooch chain that keep some (<see cref="CatchTimes.Links"/>): it's
+    /// only caught while they bite. Nautilus bites any time, but only mooched from a Fullmoon Sardine: "18:00–06:00 ET".
+    /// </summary>
+    public static BiteRuleText Rule(FishInfo fish, IReadOnlyList<FishInfo> links)
     {
+        // Each part from the fish itself, else from the first link that keeps one.
+        FishInfo? Of(Func<FishInfo, bool> keeps) => keeps(fish) ? fish : links.FirstOrDefault(keeps);
+        var hours = Of(f => f.Window is { On: > 0, Off: > 0 });
+        var weather = Of(f => f.Weather.Count > 0);
+        var previous = Of(f => f.PreviousWeather.Count > 0);
         var parts = new List<string>(3);
-        if (fish.Window is { On: > 0, Off: > 0 } w) parts.Add($"{EorzeaClock(w.Shift)}–{EorzeaClock(w.Shift + w.On)} ET");
-        if (fish.Weather.Count > 0) parts.Add("in " + WeatherNames(fish.Weather));
-        if (fish.PreviousWeather.Count > 0) parts.Add("after " + WeatherNames(fish.PreviousWeather));
-        return string.Join(" ", parts);
+        if (hours?.Window is { } w) parts.Add($"{EorzeaClock(w.Shift)}–{EorzeaClock(w.Shift + w.On)} ET");
+        if (weather != null) parts.Add("in " + WeatherNames(weather.Weather));
+        if (previous != null) parts.Add("after " + WeatherNames(previous.PreviousWeather));
+        var from = new[] { hours, weather, previous }.OfType<FishInfo>().Where(f => f.ItemId != fish.ItemId).DistinctBy(f => f.ItemId).ToList();
+        return new BiteRuleText(string.Join(" ", parts), hours != null, weather != null || previous != null, from);
     }
 
     /// <summary>Eorzea time of day for a moment given in real milliseconds since the epoch ("18:00").</summary>

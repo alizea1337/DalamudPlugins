@@ -63,8 +63,8 @@ public sealed record OrderEstimate(
     /// <summary>Part of <see cref="Fishing"/>: waiting for a fish to start biting with nothing else left to do.</summary>
     TimeSpan FishWait = default,
     /// <summary>
-    /// Fish with no window at all within the weather forecast, so a run can't catch them yet: their fishing is
-    /// counted, no wait for them.
+    /// Fish with no window at all within the weather forecast (their own, their mooch chain's, or that of a fish
+    /// caught first for Fisher's Intuition), so a run can't catch them yet: their fishing is counted, no wait for them.
     /// </summary>
     IReadOnlyList<uint>? FishBeyondForecast = null,
     /// <summary>
