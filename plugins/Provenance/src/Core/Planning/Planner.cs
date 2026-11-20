@@ -335,11 +335,16 @@ public static class Planner
             else if (src.Has(Obtain.Fish)) line.Supply = Supply.Fish;
             else if (vendorOk) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Drop)) line.Supply = Supply.Drop;
+            else if (src.Has(Obtain.Reduce)) line.Supply = Supply.Reduce;
             else
             {
                 line.Supply = Supply.Manual;
                 line.ManualReason = src.Has(Obtain.Vendor)
                     ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
+                    : src.Has(Obtain.ReduceElsewhere)
+                        ? (src.Places & ~Place.OpenWorld) != Place.None
+                            ? $"Only from aetherial reduction of collectables gathered in {Places.Describe(src.Places & ~Place.OpenWorld)}, which a run can't go to"
+                            : "Only from aetherial reduction of fish collectables, which a run doesn't do yet"
                     : (src.Places & ~Place.OpenWorld) != Place.None
                         ? ElsewhereReason(src)
                         : "No gathering, fishing, vendor or monster source";

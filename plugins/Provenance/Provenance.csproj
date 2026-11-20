@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.8.0.0</Version>
+    <Version>0.9.0.0</Version>
     <Author>alizea1337</Author>
     <Name>Provenance</Name>
     <Punchline>Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.</Punchline>
@@ -31,6 +31,7 @@
     </Content>
     <EmbeddedResource Include="Resources/vendors.json" LogicalName="Provenance.Resources.vendors.json" />
     <EmbeddedResource Include="Resources/mobs.json" LogicalName="Provenance.Resources.mobs.json" />
+    <EmbeddedResource Include="Resources/reduction.json" LogicalName="Provenance.Resources.reduction.json" />
     <EmbeddedResource Include="Resources/nodes.json" LogicalName="Provenance.Resources.nodes.json" />
     <EmbeddedResource Include="Resources/fish.json" LogicalName="Provenance.Resources.fish.json" />
     <EmbeddedResource Include="Resources/fishspots.json" LogicalName="Provenance.Resources.fishspots.json" />

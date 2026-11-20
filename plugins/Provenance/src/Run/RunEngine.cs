@@ -656,13 +656,19 @@ internal sealed class RunEngine : IDisposable
         Crafter.DeferMissing = true;
         Crafter.RequestPause();
 
-        Gather.Begin(targets, Left, NeededCollectables);
+        Gather.Begin(GathererTargets(targets), GathererLeft, NeededCollectables, ReduceNow);
+        // Reduced only from collectables the order wants as themselves: nothing would ever gather for it.
+        if (targets.FirstOrDefault(t => t.Supply == Supply.Reduce && !reduceFor.ContainsValue(t)) is { ItemId: not 0 } orphan)
+        {
+            Stop($"Can't get {ItemName(orphan.ItemId)}: the collectables it's reduced from are on the order as themselves. Get it yourself.", true, now: true);
+            return;
+        }
         Fish.Begin(targets.Where(t => t.Supply == Supply.Fish), Left, NeededCollectables, OnUsedAsBait);
         fishBegun = true;
         landActiveSince = DateTime.UtcNow;
         UpdateFishWaits();
         // Whoever has work now starts; the other waits paused until the run hands over.
-        var land = targets.Count(t => t.Supply != Supply.Fish);
+        var land = targets.Count(t => t.Supply != Supply.Fish && (t.Supply != Supply.Reduce || reduceFor.ContainsValue(t)));
         var fish = targets.Count - land;
         var (want, _) = WantedWorker();
         worker = want ?? (land > 0 ? Worker.Land : Worker.Fish);
@@ -1116,6 +1122,12 @@ internal sealed class RunEngine : IDisposable
     private void TickGathering()
     {
         if (Gather.Failure is { } failure) { Stop(failure, true, now: true); return; }
+        // The collectables for a reduction are in, but reducing them would take something else too: say what.
+        if (Gather.Waiting && Gather.ReduceBlocked is { } blocked && reduceFor.Values.Any(t => Left(t) > 0))
+        {
+            Stop($"Can't reduce the collectables for {string.Join(", ", reduceFor.Values.Where(t => Left(t) > 0).Select(t => ItemName(t.ItemId)).Distinct())}: {blocked}.", true, now: true);
+            return;
+        }
         if (Fish.Failure is { } fishFailure) { Stop(fishFailure, true, now: true); return; }
         if (workerError is { } error) { workerError = null; Stop(error, true, now: true); return; }
         if (fisherStuck)
@@ -1948,8 +1960,52 @@ internal sealed class RunEngine : IDisposable
     /// never drops below what the bags held before gathering, less what crafting took of it: only what this
     /// gathering stage brought in over the order's amount goes. Crystals always stay.
     /// </summary>
+    /// <summary>
+    /// For the gatherer, a reduction target is the collectables it comes from (source item → the target). A
+    /// collectable the order needs as itself is never gathered for reduction, and two targets don't share one.
+    /// </summary>
+    private readonly Dictionary<uint, GatherTarget> reduceFor = new();
+
+    /// <summary>The gatherer's targets: reduction targets swapped for the collectables they come from.</summary>
+    private List<GatherTarget> GathererTargets(List<GatherTarget> targets)
+    {
+        reduceFor.Clear();
+        var catalog = plugin.Plans.Catalog!;
+        var direct = targets.Where(t => t.Supply != Supply.Reduce).Select(t => t.ItemId).ToHashSet();
+        var list = new List<GatherTarget>();
+        foreach (var t in targets)
+        {
+            if (t.Supply != Supply.Reduce) { list.Add(t); continue; }
+            foreach (var source in catalog.ReducedFrom(t.ItemId))
+            {
+                if (direct.Contains(source) || reduceFor.ContainsKey(source)) continue;
+                reduceFor[source] = t;
+                var timed = !catalog.Sources(source).Has(Obtain.Gather);
+                list.Add(new GatherTarget(source, timed ? Supply.GatherTimed : Supply.Gather, t.Remaining, 0));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// How many more the gatherer should gather: for a reduction's collectables, what the target still lacks less
+    /// the collectables already waiting to be reduced (each gives at least one); otherwise the run's own count.
+    /// </summary>
+    private int GathererLeft(GatherTarget t)
+    {
+        if (!reduceFor.TryGetValue(t.ItemId, out var target)) return Left(t);
+        var lacking = Left(target);
+        if (lacking <= 0) return 0;
+        var waiting = reduceFor.Where(kv => kv.Value.ItemId == target.ItemId).Sum(kv => GameState.Collectables(kv.Key).Count);
+        return Math.Max(0, lacking - waiting);
+    }
+
+    /// <summary>Collectables to reduce now: those gathered for reduction targets that still lack items.</summary>
+    private IReadOnlySet<uint> ReduceNow() => reduceFor.Where(kv => Left(kv.Value) > 0).Select(kv => kv.Key).ToHashSet();
+
     private List<(uint ItemId, int Keep)> TargetExtras()
-        => Targets.Where(t => !Items.IsCrystal(t.ItemId) && (Settings.DiscardTimedExtras || !Windowed(t)))
+        // Reduction results stay: how many a reduction gives is up to chance, and they're worth keeping.
+        => Targets.Where(t => !Items.IsCrystal(t.ItemId) && t.Supply != Supply.Reduce && (Settings.DiscardTimedExtras || !Windowed(t)))
             .Select(t => (t.ItemId, Math.Max(0, (int)t.Target - consumed.GetValueOrDefault(t.ItemId)))).ToList();
 
     /// <summary>

@@ -104,12 +104,19 @@ internal sealed unsafe class Gatherer
     private readonly HashSet<uint> unreachable = new();
 
     private GameCatalog Catalog => plugin.Plans.Catalog!;
+    private Func<IReadOnlySet<uint>> reduceNow = () => new HashSet<uint>();
 
-    public void Begin(IEnumerable<GatherTarget> gatherTargets, Func<GatherTarget, int> leftOf, Func<IReadOnlySet<uint>> collectablesNeeded)
+    /// <summary>Why the collectables gathered for reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
+    public string? ReduceBlocked => upkeep.ReduceBlocked;
+
+    /// <param name="reduceNow">Collectables gathered to be reduced; reduced between nodes as soon as they're in the bags.</param>
+    public void Begin(IEnumerable<GatherTarget> gatherTargets, Func<GatherTarget, int> leftOf, Func<IReadOnlySet<uint>> collectablesNeeded,
+        Func<IReadOnlySet<uint>>? reduceNow = null)
     {
         targets = gatherTargets.Where(t => t.Supply != Supply.Fish).ToList();
         left = leftOf;
         neededCollectables = collectablesNeeded;
+        this.reduceNow = reduceNow ?? (() => new HashSet<uint>());
         visited.Clear();
         givenUp.Clear();
         giveUps.Clear();
@@ -209,7 +216,7 @@ internal sealed unsafe class Gatherer
 
     private void Choose()
     {
-        if (upkeep.Begin(neededCollectables())) { Go(Step.Upkeep); return; }
+        if (upkeep.Begin(neededCollectables(), reduceNow())) { Go(Step.Upkeep); return; }
         var now = DateTimeOffset.UtcNow;
         var here = Services.ClientState.TerritoryType;
         var unlocked = Teleporter.Unlocked();

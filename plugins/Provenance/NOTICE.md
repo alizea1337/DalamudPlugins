@@ -136,13 +136,14 @@ IMPLIED WARRANTIES ARE DISCLAIMED.
 Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds). Provenance runs it as a
 separate program to work out crafting rotations.
 
-## FFXIV Teamcraft (vendor positions, monster drops)
+## FFXIV Teamcraft (vendor positions, monster drops, aetherial reduction)
 
 `Resources/vendors.json` holds world positions of gil vendors, scrip exchanges and collectable
 appraisers, converted by `tools/VendorTable` from Teamcraft's NPC data. `Resources/mobs.json` holds
 which monsters drop which items and where they spawn, built by `tools/MobTable` from Teamcraft's
-`drop-sources.json` and `monsters.json`. Both from <https://github.com/ffxiv-teamcraft/ffxiv-teamcraft>,
-MIT License, Copyright (c) 2017 Flavien Normand.
+`drop-sources.json` and `monsters.json`. `Resources/reduction.json` holds which collectables reduce into
+which items, Teamcraft's `libs/data/src/lib/json/reduction.json` as it is. All from
+<https://github.com/ffxiv-teamcraft/ffxiv-teamcraft>, MIT License, Copyright (c) 2017 Flavien Normand.
 
 ## ECommons
 

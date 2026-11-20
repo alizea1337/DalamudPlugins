@@ -19,6 +19,15 @@ internal sealed unsafe class Upkeep
 {
     private const uint MateriaQuest = 66174;   // Forging the Spirit
     private const uint ReductionQuest = 67633; // the aetherial reduction unlock
+
+    /// <summary>Aetherial reduction is unlocked (its quest is done).</summary>
+    public static bool ReductionUnlocked => QuestDone(ReductionQuest);
+
+    /// <summary>
+    /// Why the collectables gathered for a reduction target can't be reduced right now (something else in the
+    /// bags would be reduced with them), or null. The game's reduction reduces every reducible collectable it lists.
+    /// </summary>
+    public string? ReduceBlocked { get; private set; }
     private const int ReduceBelowFreeSlots = 20;
 
     private enum Step { Idle, Materia, Reduce, Done }
@@ -81,7 +90,12 @@ internal sealed unsafe class Upkeep
     }
 
     /// <summary>Starts extraction or reduction when there is something to do. True when it started.</summary>
-    public bool Begin(IReadOnlySet<uint> neededCollectables)
+    /// <param name="reduceNow">
+    /// Collectables gathered to be reduced (for an item that only comes from aetherial reduction): reduced as soon
+    /// as they're in the bags, whatever the free slots, but never together with a collectable the order needs, nor
+    /// with spare ones while "Reduce spare collectables" is off.
+    /// </param>
+    public bool Begin(IReadOnlySet<uint> neededCollectables, IReadOnlySet<uint>? reduceNow = null)
     {
         if (Busy) return true;
         needed = neededCollectables;
@@ -96,6 +110,25 @@ internal sealed unsafe class Upkeep
             deadline = DateTime.UtcNow.AddSeconds(60);
             Status = "Extracting materia";
             return true;
+        }
+        ReduceBlocked = null;
+        if (reduceNow is { Count: > 0 } && QuestDone(ReductionQuest) && Reducible() is var r && r.Spare.Any(reduceNow.Contains))
+        {
+            var others = r.Spare.Where(id => !reduceNow.Contains(id)).Distinct().ToList();
+            var items = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>();
+            string Name(uint id) => items.GetRowOrDefault(id)?.Name.ExtractText() ?? "a collectable";
+            if (r.AnyNeeded)
+                ReduceBlocked = "the bags also hold a reducible collectable the order needs, and reduction would take it too";
+            else if (others.Count > 0 && !s.ReduceCollectables)
+                ReduceBlocked = $"the bags also hold other reducible collectables ({string.Join(", ", others.Take(3).Select(Name))}) and \"Reduce spare collectables\" is off; put them in a retainer or turn the setting on";
+            else
+            {
+                step = Step.Reduce;
+                deadline = DateTime.UtcNow.AddSeconds(120);
+                Status = "Aetherial reduction";
+                log($"Reducing {string.Join(", ", r.Spare.Where(reduceNow.Contains).Distinct().Select(Name))}.", false);
+                return true;
+            }
         }
         // The game's reduction window reduces whatever it lists, so it only runs while no needed reducible collectable is in the bags.
         if (s.ReduceCollectables && Data.Stock.FreeSlots() < ReduceBelowFreeSlots && QuestDone(ReductionQuest)

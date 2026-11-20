@@ -17,6 +17,8 @@ public enum Supply
     Manual,
     /// <summary>A master book or folklore tome to read before anything else (needed by a recipe or a node).</summary>
     Learn,
+    /// <summary>Aetherial reduction: gathered as a collectable (see <see cref="Catalog.IGameCatalog.ReducedFrom"/>), then reduced.</summary>
+    Reduce,
 }
 
 public sealed class PlannerOptions

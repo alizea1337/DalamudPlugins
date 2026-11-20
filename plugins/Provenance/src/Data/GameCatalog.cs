@@ -41,8 +41,11 @@ internal enum BrowseKind { Recipe, Gather, Fish }
 /// <see cref="Place.OpenWorld"/> when a run can get it there, else the special content it comes from
 /// (the Diadem, Cosmic Exploration and so on).
 /// </param>
+/// <param name="Reduced">Comes from aetherial reduction of a collectable this job gathers or fishes.</param>
+/// <param name="ReducedByRun">With <paramref name="Reduced"/>: a run gathers and reduces it (miners' and botanists' collectables).</param>
 internal sealed record BrowseEntry(BrowseKind Kind, uint RecipeId, uint ItemId, string Name, uint ClassJobId, int Level, int Stars, uint Icon,
-    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false, Place Places = Place.OpenWorld)
+    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false, Place Places = Place.OpenWorld,
+    bool Reduced = false, bool ReducedByRun = false)
 {
     public readonly string NameLower = Name.ToLowerInvariant();
     public string Key => Kind == BrowseKind.Recipe ? "r" + RecipeId : $"g{ClassJobId}_{ItemId}";
@@ -71,6 +74,12 @@ internal sealed class GameCatalog : IGameCatalog
     /// world, or the special content it only comes from.
     /// </summary>
     private readonly Dictionary<(uint Item, uint Job), (int Level, bool Normal, BrowseKind Kind, Place Places)> gatherBrowse = new();
+    /// <summary>Browser rows (item, job) that come from aetherial reduction, and whether a run can do it.</summary>
+    private readonly Dictionary<(uint Item, uint Job), bool> reducedBrowse = new();
+    /// <summary>Item → the gatherable collectables (open world) whose aetherial reduction gives it.</summary>
+    private readonly Dictionary<uint, List<uint>> reducedFrom = new();
+    /// <summary>Item → every collectable that reduces into it (fish and special content too), for the plan's text.</summary>
+    private readonly Dictionary<uint, List<uint>> reductionSources = new();
     public IReadOnlyList<MasterBook> MasterBooks { get; private set; } = Array.Empty<MasterBook>();
     public IReadOnlyList<FolkloreTome> FolkloreTomes { get; private set; } = Array.Empty<FolkloreTome>();
     /// <summary>Foods and medicines that raise crafting or gathering stats, highest item level first.</summary>
@@ -90,6 +99,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexGathering();
         c.IndexFishing();
         c.ApplyCosmic();
+        c.IndexReduction();
         c.IndexVendors();
         c.IndexBells();
         c.IndexDrops();
@@ -750,10 +760,90 @@ internal sealed class GameCatalog : IGameCatalog
             if (places == Place.None || items.GetRowOrDefault(itemId) is not { } item) continue;
             var name = item.Name.ExtractText();
             if (name.Length == 0) continue;
-            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places));
+            var reduced = reducedBrowse.TryGetValue((itemId, job), out var byRun);
+            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places, Reduced: reduced, ReducedByRun: reduced && byRun));
         }
         all.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         Browse = all;
+    }
+
+    public IReadOnlyList<uint> ReducedFrom(uint itemId) => reducedFrom.TryGetValue(itemId, out var l) ? l : Array.Empty<uint>();
+
+    /// <summary>Every collectable whose aetherial reduction gives the item (fish and special content included).</summary>
+    public IReadOnlyList<uint> ReductionSources(uint itemId) => reductionSources.TryGetValue(itemId, out var l) ? l : Array.Empty<uint>();
+
+    /// <summary>
+    /// Aetherial reduction (Resources/reduction.json, from Teamcraft): items that only come from reducing
+    /// collectables. A source counts only when it really is a reducible collectable (the data has a stray row of
+    /// crystals). Miners' and botanists' collectables in the open world make the item <see cref="Obtain.Reduce"/>;
+    /// fish collectables (a run doesn't reduce those yet) and special content make it <see cref="Obtain.ReduceElsewhere"/>.
+    /// Crystals are left out: they're gathered directly.
+    /// </summary>
+    private void IndexReduction()
+    {
+        var items = Services.Data.GetExcelSheet<Item>();
+        System.Text.Json.JsonDocument doc;
+        try
+        {
+            using var stream = typeof(GameCatalog).Assembly.GetManifestResourceStream("Provenance.Resources.reduction.json")
+                               ?? throw new System.IO.FileNotFoundException("reduction.json is missing from the plugin");
+            doc = System.Text.Json.JsonDocument.Parse(stream);
+        }
+        catch (Exception e)
+        {
+            Services.Log.Error(e, "Couldn't read the aetherial reduction data");
+            return;
+        }
+        using (doc)
+            foreach (var row in doc.RootElement.GetProperty("reduction").EnumerateObject())
+            {
+                if (!uint.TryParse(row.Name, out var result) || result < 20 || Items.IsCrystal(result)) continue;
+                if (items.GetRowOrDefault(result) is not { } resultItem || resultItem.Name.IsEmpty) continue;
+                var land = new List<uint>();
+                var all = new List<uint>();
+                var elsewhere = Place.None;
+                var fish = false;
+                foreach (var s in row.Value.EnumerateArray())
+                {
+                    var source = s.GetUInt32();
+                    if (items.GetRowOrDefault(source) is not { IsCollectable: true, AetherialReduce: > 0 }) continue;
+                    all.Add(source);
+                    var src = Sources(source);
+                    if (src.Has(Obtain.Gather | Obtain.GatherTimed))
+                    {
+                        land.Add(source);
+                        foreach (var p in GatherPoints(source).GroupBy(p => p.ClassJobId))
+                            NoteReduced(result, p.Key, p.Min(x => x.Level), p.Any(x => !x.Timed), BrowseKind.Gather, Place.OpenWorld, true);
+                    }
+                    else if (src.Has(Obtain.Fish))
+                    {
+                        fish = true;
+                        var level = Gather.Fish(source)?.Spots.Select(Gather.Spot).OfType<Core.Fishing.FishingSpotInfo>().Select(x => x.Level).DefaultIfEmpty(1).Min() ?? 1;
+                        NoteReduced(result, 18, level, true, BrowseKind.Fish, Place.OpenWorld, false);
+                    }
+                    else if (src.Has(Obtain.GatherElsewhere | Obtain.FishElsewhere))
+                    {
+                        var where = src.Places & ~Place.OpenWorld;
+                        elsewhere |= where;
+                        foreach (var p in GatherPoints(source).GroupBy(p => p.ClassJobId))
+                            NoteReduced(result, p.Key, p.Min(x => x.Level), true, BrowseKind.Gather, where, false);
+                    }
+                }
+                if (all.Count == 0) continue;
+                reductionSources[result] = all;
+                if (land.Count > 0)
+                {
+                    reducedFrom[result] = land;
+                    Add(result, Obtain.Reduce, Place.OpenWorld);
+                }
+                else if (fish || elsewhere != Place.None) Add(result, Obtain.ReduceElsewhere, elsewhere);
+            }
+    }
+
+    private void NoteReduced(uint item, uint job, int level, bool normal, BrowseKind kind, Place place, bool byRun)
+    {
+        NoteBrowse(item, job, level, normal, kind, place);
+        reducedBrowse[(item, job)] = reducedBrowse.GetValueOrDefault((item, job)) || byRun;
     }
 
     private void Add(uint itemId, Obtain flag, Place place = Place.None)

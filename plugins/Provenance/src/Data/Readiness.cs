@@ -62,6 +62,26 @@ internal static class Readiness
 
         // Gathering and fishing: job level and the Perception the item asks for; fish get their own checks.
         int Level(uint job) => PlanService.JobLevel(job);
+
+        // Items only from aetherial reduction: reduction unlocked, and one of the collectables within reach.
+        foreach (var line in plan.Lines.Where(l => l.Supply == Supply.Reduce && l.Remaining > 0))
+        {
+            if (Services.ClientState.IsLoggedIn && !Run.Gathering.Upkeep.ReductionUnlocked)
+            {
+                issues.Add(new ReadinessIssue(line.ItemId, 0, "Comes from aetherial reduction, which this character hasn't unlocked yet: it comes with the quest \"No Longer a Collectable\" in Mor Dhona (a gatherer at level 56).", true));
+                continue;
+            }
+            var sources = catalog.ReducedFrom(line.ItemId);
+            var known = sources.Select(id => (Id: id, Needs: catalog.GatherNeedsFor(id, Level)))
+                .Where(x => x.Needs.HasValue).Select(x => (x.Id, Needs: x.Needs!.Value)).ToList();
+            if (known.Count > 0 && known.All(x => Level(x.Needs.ClassJobId) < x.Needs.Level))
+            {
+                var (id, needs) = known.OrderBy(x => x.Needs.Level).First();
+                issues.Add(new ReadinessIssue(line.ItemId, needs.ClassJobId,
+                    $"Comes from reducing {catalog.ItemName(id)}, which needs {ClassJobs.Abbreviation(needs.ClassJobId)} level {needs.Level}; yours is {Level(needs.ClassJobId)}.", true));
+            }
+        }
+
         var fishing = false;
         foreach (var line in plan.Lines.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed or Supply.Fish && l.Remaining > 0))
         {

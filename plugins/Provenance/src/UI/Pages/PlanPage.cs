@@ -109,6 +109,8 @@ internal sealed class PlanPage : Page
             materials.Where(l => l.Supply is Supply.Gather or Supply.GatherTimed), catalog, null);
         Section("To fish", FontAwesomeIcon.Fish, Palette.SupplyColor(Supply.Fish),
             materials.Where(l => l.Supply == Supply.Fish), catalog, null);
+        Section("To reduce", FontAwesomeIcon.Magic, Palette.SupplyColor(Supply.Reduce),
+            materials.Where(l => l.Supply == Supply.Reduce), catalog, "gathered as collectables, then reduced");
         Section("To buy", FontAwesomeIcon.Store, Palette.SupplyColor(Supply.Vendor),
             materials.Where(l => l.Supply == Supply.Vendor), catalog, plan.VendorGil > 0 ? $"about {plan.VendorGil:N0} gil" : null);
         Section("Monster drops", FontAwesomeIcon.Paw, Palette.SupplyColor(Supply.Drop),
@@ -650,6 +652,15 @@ internal sealed class PlanPage : Page
                 chips.Add(new ChipText(VendorPlace(line.ItemId, catalog) is { Length: > 0 } place ? new[] { price + place, price } : new[] { price },
                     Palette.SupplyColor(Supply.Vendor)));
                 break;
+            case Supply.Reduce:
+            {
+                // The collectables the run gathers for it (the gatherer picks the node that suits best).
+                var from = catalog.ReducedFrom(line.ItemId);
+                var names = from.Take(2).Select(catalog.ItemName).ToList();
+                var full = "from " + string.Join(" or ", names) + (from.Count > 2 ? $" (or {from.Count - 2} more)" : "");
+                chips.Add(new ChipText(new[] { full, "reduce " + names.FirstOrDefault(), "reduce" }, Palette.SupplyColor(Supply.Reduce), FontAwesomeIcon.Magic));
+                break;
+            }
             case Supply.Drop:
                 chips.Add(catalog.Mobs.For(line.ItemId).FirstOrDefault() is { } mob
                     ? new ChipText(new[] { $"{mob.Name}, {mob.PlaceName} (level {mob.Level})", mob.Name }, Palette.SupplyColor(Supply.Drop))

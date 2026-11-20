@@ -79,6 +79,13 @@ public enum Obtain
     /// <summary>Crafted only in content a run can't go to (Cosmic Exploration missions).</summary>
     CraftElsewhere = 1 << 7,
     Elsewhere = GatherElsewhere | FishElsewhere | CraftElsewhere,
+    /// <summary>Aetherial reduction of a collectable a run can gather (<see cref="IGameCatalog.ReducedFrom"/> lists them).</summary>
+    Reduce = 1 << 8,
+    /// <summary>
+    /// Only from aetherial reduction of collectables a run can't get: fish collectables (not done by a run yet), or
+    /// ones gathered in content a run can't go to (<see cref="ItemSources.Places"/> says which).
+    /// </summary>
+    ReduceElsewhere = 1 << 9,
 }
 
 /// <summary>Where an item is gathered, fished or crafted. A run only goes to the open world.</summary>
@@ -136,6 +143,11 @@ public interface IGameCatalog
     ItemSources Sources(uint itemId);
     /// <summary>Exact item-name lookup in the client language, ignoring case and the HQ glyph.</summary>
     bool TryFindItem(string name, out uint itemId);
+    /// <summary>
+    /// The collectables a run can gather (miners' and botanists' nodes in the open world) whose aetherial reduction
+    /// gives this item; empty when there are none.
+    /// </summary>
+    IReadOnlyList<uint> ReducedFrom(uint itemId);
 }
 
 public static class Items

@@ -15,7 +15,8 @@ public readonly record struct GatherTarget(uint ItemId, Supply Supply, int Remai
 
 public static class GatherTargets
 {
-    public static bool IsGatherSupply(Supply s) => s is Supply.Gather or Supply.GatherTimed or Supply.Fish;
+    /// <summary>Gathered by the run: nodes, fishing, and collectables gathered to be reduced.</summary>
+    public static bool IsGatherSupply(Supply s) => s is Supply.Gather or Supply.GatherTimed or Supply.Fish or Supply.Reduce;
 
     /// <param name="bagCount">Count of the item in the main bags as GatherBuddy Reborn counts it.</param>
     public static List<GatherTarget> Build(Plan plan, Func<uint, int> bagCount)

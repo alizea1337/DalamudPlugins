@@ -433,6 +433,8 @@ internal sealed class RunPage : Page
         var gatherParts = new List<string>();
         if (land > 0) gatherParts.Add(land == 1 ? "1 material to gather" : $"{land} materials to gather");
         if (fish > 0) gatherParts.Add(fish == 1 ? "1 kind of fish to catch" : $"{fish} kinds of fish to catch");
+        var reduce = plan.Count(Supply.Reduce);
+        if (reduce > 0) gatherParts.Add(reduce == 1 ? "1 material from aetherial reduction" : $"{reduce} materials from aetherial reduction");
         var gatherDetail = gatherParts.Count == 0 ? "Nothing to gather." : string.Join(" and ", gatherParts) + ".";
         if (fish > 0) gatherDetail += " Fish are caught with your Fisher gearset and the bait from the plan.";
         var crafts = plan.CraftSteps.Sum(l => l.Crafts);

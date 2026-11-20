@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.9.0 (testing)
+
+Books on the order, and items that only come from aetherial reduction.
+
+- Character page: every master book and folklore tome row has a round add button, and each section
+  has "Add all missing". They put the missing books on the order (joining whatever is already on it).
+  Books a run can't get by itself are left out, and a note under the heading says which and why: not
+  sold at an exchange, sold where you can't teleport yet, or sold for something a run can't earn.
+- Books on the order are read, not made: the run buys each at a scrip exchange, earning the scrips
+  with collectables when you're short, and reads it. One copy each, and books you've already learned
+  are skipped.
+- Scrips stop at 4,000, so a big batch of books is earned and bought in turns: the run buys every book
+  the scrips at hand pay for (cheapest first), earns up to the cap with collectables, buys again, and
+  so on until every book is in. Before, each book that the scrips could pay for on its own counted as
+  bought, even when all of them together cost more.
+- Aetherial reduction: items that only come from reducing collectables (the aethersands and others,
+  from Teamcraft's reduction data) are now planned and fetched. The run gathers the miner's or
+  botanist's collectables they come from (with the collectable rotation, for the best yield), reduces
+  them between nodes, and keeps going until the amount is in. The extras are kept.
+- Reduction only runs when it's safe: never while a collectable the order needs is in the bags, and,
+  with "Reduce spare collectables" off, never while other reducible collectables are there (the
+  game's reduction takes them all). Otherwise the run stops and says what's in the way.
+- Items only reduced from fish collectables, or from collectables of the Diadem, are listed under
+  "Get these yourself" with the reason; a run doesn't fish collectables for reduction yet.
+- Browse lists the items that come from reduction under the job that gathers their collectables,
+  tagged "aetherial reduction"; the tag is amber when a run can't do it.
+- Plan page: a "To reduce" section with the collectables each item comes from. The character check
+  blocks reduction until its quest ("No Longer a Collectable") is done and warns when the
+  collectables are above your gatherer's level.
+
 ## 0.8.0
 
 Fishing and spearfishing without AutoHook.

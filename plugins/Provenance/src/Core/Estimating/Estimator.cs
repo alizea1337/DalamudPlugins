@@ -88,6 +88,9 @@ public static class Estimator
 {
     /// <summary>Typical rotation lengths when Raphael hasn't answered yet.</summary>
     public const int TypicalStepsHq = 14;
+
+    /// <summary>Items one collectable gives in aetherial reduction, on average at a good collectability (a guess; it varies).</summary>
+    public const double ReduceYield = 1.5;
     public const int TypicalStepsFast = 6;
 
     /// <param name="steps">Rotation length for a recipe (and whether HQ is wanted), or null when unknown.</param>
@@ -105,7 +108,11 @@ public static class Estimator
         var fished = plan.Lines.Where(l => l.Supply == Supply.Fish).Sum(l => Math.Max(0, l.Remaining));
         var collectLines = gatherLines.Where(l => collectable(l.ItemId)).ToList();
         var gpWait = CollectableGp(collectLines, t, collectables);
-        var collectTime = TimeSpan.FromSeconds(collectLines.Sum(l => Visits(l.Remaining, t)) * t.SecondsPerCollectableVisit);
+        // Items that only come from aetherial reduction: collectables gathered and reduced (one gives about
+        // ReduceYield of them at a good collectability).
+        var reduceVisits = plan.Lines.Where(l => l.Supply == Supply.Reduce && l.Remaining > 0)
+            .Sum(l => Visits((int)Math.Ceiling(l.Remaining / ReduceYield), t));
+        var collectTime = TimeSpan.FromSeconds((collectLines.Sum(l => Visits(l.Remaining, t)) + reduceVisits) * t.SecondsPerCollectableVisit);
         TimeSpan gathering, fishing;
         var fishWait = TimeSpan.Zero;
         IReadOnlyList<uint>? beyond = null, tight = null;

@@ -233,6 +233,24 @@ internal sealed class BrowsePage : Page
                     }
                 }
                 break;
+            case BrowseKind.Gather or BrowseKind.Fish when e.Reduced:
+            {
+                ImGui.SameLine(0, 6 * s);
+                var cat = Plans.Catalog!;
+                var from = cat.ReductionSources(e.ItemId);
+                var names = string.Join(", ", from.Take(4).Select(cat.ItemName)) + (from.Count > 4 ? $" and {from.Count - 4} more" : "");
+                if (e.ReducedByRun)
+                {
+                    Ui.Chip("aetherial reduction", Palette.SupplyColor(Core.Planning.Supply.Reduce), FontAwesomeIcon.Magic);
+                    Ui.Tooltip($"Comes from reducing collectables: {names}. A run gathers them as collectables and reduces them.");
+                }
+                else
+                {
+                    Ui.Chip("aetherial reduction", Palette.Warn, FontAwesomeIcon.Magic);
+                    Ui.Tooltip($"Comes from reducing collectables: {names}. A run can't do these yet (fish collectables, or content it can't go to): added to the order, it's listed under things to get yourself.");
+                }
+                break;
+            }
             case BrowseKind.Gather:
                 ImGui.SameLine(0, 6 * s);
                 Ui.Chip(e.TimedOnly ? "timed node" : "gather", e.TimedOnly ? Palette.SupplyColor(Core.Planning.Supply.GatherTimed) : Palette.SupplyColor(Core.Planning.Supply.Gather));
