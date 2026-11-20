@@ -20,12 +20,18 @@ public static class Planner
 
     public static Plan Build(Order order, IGameCatalog catalog, IReadOnlyDictionary<uint, int> owned, PlannerOptions options)
     {
-        var targets = order.Lines.Where(l => l.Quantity > 0).ToList();
-        if (targets.Count == 0) return Plan.Empty;
+        var ordered = order.Lines.Where(l => l.Quantity > 0).ToList();
+        // Master books and folklore tomes on the order are read, not made: they become book lines below (one
+        // copy each, nothing when already learned) and stay out of the material tree.
+        var orderedBooks = ordered.Where(l => options.BookLearned?.Invoke(l.ItemId) is not null).ToList();
+        var targets = ordered.Except(orderedBooks).ToList();
+        var booksToLearn = orderedBooks.Where(l => options.BookLearned!(l.ItemId) == false).Select(l => l.ItemId).Distinct().ToList();
+        if (targets.Count == 0 && booksToLearn.Count == 0) return Plan.Empty;
 
         var lines = new Dictionary<uint, PlanLine>();
         var postOrder = new List<uint>();
         var learn = new Dictionary<uint, List<uint>>(); // book or tome item -> items that need it
+        foreach (var book in booksToLearn) learn[book] = new List<uint>();
         var state = new Dictionary<uint, VisitState>();
 
         // Bait: what each fish is cast with, the fish each bait is for (in the order they were met), and the
@@ -63,6 +69,8 @@ public static class Planner
 
         var craftSteps = postOrder.Select(id => lines[id]).Where(l => l.Supply == Supply.Craft && l.Crafts > 0).ToList();
         var tree = targets.Select(t => BuildTree(t.ItemId, t.Quantity, 0)).ToList();
+        // Ordered books show up in the tree as themselves, so the plan lists them with the rest of the order.
+        tree.AddRange(booksToLearn.Select(b => new PlanTreeNode { ItemId = b, Quantity = 1, Supply = Supply.Learn }));
 
         // Materials below an intermediate that stock fully covers are not needed at all (bait still missing is).
         foreach (var id in lines.Where(kv => kv.Value.Needed == 0 && !kv.Value.IsTarget && kv.Value.MissingBait == 0).Select(kv => kv.Key).ToList())
@@ -77,16 +85,17 @@ public static class Planner
             stand.NeededFor = fishMet.Where(f => (direct?.Contains(f) == true || spilled.Contains(f)) && StillFished(f)).ToList();
         }
 
-        // Books and tomes to read first, but only for what is still made or gathered.
+        // Books and tomes to read first, but only for what is still made or gathered (or the book is on the order).
         foreach (var (book, users) in learn)
         {
             var still = users.Where(u => lines.TryGetValue(u, out var l) && l.Remaining > 0).Distinct().ToList();
-            if (still.Count == 0) continue;
+            if (still.Count == 0 && !booksToLearn.Contains(book)) continue;
             var have = Math.Min(1, Math.Max(0, owned.GetValueOrDefault(book)));
             var purchase = have > 0 ? null : options.BuyBook?.Invoke(book);
             lines[book] = new PlanLine
             {
                 ItemId = book, Supply = Supply.Learn, Needed = 1, FromStock = have, NeededFor = still, Purchase = purchase,
+                IsTarget = booksToLearn.Contains(book),
                 ManualReason = have > 0 ? null : purchase?.Text ?? "Not learned yet and not in your bags",
             };
         }

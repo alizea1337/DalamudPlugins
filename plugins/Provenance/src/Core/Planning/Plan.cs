@@ -49,6 +49,13 @@ public sealed class PlannerOptions
     public System.Func<uint, BookPurchase?>? BuyBook { get; init; }
 
     /// <summary>
+    /// For an item put on the order: null when it isn't a master book or folklore tome, otherwise whether the
+    /// character has learned it. An ordered book is learned (bought first when needed), never made or gathered;
+    /// one already learned needs nothing. Null: books on the order are planned like any other item.
+    /// </summary>
+    public System.Func<uint, bool?>? BookLearned { get; init; }
+
+    /// <summary>
     /// The bait a fish uses up per catch, by fish item id: its own bait (for a mooched fish, the tackle the
     /// chain starts with) and the bait of the fish caught first for Fisher's Intuition. Null or empty: no
     /// bait (spearfishing, or nothing known). Bait becomes plan lines under the fish (never crafted).

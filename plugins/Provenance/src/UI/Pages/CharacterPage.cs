@@ -18,6 +18,11 @@ internal sealed class CharacterPage : Page
 {
     private const float TileHeight = 156f;
     private readonly HashSet<uint> expanded = new();
+    /// <summary>What the last "add to order" did, per book section, shown under its heading for a while.</summary>
+    private readonly Dictionary<string, (string Text, bool Problem, DateTime At)> addNotes = new();
+    private static readonly TimeSpan NoteFor = TimeSpan.FromSeconds(30);
+    /// <summary>Size of the round add button at the end of each book row (before scaling).</summary>
+    private const float AddButton = 28;
     private bool checking;
     private string? error;
 
@@ -101,21 +106,106 @@ internal sealed class CharacterPage : Page
         Grid(ClassJobs.Gatherers, 3, p);
 
         if (catalog == null) return;
-        SectionTitle("Master books");
+        var missingBooks = ClassJobs.Crafters.ToDictionary(job => job, job =>
+            catalog.MasterBooks.Where(b => b.Job.HasValue && (uint)b.Job.Value + 8 == job && !p.MasterBooks.Contains(b.Id)).Select(b => (b.ItemId, b.Name)).ToList());
+        BookSectionTitle("Master books", "master", missingBooks.Values.SelectMany(l => l.Select(b => b.ItemId)).ToList());
         Ui.Wrapped("Master recipes can only be crafted once their book is learned.", Palette.TextMuted);
+        AddNote("master");
         foreach (var job in ClassJobs.Crafters)
         {
             var books = catalog.MasterBooks.Where(b => b.Job.HasValue && (uint)b.Job.Value + 8 == job).ToList();
-            BookRow(job, books.Count, books.Count(b => p.MasterBooks.Contains(b.Id)), books.Where(b => !p.MasterBooks.Contains(b.Id)).Select(b => b.Name).ToList());
+            BookRow(job, books.Count, books.Count - missingBooks[job].Count, missingBooks[job], "master");
         }
         ImGui.Dummy(new Vector2(0, 6 * s));
-        SectionTitle("Folklore tomes");
+        var missingTomes = ClassJobs.Gatherers.ToDictionary(job => job, job =>
+            catalog.FolkloreTomes.Where(t => t.ClassJobId == job && !p.FolkloreTomes.Contains(t.ItemId)).Select(t => (t.ItemId, t.Name)).ToList());
+        BookSectionTitle("Folklore tomes", "folklore", missingTomes.Values.SelectMany(l => l.Select(t => t.ItemId)).ToList());
         Ui.Wrapped("Legendary nodes and some fishing holes only appear once their tome is read.", Palette.TextMuted);
+        AddNote("folklore");
         foreach (var job in ClassJobs.Gatherers)
         {
             var tomes = catalog.FolkloreTomes.Where(t => t.ClassJobId == job).ToList();
-            BookRow(job, tomes.Count, tomes.Count(t => p.FolkloreTomes.Contains(t.ItemId)), tomes.Where(t => !p.FolkloreTomes.Contains(t.ItemId)).Select(t => t.Name).ToList());
+            BookRow(job, tomes.Count, tomes.Count - missingTomes[job].Count, missingTomes[job], "folklore");
         }
+    }
+
+    /// <summary>The order lines that are books (by item id), so rows can say what's already on it.</summary>
+    private HashSet<uint> Ordered() => Config.Order.Lines.Where(l => l.Quantity > 0).Select(l => l.ItemId).ToHashSet();
+
+    /// <summary>
+    /// A book section's heading with a quiet "Add all missing" on the right, lined up with the rows' round add
+    /// buttons (the end of the link text against the right edge of their icons).
+    /// </summary>
+    private void BookSectionTitle(string title, string section, IReadOnlyList<uint> missing)
+    {
+        var s = Ui.S;
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var start = ImGui.GetCursorScreenPos();
+        var width = ImGui.GetContentRegionAvail().X;
+        float titleH;
+        using (Ui.F.Strong.Push())
+        {
+            Ui.Text(title);
+            titleH = ImGui.GetTextLineHeight();
+        }
+        var ordered = Ordered();
+        var toAdd = missing.Where(id => !ordered.Contains(id)).ToList();
+        if (toAdd.Count == 0) return;
+        var after = ImGui.GetCursorScreenPos();
+        const string label = "Add all missing";
+        var size = Ui.LinkButtonSize(label, FontAwesomeIcon.Plus);
+        var iconInset = (AddButton * s - Ui.IconSize(FontAwesomeIcon.Plus).X) / 2;
+        // The link's text ends 10 px inside its box: line that end up with the right edge of the rows' plus icons.
+        var right = start.X + width - iconInset + 10 * s;
+        ImGui.SetCursorScreenPos(new Vector2(right - size.X, start.Y + (titleH - size.Y) / 2));
+        if (Ui.LinkButton(label, Palette.Accent, FontAwesomeIcon.Plus,
+                $"Puts the {toAdd.Count} missing {(section == "master" ? "master books" : "folklore tomes")} on the order. The run earns the scrips with collectables, buys them and reads them.",
+                "##addall" + section))
+            AddBooks(toAdd, section);
+        ImGui.SetCursorScreenPos(after);
+    }
+
+    /// <summary>The last add's result under a section's heading, for half a minute.</summary>
+    private void AddNote(string section)
+    {
+        if (!addNotes.TryGetValue(section, out var note)) return;
+        if (DateTime.UtcNow - note.At > NoteFor) { addNotes.Remove(section); return; }
+        ImGui.Dummy(new Vector2(0, 2 * Ui.S));
+        Ui.Wrapped(note.Text, note.Problem ? Palette.Warn : Palette.Accent);
+    }
+
+    /// <summary>
+    /// Puts books on the order (one each), leaving out those already on it and those a run can't get by itself,
+    /// and says which were left out and why.
+    /// </summary>
+    private void AddBooks(IReadOnlyList<uint> items, string section)
+    {
+        var catalog = Plans.Catalog;
+        if (catalog == null) return;
+        var ordered = Ordered();
+        var added = new List<uint>();
+        var skipped = new List<string>();
+        foreach (var id in items.Distinct())
+        {
+            if (ordered.Contains(id)) continue;
+            if (Plans.BookBlocker(id) is { } why) { skipped.Add($"{catalog.ItemName(id)} ({why})"); continue; }
+            Config.Order.Add(id, 1, 0, false);
+            added.Add(id);
+        }
+        if (added.Count > 0)
+        {
+            Config.Save();
+            Plans.Invalidate();
+        }
+        var text = added.Count switch
+        {
+            0 => "Nothing added.",
+            1 => $"Added {catalog.ItemName(added[0])} to the order.",
+            _ => $"Added {added.Count} books to the order.",
+        };
+        if (skipped.Count > 0)
+            text += $" Left out {skipped.Count}, which a run can't get: " + string.Join("; ", skipped.Take(6)) + (skipped.Count > 6 ? $"; and {skipped.Count - 6} more." : ".");
+        addNotes[section] = (text, added.Count == 0 || skipped.Count > 0, DateTime.UtcNow);
     }
 
     private static void SectionTitle(string text)
@@ -224,15 +314,21 @@ internal sealed class CharacterPage : Page
         }
     }
 
-    private void BookRow(uint job, int total, int have, List<string> missing)
+    private void BookRow(uint job, int total, int have, List<(uint ItemId, string Name)> missing, string section)
     {
         if (total == 0) return;
         var s = Ui.S;
         var start = ImGui.GetCursorScreenPos();
-        var width = ImGui.GetContentRegionAvail().X;
+        var fullWidth = ImGui.GetContentRegionAvail().X;
+        // A column at the right end for the round add button; the row's own click (show the missing names)
+        // stops short of it, so the two never overlap.
+        var buttonCol = (AddButton + 10) * s;
+        var width = fullWidth - buttonCol;
         var h = 32 * s;
         var isOpen = expanded.Contains(job);
         var canOpen = missing.Count > 0;
+        var ordered = Ordered();
+        var toAdd = missing.Where(b => !ordered.Contains(b.ItemId)).Select(b => b.ItemId).ToList();
 
         if (ImGui.InvisibleButton("##books" + job, new Vector2(width, h)) && canOpen)
         {
@@ -255,18 +351,29 @@ internal sealed class CharacterPage : Page
         Ui.Bar("##bookbar" + job, total == 0 ? 0 : have / (float)total, have == total ? Palette.Accent : color, MathF.Min(260 * s, width - 324 * s));
         if (canOpen)
         {
-            var hint = isOpen ? "hide missing" : $"{missing.Count} missing";
+            var onOrder = toAdd.Count == 0;
+            var hint = isOpen ? "hide missing" : onOrder ? $"{missing.Count} missing, on the order" : $"{missing.Count} missing";
             using (Ui.F.Small.Push())
             {
                 var hw = ImGui.CalcTextSize(hint).X;
-                dl.AddText(new Vector2(start.X + width - hw - 10 * s, start.Y + (h - ImGui.GetTextLineHeight()) / 2), Palette.U32(hovered ? Palette.Text : Palette.TextMuted), hint);
+                var hintColor = hovered ? Palette.Text : onOrder && !isOpen ? Palette.Accent : Palette.TextMuted;
+                dl.AddText(new Vector2(start.X + width - hw - 10 * s, start.Y + (h - ImGui.GetTextLineHeight()) / 2), Palette.U32(hintColor), hint);
             }
+        }
+        if (toAdd.Count > 0)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(start.X + fullWidth - AddButton * s, start.Y + (h - AddButton * s) / 2));
+            var what = section == "master" ? (toAdd.Count == 1 ? "master book" : "master books") : (toAdd.Count == 1 ? "folklore tome" : "folklore tomes");
+            if (Ui.IconButton("##addbooks" + job, FontAwesomeIcon.Plus,
+                    $"Put the {toAdd.Count} missing {ClassJobs.Abbreviation(job)} {what} on the order: the run earns the scrips, buys them and reads them.",
+                    Ui.Kind.Ghost, AddButton))
+                AddBooks(toAdd, section);
         }
         ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h + 2 * s));
         if (isOpen && canOpen)
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 88 * s);
-            Ui.Wrapped(string.Join(", ", missing), Palette.TextMuted, width - 80 * s);
+            Ui.Wrapped(string.Join(", ", missing.Select(b => ordered.Contains(b.ItemId) ? b.Name + " (on the order)" : b.Name)), Palette.TextMuted, width - 80 * s);
             ImGui.Dummy(new Vector2(0, 2 * s));
         }
     }

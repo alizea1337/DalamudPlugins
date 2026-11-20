@@ -120,6 +120,17 @@ internal sealed class PlanService : IDisposable
     public Func<bool>? KeepScripTasks { get; set; }
     /// <summary>Scrips the scrip plan is expected to bring in, by scrip item.</summary>
     private readonly Dictionary<uint, Core.Scrips.ScripTask> earning = new();
+    /// <summary>Which books the scrips at hand buy now, and what the next round of collectables earns for the rest.</summary>
+    private Core.Scrips.BookBudget bookBudget = Core.Scrips.BookBudget.None;
+
+    /// <summary>The run buys this book now: the scrips at hand pay for it (after the cheaper books in the plan).</summary>
+    public bool BuyNow(uint itemId) => bookBudget.BuyNow.Contains(itemId);
+
+    /// <summary>Books still waiting for scrips from a later round of collectables.</summary>
+    public int BooksForLater => bookBudget.Later.Values.Sum();
+
+    /// <summary>The books cost more of a scrip than the cap lets a character hold, so the run earns and buys in turns.</summary>
+    public bool SeveralScripRounds { get; private set; }
     /// <summary>How long the order takes, refreshed every second.</summary>
     public OrderEstimate Estimate { get; private set; } = OrderEstimate.Empty;
     public IReadOnlyDictionary<uint, int> Owned => owned;
@@ -186,23 +197,24 @@ internal sealed class PlanService : IDisposable
         ScripTasks = Array.Empty<Core.Scrips.ScripTask>();
         ScripPlan = Plan.Empty;
         var tasks = held.ToList();
+        // The books still to buy, at their best exchange: the scrips at hand go to the cheapest first, and the
+        // next round of collectables earns for the rest, up to the scrip cap (a big batch takes several rounds).
+        var books = Plan.Learn.Where(l => l.Remaining > 0)
+            .Select(l => BookOffer(l.ItemId) is { } o ? new Core.Scrips.BookCost(l.ItemId, o.CurrencyItemId, o.Cost) : (Core.Scrips.BookCost?)null)
+            .OfType<Core.Scrips.BookCost>().ToList();
+        bookBudget = Services.ClientState.IsLoggedIn
+            ? Core.Scrips.BookBudget.Allocate(books, GameState.CurrencyCount, ScripCap)
+            : Core.Scrips.BookBudget.None;
+        if (tasks.Count == 0 && c.Run.EarnScrips && Services.ClientState.IsLoggedIn)
+            foreach (var (currency, missing) in bookBudget.ToEarn)
+                if (EasiestEarning(currency, missing, catalog) is { } task) tasks.Add(task);
+        foreach (var task in tasks) earning[task.Option.Currency] = task;
+        SeveralScripRounds = earning.Keys.Any(cur => BooksCost(cur) > ScripCap(cur));
         if (tasks.Count == 0)
         {
-            if (!c.Run.EarnScrips || !Services.ClientState.IsLoggedIn) return;
-
-            // Scrips the books still need, per scrip, beyond what you have.
-            var cost = new Dictionary<uint, int>();
-            foreach (var line in Plan.Learn.Where(l => l.Remaining > 0 && !l.WillBuy))
-                if (BookOffer(line.ItemId) is { } offer)
-                    cost[offer.CurrencyItemId] = cost.GetValueOrDefault(offer.CurrencyItemId) + offer.Cost;
-            foreach (var (currency, total) in cost)
-            {
-                var missing = total - GameState.CurrencyCount(currency);
-                if (EasiestEarning(currency, missing, catalog) is { } task) tasks.Add(task);
-            }
+            Plan = BuildPlan(c.Order, catalog); // the books now know which the scrips at hand buy
+            return;
         }
-        foreach (var task in tasks) earning[task.Option.Currency] = task;
-        if (tasks.Count == 0) return;
         ScripTasks = tasks;
         var scripOrder = new Core.Orders.Order { Name = "Scrips" };
         foreach (var t in tasks) scripOrder.Lines.Add(new Core.Orders.OrderLine(t.Option.ItemId, t.Count, 0, false));
@@ -280,6 +292,7 @@ internal sealed class PlanService : IDisposable
             MissingBook = r => MissingBook(r, catalog),
             HasTome = HasTome,
             BuyBook = BuyBook,
+            BookLearned = id => BookLearned(id, catalog),
             FishBaits = buyBait ? BaitPerCatch : null,
             SpareBait = Math.Max(0, c.Fishing.SpareBait),
             FallbackBait = buyBait ? LureStandIn(catalog, c) : 0,
@@ -519,6 +532,26 @@ internal sealed class PlanService : IDisposable
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// Why a run can't get this master book or folklore tome by itself (not sold at an exchange it can reach, or
+    /// sold for something it can't earn), or null when it can: bought with what you have, or with scrips it earns.
+    /// </summary>
+    public string? BookBlocker(uint itemId)
+    {
+        var catalog = Catalog;
+        if (catalog == null) return "the game data isn't read yet";
+        var all = catalog.Exchanges.For(itemId);
+        if (all.Count == 0) return "not sold at a scrip or token exchange";
+        if (BookOffer(itemId) is not { } offer)
+            return $"sold by {all[0].Who} in {all[0].PlaceName}, which you can't teleport to yet";
+        if (GameState.CurrencyCount(offer.CurrencyItemId) >= offer.Cost) return null;
+        if (!catalog.Collectables.Any(c => c.Currency == offer.CurrencyItemId))
+            return $"sold for {offer.Cost:N0} {offer.CurrencyName}, which a run can't earn";
+        if (!config().Run.EarnScrips)
+            return $"costs {offer.Cost:N0} {offer.CurrencyName}; turn on \"Earn scrips for books\" in Settings to have the run earn them";
+        return null;
+    }
+
     /// <summary>What the planner shows for a book that isn't in the bags: bought by the run, or why not.</summary>
     private BookPurchase? BuyBook(uint itemId)
     {
@@ -532,12 +565,37 @@ internal sealed class PlanService : IDisposable
             return new BookPurchase(false, $"Sold for {any.Cost:N0} {any.CurrencyName} by {any.Who} in {any.PlaceName}, which you can't teleport to yet");
         }
         var have = GameState.CurrencyCount(offer.CurrencyItemId);
-        if (have < offer.Cost && earning.TryGetValue(offer.CurrencyItemId, out var task) && have + task.Expected >= offer.Cost)
-            return new BookPurchase(true, $"Costs {offer.Cost:N0} {offer.CurrencyName} (you have {have:N0}); the run earns the rest first with {task.Count}× {catalog.ItemName(task.Option.ItemId)}, then buys it from {offer.Who} in {offer.PlaceName}");
-        if (have < offer.Cost)
-            return new BookPurchase(false, $"Costs {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName}; you have {have:N0}" +
-                (config().Run.EarnScrips ? "" : ". Turn on \"Earn scrips for books\" in Settings to have the run earn them"));
-        return new BookPurchase(true, $"The run buys it for {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName} (you have {have:N0})");
+        if (bookBudget.BuyNow.Contains(itemId))
+            return new BookPurchase(true, $"The run buys it for {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName} (you have {have:N0})");
+        if (earning.TryGetValue(offer.CurrencyItemId, out var task))
+        {
+            // Earned in rounds: each round of collectables fills the scrips up to the cap, then books are bought.
+            var cap = ScripCap(offer.CurrencyItemId);
+            var rounds = BooksCost(offer.CurrencyItemId) > cap ? $" over several rounds (scrips stop at {cap:N0})" : "";
+            return new BookPurchase(true, $"Costs {offer.Cost:N0} {offer.CurrencyName} (you have {have:N0}); the run earns them with {catalog.ItemName(task.Option.ItemId)}{rounds}, then buys it from {offer.Who} in {offer.PlaceName}");
+        }
+        var why = have >= offer.Cost ? $"your {have:N0} go to the cheaper books first" : $"you have {have:N0}";
+        return new BookPurchase(false, $"Costs {offer.Cost:N0} {offer.CurrencyName} from {offer.Who} in {offer.PlaceName}; {why}" +
+            (config().Run.EarnScrips ? "" : ". Turn on \"Earn scrips for books\" in Settings to have the run earn them"));
+    }
+
+    /// <summary>What every book still to buy costs in one currency.</summary>
+    private int BooksCost(uint currency)
+        => Plan.Learn.Where(l => l.Remaining > 0).Select(l => BookOffer(l.ItemId)).Where(o => o?.CurrencyItemId == currency).Sum(o => o!.Cost);
+
+    /// <summary>The most of a currency a character can hold (4,000 for scrips); unlimited when the sheet has no cap.</summary>
+    public static int ScripCap(uint currency)
+        => Services.Data.GetExcelSheet<Item>().GetRowOrDefault(currency)?.StackSize is > 1 and var cap ? (int)cap : int.MaxValue;
+
+    /// <summary>
+    /// Null when the item isn't a master book or folklore tome; otherwise whether the character has learned it
+    /// (a book on the order is read, not made).
+    /// </summary>
+    public static bool? BookLearned(uint itemId, GameCatalog catalog)
+    {
+        if (catalog.MasterBooks.FirstOrDefault(b => b.ItemId == itemId) is { } book) return IsBookLearned(book.Id);
+        if (catalog.FolkloreTomes.Any(t => t.ItemId == itemId)) return HasTome(itemId);
+        return null;
     }
 
     /// <summary>

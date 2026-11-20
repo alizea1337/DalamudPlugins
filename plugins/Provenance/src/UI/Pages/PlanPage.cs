@@ -208,15 +208,18 @@ internal sealed class PlanPage : Page
     }
 
     /// <summary>Master books and folklore tomes the order needs, with what the run does about them.</summary>
-    private static void DrawLearnFirst(Plan plan, GameCatalog catalog)
+    private void DrawLearnFirst(Plan plan, GameCatalog catalog)
     {
         if (plan.Learn.Count == 0) return;
         var s = Ui.S;
+        var onlyOrdered = plan.Learn.All(l => l.NeededFor.Count == 0);
         Ui.BeginCard(Palette.WithAlpha(Palette.Warn, 0.07f));
         Ui.Icon(FontAwesomeIcon.Book, Palette.Warn);
         ImGui.SameLine(0, 10 * s);
-        using (Ui.F.Strong.Push()) Ui.Text("Learn first", Palette.Warn);
-        Ui.Wrapped("Some recipes or legendary nodes in this order need a book you haven't learned. The run buys it at an exchange when you have the scrips or tokens, and reads it before anything else.");
+        using (Ui.F.Strong.Push()) Ui.Text(onlyOrdered ? "Books to learn" : "Learn first", Palette.Warn);
+        Ui.Wrapped(onlyOrdered
+            ? "The run buys these at an exchange, earning the scrips with collectables when you're short, and reads them."
+            : "Some recipes or legendary nodes in this order need a book you haven't learned. The run buys it at an exchange when you have the scrips or tokens, and reads it before anything else.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         foreach (var line in plan.Learn)
         {
@@ -226,9 +229,12 @@ internal sealed class PlanPage : Page
             Ui.Text(catalog.ItemName(line.ItemId));
             ImGui.SameLine(0, 8 * s);
             if (line.Remaining == 0) Ui.Chip("in your bags, read first", Palette.Accent);
-            else if (line.WillBuy) Ui.Chip("bought first", Palette.Accent);
+            else if (line.WillBuy && Plans.BuyNow(line.ItemId)) Ui.Chip("bought first", Palette.Accent);
+            else if (line.WillBuy) Ui.Chip("bought once the scrips are in", Palette.Accent);
             else Ui.Chip("get it first", Palette.Danger);
-            var forText = "Needed for " + string.Join(", ", line.NeededFor.Take(4).Select(catalog.ItemName)) + (line.NeededFor.Count > 4 ? $" and {line.NeededFor.Count - 4} more" : "") + ".";
+            var forText = line.NeededFor.Count == 0
+                ? "On the order."
+                : "Needed for " + string.Join(", ", line.NeededFor.Take(4).Select(catalog.ItemName)) + (line.NeededFor.Count > 4 ? $" and {line.NeededFor.Count - 4} more" : "") + ".";
             if (line.Remaining > 0 && line.Purchase is { } purchase) forText += " " + purchase.Text + ".";
             else if (line.Remaining > 0 && catalog.SoldAt(line.ItemId) is { } shop) forText += $" Sold at the {shop} exchange.";
             using (Ui.F.Small.Push()) Ui.Muted(forText);
@@ -248,7 +254,8 @@ internal sealed class PlanPage : Page
         Ui.Icon(FontAwesomeIcon.Coins, Palette.Accent);
         ImGui.SameLine(0, 10 * s);
         using (Ui.F.Strong.Push()) Ui.Text("Earn scrips first", Palette.Accent);
-        Ui.Wrapped("The books cost more scrips than you have. Before the order, the run makes or gathers these collectables, turns them in at a collectable appraiser and buys the books.");
+        Ui.Wrapped("The books cost more scrips than you have. Before the order, the run makes or gathers these collectables, turns them in at a collectable appraiser and buys the books."
+            + (Plans.SeveralScripRounds ? " Scrips stop at 4,000, so it buys what it can, earns more and buys again until every book is in." : ""));
         ImGui.Dummy(new Vector2(0, 2 * s));
         foreach (var t in tasks)
         {
