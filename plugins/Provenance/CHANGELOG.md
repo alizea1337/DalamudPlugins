@@ -22,6 +22,13 @@ A sidebar instead of tabs.
   anywhere a teleport and a walk reach, then walks to the exact spot. Crafting while waiting for timed
   nodes stays by the nodes. When it can't get there, it says why and crafts where it is. "After the
   order" can go back there too. Private chambers and other people's houses can't be saved.
+- Crafting spot, "Go there now": makes the trip right away, outside a run, to see it work. The house
+  you stand in is now recognised by the game's own house ids, which fixes free company houses being
+  turned down as "not in your teleport list".
+- Aetherial reduction from timed nodes: Levinchrome Aethersand and the like come from collectables
+  that only grow on ephemeral nodes (Levin Quartz, Calamus Root). The run treated them as always up and
+  stood still without saying why; now it waits for their hours like any timed node, says when the next
+  one opens, travels ahead and crafts in the meantime.
 - The Teamcraft import no longer turns the whole screen hazy: only Provenance's window darkens behind it.
 - "Tooltip size" (General, Window) picks how big the text in tooltips is: Small, Normal, Large,
   Larger or Largest. Their lines get wider with the text. Next to it, "Hover for a sample" shows one.
