@@ -30,7 +30,7 @@ internal sealed unsafe class Upkeep
     public string? ReduceBlocked { get; private set; }
     private const int ReduceBelowFreeSlots = 20;
 
-    private enum Step { Idle, Materia, Reduce, Done }
+    private enum Step { Idle, Materia, Reduce, Dismount, Done }
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
@@ -45,7 +45,7 @@ internal sealed unsafe class Upkeep
         this.log = log;
     }
 
-    public bool Busy => step is Step.Materia or Step.Reduce;
+    public bool Busy => step is Step.Materia or Step.Reduce or Step.Dismount;
     public string Status { get; private set; } = "";
 
     /// <summary>Equipped pieces at 100% spiritbond.</summary>
@@ -102,7 +102,17 @@ internal sealed unsafe class Upkeep
         var s = plugin.Config.Run;
         var c = Services.Condition;
         // Never with the rod out: extraction and reduction with the fishing stance up aren't checked in game.
-        if (c[ConditionFlag.Mounted] || c[ConditionFlag.Gathering] || c[ConditionFlag.Fishing] || c[ConditionFlag.InCombat] || c[ConditionFlag.BetweenAreas]) return false;
+        if (c[ConditionFlag.Gathering] || c[ConditionFlag.Fishing] || c[ConditionFlag.InCombat] || c[ConditionFlag.BetweenAreas]) return false;
+        // Neither works on a mount. Collectables waiting to be reduced for the order: get off first (land when
+        // flying), or nothing would ever reduce them and the run would stand there.
+        if (c[ConditionFlag.Mounted])
+        {
+            if (reduceNow is not { Count: > 0 } || !QuestDone(ReductionQuest) || !Reducible().Spare.Any(reduceNow.Contains)) return false;
+            step = Step.Dismount;
+            deadline = DateTime.UtcNow.AddSeconds(20);
+            Status = "Getting off the mount to reduce collectables";
+            return true;
+        }
         if (s.ExtractMateria && FullySpiritbonded() > 0 && QuestDone(MateriaQuest))
         {
             step = Step.Materia;
@@ -163,6 +173,18 @@ internal sealed unsafe class Upkeep
                 if (Interact.Ready("Materialize") is var list && list != null) { Callback.Fire(list, true, 2, 0); Wait(1); return; }
                 ActionManager.Instance()->UseAction(ActionType.GeneralAction, 14);
                 Wait(1.2);
+                return;
+
+            case Step.Dismount:
+                if (!Services.Condition[ConditionFlag.Mounted])
+                {
+                    // Off: the caller asks again and the reduction starts.
+                    step = Step.Idle;
+                    Status = "";
+                    return;
+                }
+                ActionManager.Instance()->UseAction(ActionType.GeneralAction, 23);
+                Wait(1.5);
                 return;
 
             case Step.Reduce:

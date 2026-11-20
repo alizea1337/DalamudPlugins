@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.1
+
+Aetherial reduction you can follow.
+
+- The Run page lists, under each item from aetherial reduction, every collectable it comes from: the
+  job, the zone, and what's going on with it now ("node up now", "node opens in 12 min (04:00–08:00
+  ET)", "bites now", or why the run can't get it), plus how many wait in the bags to be reduced. Almost
+  every aethersand comes from ephemeral or unspoiled nodes, so a run often waits for one to open; now
+  it says which and when.
+- The run log says where each reduction item comes from when gathering starts.
+- A run no longer stands still when collectables are waiting to be reduced while the character is on
+  a mount (after travelling ahead to a node, or when the run starts mounted): it gets off (landing
+  first when flying) and reduces them.
+
 ## 0.11.0
 
 Aetherial reduction from fish.

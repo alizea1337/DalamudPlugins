@@ -38,6 +38,13 @@ internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn,
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
 /// <summary>
+/// A collectable an item from aetherial reduction comes from, as the Run page shows it: the job that gets it, where,
+/// what's going on with it now ("up now", "opens in 12 min, at 16:00 ET", why it can't be had), and how many wait in
+/// the bags to be reduced.
+/// </summary>
+internal sealed record ReductionSource(uint ItemId, uint ClassJobId, string Zone, string State, bool Problem, int Waiting);
+
+/// <summary>
 /// Runs an order from start to finish. Books first; then gathering and fishing with Provenance's own
 /// gatherer and fisher, one at a time (a fish whose window is open first, then nodes, then fish that
 /// always bite; a switch waits for the node or catch under way). When only timed nodes and fish windows
@@ -741,6 +748,7 @@ internal sealed class RunEngine : IDisposable
         Add(fish == 0 ? $"Gathering {land} {(land == 1 ? "item" : "items")}."
             : land == 0 ? char.ToUpperInvariant(fishText[0]) + fishText[1..] + "."
             : $"Gathering {land} {(land == 1 ? "item" : "items")} and {fishText}.", false);
+        LogReductionSources(targets);
     }
 
     /// <summary>Everything gathered: craft whatever is left (or all of it when nothing was gathered).</summary>
@@ -2064,6 +2072,89 @@ internal sealed class RunEngine : IDisposable
     /// Levinchrome Aethersand). The run's scheduling goes by these; the order's progress by <see cref="Targets"/>.
     /// </summary>
     private List<GatherTarget> workTargets = new();
+
+    /// <summary>
+    /// The collectables an item from aetherial reduction comes from, with their state now (for the Run page): those
+    /// this run gathers or fishes for it, or before gathering starts every one a run can get.
+    /// </summary>
+    public IReadOnlyList<ReductionSource> SourcesOf(GatherTarget target)
+    {
+        var catalog = plugin.Plans.Catalog;
+        if (catalog == null || target.Supply != Supply.Reduce) return Array.Empty<ReductionSource>();
+        var ids = reduceFor.Where(kv => kv.Value.ItemId == target.ItemId).Select(kv => kv.Key).ToList();
+        if (ids.Count == 0) ids = catalog.ReducedFrom(target.ItemId).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var list = new List<ReductionSource>();
+        foreach (var id in ids)
+        {
+            var waiting = GameState.Collectables(id).Count;
+            if (catalog.Sources(id).Has(Obtain.Fish))
+            {
+                var spot = catalog.Gather.Fish(id)?.Spots.Select(catalog.Gather.Spot).OfType<Core.Fishing.FishingSpotInfo>().FirstOrDefault();
+                var zone = spot != null ? FishAccess.Zone(spot.TerritoryId) : "";
+                if (Fish.Unreachable.Contains(id)) { list.Add(new ReductionSource(id, FishAccess.Fisher, zone, "the fisher can't get it (see the log)", true, waiting)); continue; }
+                var wait = fishWaits.TryGetValue(id, out var w) ? w : Fish.WaitFor(id);
+                var state = wait switch
+                {
+                    null => "bites any time",
+                    { } x when x == TimeSpan.MaxValue => "doesn't bite within the weather forecast",
+                    { } x when x <= TimeSpan.Zero => "bites now",
+                    { } x => $"bites in {Short(x)}",
+                };
+                list.Add(new ReductionSource(id, FishAccess.Fisher, zone, state, false, waiting));
+                continue;
+            }
+            var points = catalog.GatherPoints(id);
+            var job = points.Select(p => p.ClassJobId).FirstOrDefault();
+            var where = points.Count > 0 ? FishAccess.Zone(points[0].TerritoryId) : "";
+            if (Gather.Unreachable.Contains(id)) { list.Add(new ReductionSource(id, job, where, "no node the run can reach (see the log)", true, waiting)); continue; }
+            var mask = catalog.TimedMask(id);
+            if (mask == 0 || catalog.Sources(id).Has(Obtain.Gather)) { list.Add(new ReductionSource(id, job, where, "regular nodes", false, waiting)); continue; }
+            var opens = Core.Timing.Eorzea.UntilOpen(mask, now);
+            var text = opens is not { } o ? "never up" : o <= TimeSpan.Zero ? "node up now" : $"node opens in {Short(o)}";
+            list.Add(new ReductionSource(id, job, where, $"{text} ({Hours(mask)} ET)", opens == null, waiting));
+        }
+        return list;
+    }
+
+    /// <summary>"00:00–04:00", "04:00–08:00 and 20:00–24:00": the Eorzea hours of an uptime mask.</summary>
+    private static string Hours(uint mask)
+    {
+        var spans = new List<string>();
+        for (var h = 0; h < 24; h++)
+        {
+            if ((mask & (1u << h)) == 0 || (h > 0 && (mask & (1u << (h - 1))) != 0)) continue;
+            var end = h;
+            while (end < 24 && (mask & (1u << end)) != 0) end++;
+            spans.Add($"{h:00}:00–{end:00}:00");
+        }
+        // A window across midnight reads as one: 20:00–04:00.
+        if (spans.Count > 1 && spans[0].StartsWith("00:00") && spans[^1].EndsWith("24:00"))
+        {
+            spans[^1] = spans[^1][..5] + spans[0][5..];
+            spans.RemoveAt(0);
+        }
+        return spans.Count <= 1 ? spans.FirstOrDefault() ?? "" : string.Join(", ", spans.Take(spans.Count - 1)) + " and " + spans[^1];
+    }
+
+    /// <summary>"Levinchrome Aethersand comes from reducing Levin Quartz (MIN, Living Memory, node 00:00–04:00 ET), ...".</summary>
+    private void LogReductionSources(IEnumerable<GatherTarget> targets)
+    {
+        foreach (var t in targets.Where(t => t.Supply == Supply.Reduce))
+        {
+            var parts = SourcesOf(t).Select(src =>
+            {
+                var job = Core.Character.ClassJobs.Abbreviation(src.ClassJobId);
+                var where = src.Zone.Length > 0 ? ", " + src.Zone : "";
+                var mask = plugin.Plans.Catalog!.TimedMask(src.ItemId);
+                var how = src.ClassJobId == FishAccess.Fisher ? "fished"
+                    : mask != 0 && !plugin.Plans.Catalog!.Sources(src.ItemId).Has(Obtain.Gather) ? $"node {Hours(mask)} ET" : "regular nodes";
+                return $"{ItemName(src.ItemId)} ({job}{where}, {how})";
+            }).ToList();
+            if (parts.Count > 0)
+                Add($"{ItemName(t.ItemId)} comes from reducing {string.Join(", ", parts)}. Whichever is up is gathered or fished as a collectable and reduced.", false);
+        }
+    }
 
     /// <summary>Collectables gathered or fished for a reduction wait in the bags while the item still lacks.</summary>
     private bool ReducePending(GatherTarget t)

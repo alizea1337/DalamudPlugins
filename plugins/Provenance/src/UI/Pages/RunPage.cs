@@ -323,8 +323,57 @@ internal sealed class RunPage : Page
             Ui.Bar("##rb" + t.ItemId, t.Remaining == 0 ? 1 : got / (float)t.Remaining, remaining == 0 ? Palette.Accent : Palette.SupplyColor(t.Supply), 110 * s);
             ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
             ImGui.Dummy(new Vector2(width, 0));
+            if (t.Supply == Supply.Reduce && remaining > 0) DrawSources(t, width);
         }
         Ui.EndCard();
+    }
+
+    /// <summary>
+    /// Under an item from aetherial reduction: each collectable it comes from, the job and zone, what's going on with
+    /// it now (node up, opens in, bites, or why it can't be had), and how many wait in the bags to be reduced.
+    /// </summary>
+    private void DrawSources(Core.Run.GatherTarget t, float width)
+    {
+        var s = Ui.S;
+        var catalog = Plans.Catalog!;
+        var dl = ImGui.GetWindowDrawList();
+        using var small = Ui.F.Small.Push();
+        foreach (var src in Runs.SourcesOf(t))
+        {
+            var start = ImGui.GetCursorScreenPos();
+            var h = 24 * s;
+            var x = start.X + 34 * s;
+            var ty = start.Y + (h - ImGui.GetTextLineHeight()) / 2;
+            // A thin guide from the item down to its collectables.
+            dl.AddLine(new Vector2(start.X + 12 * s, start.Y - 2 * s), new Vector2(start.X + 12 * s, start.Y + h / 2), Palette.U32(Palette.Line), 1 * s);
+            dl.AddLine(new Vector2(start.X + 12 * s, start.Y + h / 2), new Vector2(x - 6 * s, start.Y + h / 2), Palette.U32(Palette.Line), 1 * s);
+            Ui.DrawItemIcon(dl, catalog.ItemIcon(src.ItemId), new Vector2(x, start.Y + (h - 18 * s) / 2), 18 * s);
+            x += 24 * s;
+            var name = catalog.ItemName(src.ItemId);
+            dl.AddText(new Vector2(x, ty), Palette.U32(Palette.Text), name);
+            x += ImGui.CalcTextSize(name).X + 10 * s;
+            var job = Core.Character.ClassJobs.Abbreviation(src.ClassJobId);
+            dl.AddText(new Vector2(x, ty), Palette.U32(Palette.ClassJobColor(src.ClassJobId)), job);
+            x += ImGui.CalcTextSize(job).X + 8 * s;
+            var right = start.X + width;
+            if (src.Waiting > 0)
+            {
+                var wait = $"{src.Waiting} to reduce";
+                var ww = ImGui.CalcTextSize(wait).X;
+                dl.AddText(new Vector2(right - ww, ty), Palette.U32(Palette.SupplyColor(Supply.Reduce)), wait);
+                right -= ww + 14 * s;
+            }
+            var state = (src.Zone.Length > 0 ? src.Zone + ", " : "") + src.State;
+            while (state.Length > 4 && x + ImGui.CalcTextSize(state).X > right) state = state[..^2].TrimEnd() + "…";
+            var live = src.State.StartsWith("node up") || src.State.StartsWith("bites now");
+            dl.AddText(new Vector2(x, ty), Palette.U32(src.Problem ? Palette.Warn : live ? Palette.Accent : Palette.TextMuted), state);
+            if (ImGui.IsMouseHoveringRect(start, new Vector2(start.X + width, start.Y + h)))
+                Ui.ShowTooltip($"{name} ({job}{(src.Zone.Length > 0 ? ", " + src.Zone : "")}): {src.State}."
+                               + (src.Waiting > 0 ? $" {src.Waiting} in the bags, reduced before the run gathers or fishes more." : ""));
+            ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
+            ImGui.Dummy(new Vector2(width, 0));
+        }
+        ImGui.Dummy(new Vector2(0, 4 * s));
     }
 
     private void DrawCrafting()
