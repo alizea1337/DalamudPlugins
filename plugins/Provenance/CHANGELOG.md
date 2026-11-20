@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.0 (testing)
+## 0.10.0
 
 A sidebar instead of tabs.
 
