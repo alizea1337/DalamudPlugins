@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: \"The aethernet didn't open\" when a trip started at an aethernet shard (anywhere in Ul'dah -\n  Steps of Thal, Limsa's Upper Decks, Old Gridania, and at any shard nearer than the city's\n  aetheryte). Shards weren't recognised as something to talk to, only the big aetherytes were. The\n  run also walks right up to a shard now.\n- Scrip exchanges are picked by the trip: the one in the area or city you're in first, then the one\n  the teleport costs the least to from where you stand. Before, it was always the same one (Ul'dah,\n  for most things), whatever it cost. The collectable appraiser is picked the same way, so turning\n  in and buying happen in one city. In Radz-at-Han, for one, the run now stays in Radz-at-Han.\n- At a city's aetheryte the run picks \"Aethernet\" by the game's own text for it, in every client\n  language, and no longer risks \"Residential District Aethernet\".\n- An aethernet window that doesn't list the stop (or lists it as not attuned) is closed and the run\n  says so, instead of waiting in it.\n- When the aethernet still doesn't open, the run log says what happened at the crystal: none found,\n  how far away it was, or which menu came up.\r\n",
+    "Changelog": "- \"Open on GitHub\" next to \"Copy bug report\" (Settings, General): copies the report and opens a new\n  bug report on GitHub in your browser, with the plugin and version filled in. Paste the report into\n  its \"Provenance bug report\" box. Bugs and suggestions can be filed there from now on.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.15.2.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.2/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.2/latest.zip",
+    "AssemblyVersion": "0.15.3.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.3/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.3/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795209113
+    "LastUpdate": 1795211214
   }
 ]
