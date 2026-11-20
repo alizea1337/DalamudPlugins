@@ -8,8 +8,9 @@ Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and 
 Run under Status, Character under Tools, and the settings, one page each for General, Crafting,
 Gathering, Fishing, Monster drops, After the order and Security. A *crafting spot* (Settings, Crafting:
 stand there and save it) is where the run goes before it crafts: a corner of your house or apartment
-(through the door), an inn room, or anywhere a teleport and a walk reach. Under General, *Reduce motion*
-keeps the window from sliding things around and *Tooltip size* sets how big the hover texts are.
+(through the door), an inn room, or anywhere a teleport and a walk reach. Under General, *Interface size*
+(75% to 150%) scales the whole window, *Reduce motion* keeps it from sliding things around and
+*Tooltip size* sets how big the hover texts are.
 
 ## What it does
 

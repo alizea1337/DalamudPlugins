@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.13.1
+## 0.14.0
 
-Crafting somewhere safe.
+Crafting somewhere safe, and an interface size.
+
+- Interface size (Settings, General, Window): 75%, 90%, 100%, 110%, 125% or 150%. Text, spacing,
+  icons and the window grow or shrink together, on top of Dalamud's own scale; the text is built at
+  the new size, so it stays sharp. The old size stays on screen until the new fonts are ready.
 
 - Fixed: crafting while waiting for a timed node could start on the mount, in the air (after
   travelling ahead to the node), and the run stopped with "The synthesis didn't start". The crafter

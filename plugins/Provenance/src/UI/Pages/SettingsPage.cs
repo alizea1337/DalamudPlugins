@@ -211,6 +211,28 @@ internal sealed class SettingsPage : Page
     private List<uint> combatJobs = new();
     private List<DropdownItem>? combatJobItems;
 
+    private static readonly int[] InterfaceSizes = { 75, 90, 100, 110, 125, 150 };
+    private static readonly List<DropdownItem> InterfaceSizeItems = InterfaceSizes
+        .Select(p => new DropdownItem($"{p}%", p == 100 ? "default" : null)).ToList();
+
+    /// <summary>The interface size field: text, spacing, icons and the window together.</summary>
+    private void InterfaceSizePicker()
+    {
+        var s = Ui.S;
+        var w = Config.Window;
+        var current = Array.IndexOf(InterfaceSizes, w.Scale);
+        Ui.DropdownField("##uiscale", current >= 0 ? $"{InterfaceSizes[current]}%" : $"{w.Scale}%", "Pick a size", 220 * s, FontAwesomeIcon.ExpandArrowsAlt);
+        // While a new size is being built, say so (the fonts take a moment).
+        if (MathF.Abs(Ui.F.Scale - w.ScaleFactor) > 0.001f)
+        {
+            ImGui.SameLine(0, 14 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
+            Ui.Muted("Resizing…");
+        }
+        var pick = Ui.DropdownList("##uiscale", InterfaceSizeItems, current, "");
+        if (pick >= 0) { w.Scale = InterfaceSizes[pick]; Config.Save(); }
+    }
+
     private static readonly string[] TooltipSizeNames = { "Small", "Normal", "Large", "Larger", "Largest" };
     private static readonly List<DropdownItem> TooltipSizeItems = TooltipSizeNames
         .Select(n => new DropdownItem(n, n == "Normal" ? "default" : null)).ToList();
@@ -446,6 +468,10 @@ internal sealed class SettingsPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Window");
         v = Config.Window.ReduceMotion;
         if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { Config.Window.ReduceMotion = v; Config.Save(); }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.Text("Interface size");
+        InterfaceSizePicker();
+        using (Ui.F.Small.Push()) Ui.Wrapped("Text, spacing, icons and the window together, on top of Dalamud's own scale.", Palette.TextMuted);
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Text("Tooltip size");
         TooltipSizePicker();

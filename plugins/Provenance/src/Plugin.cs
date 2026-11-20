@@ -35,7 +35,7 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.Create<Services>();
         ECommons.ECommonsMain.Init(pluginInterface, this);
         Config = Configuration.Load();
-        fonts = new Fonts();
+        fonts = new Fonts(Config.Window.ScaleFactor);
         Ui.Init(fonts);
 
         Plans = new PlanService(() => Config, Raphael);

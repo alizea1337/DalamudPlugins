@@ -57,15 +57,22 @@ internal sealed class MainWindow : Window
         this.groups = groups.ToList();
         pages = this.groups.SelectMany(g => g.Pages).ToList();
         selected = Math.Max(0, pages.FindIndex(p => p.Title == plugin.Config.Window.LastPage));
+        appliedScale = Ui.F.Scale;
         Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
         RespectCloseHotkey = true;
         ApplyMode();
     }
 
-    private static readonly Vector2 CompactSize = new(460, 176);
-    private static readonly Vector2 FullMinimum = new(960, 620);
+    // In design units: the window's own size follows the interface size (Settings, General).
+    private static readonly Vector2 CompactDesign = new(460, 176);
+    private static readonly Vector2 FullMinimumDesign = new(960, 620);
+    private static Vector2 CompactSize => CompactDesign * Ui.F.Scale;
+    private static Vector2 FullMinimum => FullMinimumDesign * Ui.F.Scale;
     private bool applySize;
+    /// <summary>The full window's size as Dalamud takes it (before its global scale), measured while drawing.</summary>
     private Vector2 lastFullSize;
+    /// <summary>The interface size the window's size was last set for.</summary>
+    private float appliedScale = 1f;
 
     public bool Compact => plugin.Config.Window.Compact;
 
@@ -119,6 +126,21 @@ internal sealed class MainWindow : Window
 
     public override void PreDraw()
     {
+        // The interface size: new fonts are built first; once they're in use, the window grows or shrinks with them.
+        Ui.F.SetScale(plugin.Config.Window.ScaleFactor);
+        Ui.F.Update();
+        if (MathF.Abs(Ui.F.Scale - appliedScale) > 0.001f)
+        {
+            var ratio = Ui.F.Scale / appliedScale;
+            appliedScale = Ui.F.Scale;
+            if (!Compact && lastFullSize.X > 0)
+            {
+                plugin.Config.Window.FullWidth = lastFullSize.X * ratio;
+                plugin.Config.Window.FullHeight = lastFullSize.Y * ratio;
+                plugin.Config.Save();
+            }
+            ApplyMode();
+        }
         // Size is forced once after a mode switch, then the user may resize the full window again.
         if (!applySize) SizeCondition = ImGuiCond.FirstUseEver;
         applySize = false;
@@ -157,7 +179,7 @@ internal sealed class MainWindow : Window
             DrawCompact(pos, size, s);
             return;
         }
-        lastFullSize = size / s;
+        lastFullSize = size / Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale;
 
         // The sidebar first: a click there changes the page, and the page below should start its entrance this frame.
         var side = SidebarWidth * s;

@@ -21,7 +21,11 @@ internal static partial class Ui
     public const float IconRadius = 8f;
 
     public static Fonts F { get; private set; } = null!;
-    public static float S => ImGuiHelpers.GlobalScale;
+    /// <summary>
+    /// Pixels per design unit: Dalamud's global scale times the interface size (Settings, General). It follows the
+    /// fonts in use, so a new size switches text and layout in the same frame.
+    /// </summary>
+    public static float S => ImGuiHelpers.GlobalScale * (F?.Scale ?? 1f);
 
     private static readonly Dictionary<uint, float> Eased = new();
     private static readonly Stack<(Vector2 Start, float Width, Vector4 Bg, float Pad)> Cards = new();

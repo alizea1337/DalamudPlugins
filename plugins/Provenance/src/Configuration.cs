@@ -285,4 +285,9 @@ public sealed class WindowSettings
     public bool ReduceMotion { get; set; } = false;
     /// <summary>How big the text in tooltips is.</summary>
     public TooltipSize TooltipSize { get; set; } = TooltipSize.Normal;
+    /// <summary>Interface size in percent (75 to 150): text, spacing, icons and the window, on top of Dalamud's own scale.</summary>
+    public int Scale { get; set; } = 100;
+
+    /// <summary>The interface size as a factor (1 = 100%), kept within what the settings offer.</summary>
+    public float ScaleFactor => Math.Clamp(Scale, 50, 200) / 100f;
 }
