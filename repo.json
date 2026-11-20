@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: the text didn't change with the interface size (nor with the tooltip size). Fonts made after\n  the plugin loaded waited for a rebuild of the font atlas that nothing asked for, so the new size\n  never came. The atlas is now asked to build them, and asked again if they're still missing a few\n  seconds later; anything that goes wrong is written to /xllog.\n- The bug report says which interface size is in use and how the fonts are doing.\r\n",
+    "Changelog": "An Interface page, and a text size of its own.\n\n- Settings has a new Interface page, after General, for how the window looks: Interface scale, Text\n  size, Tooltip size and Reduce motion. They used to sit in General's Window card.\n- Interface scale and Text size are separate settings now, each 75% to 150%. Interface scale sizes\n  the spacing, buttons, icons and the window itself, on top of Dalamud's own scale. Text size sizes\n  all the text in the window: item names, page names in the sidebar, headings, buttons, chips and\n  the drop-down lists. If you'd picked an interface size before, the text starts at that size.\n- Both change at once. Until the sharp fonts for a new text size are built, the text in use is\n  stretched to it (\"sharpening the text…\" next to Size), so it never stays at the old size.\n- Tooltips keep their own size (Small to Largest), whatever the other two are.\n- The bug report gives the interface scale and the text size.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.14.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.14.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.14.1/latest.zip",
+    "AssemblyVersion": "0.15.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.0/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795202118
+    "LastUpdate": 1795203434
   }
 ]
