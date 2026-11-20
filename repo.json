@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "Buying materials with scrips.\n\n- Materials only sold at a scrip exchange (white, purple or orange scrips, such as Flint Corn for\n  15 Orange Crafters' Scrips) are no longer \"Get these yourself\": the plan lists them under \"To\n  buy with scrips\", with the price, the exchange, and whether your scrips pay for them now.\n- The run buys them at the exchange before gathering, as many at a time as the exchange hands over.\n  Short of scrips, it earns them first with collectables (the setting is now \"Earn scrips when\n  short\"), together with any books the order needs: one budget for both, cheapest per item first,\n  and past the 4,000 cap it buys what it can, earns more and buys again.\n- Bait sold only for scrips is bought the same way.\n- Anything a run can gather, fish, buy for gil or reduce still comes from there first; the scrip\n  exchange is the last resort before \"Get these yourself\".\r\n",
+    "Changelog": "Favourite orders, a bug report, and nodes next to each other.\n\n- Fixed: with two nodes of what the order needs side by side, the run gathered one and then stood\n  waiting (\"trying the node again soon\"). The node just gathered stays targetable for a moment while\n  it despawns; the run tried to open it again, failed, and gave up on the whole node group, the node\n  next to it included. Now the node just gathered is left alone, a node of the group already in view\n  is gone to straight away, marking a node done no longer marks its neighbour, and a node that won't\n  open only sets that node aside while another of its group is in view. Choosing the next node also\n  prefers one in view over a trip to another spawn spot.\n- Bug report (Settings, General, or /prov bugreport): copies what Provenance knows right now to the\n  clipboard: settings, the order and its plan, what the run, the gatherer and the fisher are doing,\n  the run log, the gathering nodes within 120 yalms with what they hold, and the zone and position.\n  No character name, world or retainer names.\n\n- Browse has a \"Favourites\" chip after the content chips. With it on, the saved orders show instead\n  of the items, each with a cover of its first items' icons, its name, what's on it and when it was\n  saved; hovering lists every item.\n- \"Save current order\" keeps the order as it is now and puts the cursor in the new favourite's name.\n  Names rename in place (click and type), like the order's name on the Plan page.\n- Load makes a favourite the order (asking once before it replaces a different one); Add puts its\n  items on the order as it is. Overwrite takes the current order over a favourite, Delete removes it\n  (both ask once).\n- Copy puts the favourite on the clipboard as Teamcraft text, one \"10x Item\" per line: paste it into\n  Teamcraft, or back into Provenance with Import list.\n- The search finds favourites by name or by the items on them.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.12.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.12.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.12.0/latest.zip",
+    "AssemblyVersion": "0.13.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.13.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.13.0/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795191700
+    "LastUpdate": 1795196553
   }
 ]
