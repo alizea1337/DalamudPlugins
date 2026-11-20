@@ -16,6 +16,13 @@ A sidebar instead of tabs.
 - Each page keeps its own scroll position.
 - "Reduce motion" (General, Window) turns the sliding off; fades stay, shorter. It also stops the
   drop-down lists and the import window from sliding in.
+- Crafting spot (Settings, Crafting): stand where the run should craft and press "Save where I'm
+  standing". Before it crafts, the run goes there: into your house (teleport, walk to the door, enter),
+  your apartment (the building's entrance, "Go to your apartment"), an inn room (the innkeeper), or
+  anywhere a teleport and a walk reach, then walks to the exact spot. Crafting while waiting for timed
+  nodes stays by the nodes. When it can't get there, it says why and crafts where it is. "After the
+  order" can go back there too. Private chambers and other people's houses can't be saved.
+- The Teamcraft import no longer turns the whole screen hazy: only Provenance's window darkens behind it.
 - "Tooltip size" (General, Window) picks how big the text in tooltips is: Small, Normal, Large,
   Larger or Largest. Their lines get wider with the text. Next to it, "Hover for a sample" shows one.
 - The Character page puts the crafter cards two to a row when the window is too narrow for four.

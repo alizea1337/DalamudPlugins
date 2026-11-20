@@ -17,6 +17,8 @@ internal static class Palette
     public static readonly Vector4 Raised = Hex(0x282D38);
     public static readonly Vector4 RaisedHover = Hex(0x313744);
     public static readonly Vector4 Line = Hex(0x313744);
+    /// <summary>Darkens the window behind a dialog.</summary>
+    public static readonly Vector4 Scrim = Hex(0x0A0C10);
 
     public static readonly Vector4 Text = Hex(0xE7EAF0);
     public static readonly Vector4 TextMuted = Hex(0x9AA2B1);

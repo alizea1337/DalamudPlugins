@@ -38,6 +38,12 @@ internal abstract class Page
     /// <summary>A dot on the sidebar row for something under way; it pulses while it works.</summary>
     public virtual (Vector4 Color, bool Pulse)? Live => null;
 
+    /// <summary>
+    /// Drawn over the whole window after the page and its action bar (a dialog over a darkened window). True
+    /// while something is shown, so Escape closes that and not the window.
+    /// </summary>
+    public virtual bool DrawOverlay(Vector2 windowPos, Vector2 windowSize, Vector2 pageMin, Vector2 pageSize) => false;
+
     protected void Go<T>() where T : Page => Plugin.Main.Select<T>();
 
     protected void Changed() => Plugin.Changed();

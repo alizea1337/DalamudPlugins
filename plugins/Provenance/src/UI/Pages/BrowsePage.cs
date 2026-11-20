@@ -35,6 +35,9 @@ internal sealed class BrowsePage : Page
     /// <summary>Opens the Teamcraft import over this page.</summary>
     public void OpenImport() => import.Open();
 
+    public override bool DrawOverlay(Vector2 windowPos, Vector2 windowSize, Vector2 pageMin, Vector2 pageSize)
+        => import.Draw(windowPos, windowSize, pageMin, pageSize);
+
     public override string Title => "Browse";
     public override FontAwesomeIcon Icon => FontAwesomeIcon.Search;
 
@@ -124,7 +127,6 @@ internal sealed class BrowsePage : Page
             else if (Ui.Button(label, Ui.Kind.Secondary, FontAwesomeIcon.FileImport, tooltip: "Bring in a Teamcraft list: a link, an import string or copied text.", id: "##openimport"))
                 import.Open();
         }
-        import.Draw();
 
         // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow.
         var b = Config.Browse;

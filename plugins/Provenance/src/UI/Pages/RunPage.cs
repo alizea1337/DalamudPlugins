@@ -454,7 +454,8 @@ internal sealed class RunPage : Page
             (FontAwesomeIcon.Paw, "Farm monster drops", plan.Count(Supply.Drop) > 0 ? $"{plan.Count(Supply.Drop)} items from monsters, fought as {(Config.Combat.ClassJob == 0 ? "the combat job picked in Settings" : Core.Character.ClassJobs.Abbreviation(Config.Combat.ClassJob))}." : "No monster drops needed.", plan.Count(Supply.Drop) > 0, true),
             (fish > 0 && land == 0 ? FontAwesomeIcon.Fish : FontAwesomeIcon.Leaf, fish == 0 ? "Gather" : land == 0 ? "Fish" : "Gather and fish",
                 gatherDetail, land + fish > 0, true),
-            (FontAwesomeIcon.Hammer, "Craft", crafts > 0 ? $"{crafts} crafts with Raphael rotations, ingredients first." : "Nothing to craft.", crafts > 0, true),
+            (FontAwesomeIcon.Hammer, "Craft", crafts > 0 ? $"{crafts} crafts with Raphael rotations, ingredients first."
+                + (Config.CraftingSpot is { Enabled: true, IsSet: true } spot ? $" At the crafting spot: {spot.Label}." : "") : "Nothing to craft.", crafts > 0, true),
         };
 
         for (var i = 0; i < steps.Length; i++)

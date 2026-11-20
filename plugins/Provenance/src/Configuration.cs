@@ -24,6 +24,7 @@ public sealed class Configuration : IPluginConfiguration
     public FishingSettings Fishing { get; set; } = new();
     public CombatSettings Combat { get; set; } = new();
     public AfterOrderSettings AfterOrder { get; set; } = new();
+    public CraftingSpotSettings CraftingSpot { get; set; } = new();
     public SecuritySettings Security { get; set; } = new();
     /// <summary>Timing figures for estimates, adjusted by every run.</summary>
     public Core.Estimating.Timings Timings { get; set; } = new();
@@ -56,6 +57,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Fishing.WindowLeadMinutes = Math.Clamp(c.Fishing.WindowLeadMinutes, 0, 30);
         c.Combat ??= new();
         c.AfterOrder ??= new();
+        c.CraftingSpot ??= new();
         c.Security ??= new();
         c.Retainers ??= new();
         c.Timings ??= new();
@@ -175,7 +177,40 @@ public sealed class SecuritySettings
     public int MinFreeSlots { get; set; } = 2;
 }
 
-public enum AfterOrderPlace { Stay, WhereStarted, Inn, Home }
+public enum AfterOrderPlace { Stay, WhereStarted, Inn, Home, CraftingSpot }
+
+/// <summary>What kind of place a crafting spot is in, which decides how a run gets there.</summary>
+public enum CraftingSpotKind { OpenWorld, InnRoom, House, Apartment }
+
+/// <summary>
+/// A spot saved where you stood (in your house, apartment, an inn room or out in the world) that the run walks
+/// to before it crafts. Houses and apartments are found again through the teleport list.
+/// </summary>
+[Serializable]
+public sealed class CraftingSpotSettings
+{
+    /// <summary>Go there before crafting.</summary>
+    public bool Enabled { get; set; }
+    public CraftingSpotKind Kind { get; set; }
+    /// <summary>The zone the spot is in (for a house or apartment, its inside); 0 while nothing is saved.</summary>
+    public uint Territory { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
+    public float Z { get; set; }
+    /// <summary>"Inside Mist, ward 5, plot 12 (free company house)", "Inn room in Limsa Lominsa", or the zone.</summary>
+    public string Label { get; set; } = "";
+    /// <summary>House or apartment: the housing district outside, the ward and plot (0-based), the apartment's room, the world.</summary>
+    public uint District { get; set; }
+    public int Ward { get; set; }
+    public int Plot { get; set; }
+    public int Room { get; set; }
+    public uint World { get; set; }
+    /// <summary>House or apartment: its entry in the teleport list.</summary>
+    public uint Aetheryte { get; set; }
+    public byte SubIndex { get; set; }
+
+    public bool IsSet => Territory != 0;
+}
 
 /// <summary>Text size of the tooltips (12, 14, 16, 18 and 20 px).</summary>
 public enum TooltipSize { Small, Normal, Large, Larger, Largest }

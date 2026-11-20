@@ -15,7 +15,10 @@ namespace Provenance.Integrations;
 internal static unsafe class Teleporter
 {
     /// <param name="Estate">For houses and apartments: "Mist, ward 5, plot 12 (free company)"; null for aetherytes.</param>
-    public sealed record Destination(uint AetheryteId, byte SubIndex, string Name, uint TerritoryId, uint GilCost, string? Estate = null);
+    /// <param name="Ward">For houses and apartments: the ward (0-based).</param>
+    /// <param name="Plot">For houses: the plot (0-based).</param>
+    public sealed record Destination(uint AetheryteId, byte SubIndex, string Name, uint TerritoryId, uint GilCost, string? Estate = null,
+        int Ward = -1, int Plot = -1, bool Apartment = false);
 
     /// <summary>Aetherytes the character can teleport to right now, with their current gil cost.</summary>
     public static List<Destination> Unlocked()
@@ -30,7 +33,8 @@ internal static unsafe class Teleporter
             if (info.AetheryteId == 0) continue;
             var row = sheet.GetRowOrDefault(info.AetheryteId);
             var name = row?.PlaceName.ValueNullable?.Name.ExtractText() ?? "Aetheryte " + info.AetheryteId;
-            result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost, EstateLabel(info)));
+            result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost, EstateLabel(info),
+                info.Ward, info.Plot, info.IsApartment));
         }
         return result;
     }

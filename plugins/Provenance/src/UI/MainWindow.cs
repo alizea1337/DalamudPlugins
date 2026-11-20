@@ -44,6 +44,9 @@ internal sealed class MainWindow : Window
     private double enteredAt = double.NegativeInfinity;
     private int enterFrom;
 
+    // Frames left before Escape may close the window again, after a dialog over it closed.
+    private int overlayHold;
+
     // The selection pill, relative to the top of the list; null until the list has been laid out once.
     private float? pillTop;
     private float pillBottom;
@@ -149,6 +152,8 @@ internal sealed class MainWindow : Window
 
         if (Compact)
         {
+            RespectCloseHotkey = true;
+            overlayHold = 0;
             DrawCompact(pos, size, s);
             return;
         }
@@ -197,6 +202,11 @@ internal sealed class MainWindow : Window
         ImGui.PopStyleVar();
 
         DrawFooter(pages[current], new Vector2(left, pos.Y), new Vector2(width, size.Y), s, alpha);
+
+        // A dialog over the window (the Teamcraft import). While it's up, and a frame after, Escape is its own.
+        var overlay = pages[current].DrawOverlay(pos, size, new Vector2(left, pos.Y + top), new Vector2(width, size.Y - top - footer));
+        overlayHold = overlay ? 2 : Math.Max(0, overlayHold - 1);
+        RespectCloseHotkey = overlayHold == 0;
     }
 
     /// <summary>How far into its entrance the page is: its opacity and how far it still sits from its place.</summary>

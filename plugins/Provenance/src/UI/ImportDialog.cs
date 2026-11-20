@@ -16,12 +16,16 @@ namespace Provenance.UI;
 
 /// <summary>
 /// Bringing in a Teamcraft list, as a dialog over the Browse page: paste a list link, an import string or
-/// copied text, pick how it joins the order, import, and see what came in. A floating panel in the same
-/// style as the dropdowns (raised slate, soft shadow, a short fade in); the game dims the page behind it.
+/// copied text, pick how it joins the order, import, and see what came in. A panel in the same style as the
+/// dropdowns (raised slate, soft shadow, a short fade in) over Provenance's window, which darkens behind it.
 /// </summary>
+/// <remarks>
+/// Not an ImGui modal: a modal dims the whole screen in ImGui's own pale grey. Two child windows of the main
+/// window do the same job: a dark layer over the window that takes every click and scroll outside the panel,
+/// and the panel on top of it.
+/// </remarks>
 internal sealed class ImportDialog
 {
-    private const string PopupId = "##importlist";
     private const double OpenSeconds = 0.16;
     private const float Slide = 10f;
     private static readonly string[] ModeLabels = { "Replace the order", "Add to the order" };
@@ -32,8 +36,11 @@ internal sealed class ImportDialog
     private CancellationTokenSource? cancel;
     private ImportResult? last;
     private bool openRequested;
+    private bool isOpen;
     private bool focusField;
     private double openedAt;
+    // The panel's height as last drawn: child windows can't size themselves, so the next frame takes it.
+    private float panelHeight;
 
     public ImportDialog(Plugin plugin) => this.plugin = plugin;
 
@@ -51,60 +58,76 @@ internal sealed class ImportDialog
     }
 
     /// <summary>
-    /// Every frame from the Browse page, open or not: an import that finishes after the dialog was closed
-    /// still lands in the order.
+    /// Every frame from the main window while Browse is shown, open or not: an import that finishes after the
+    /// dialog was closed still lands in the order. True while the dialog is up.
     /// </summary>
-    public void Draw()
+    public bool Draw(Vector2 windowPos, Vector2 windowSize, Vector2 pageMin, Vector2 pageSize)
     {
         CollectResult();
         var s = Ui.S;
         if (openRequested)
         {
             openRequested = false;
-            ImGui.OpenPopup(PopupId);
+            isOpen = true;
             openedAt = ImGui.GetTime();
             focusField = true;
         }
+        if (!isOpen) return false;
 
-        // Centred over the page, a little narrower than the window; it fades in and settles upwards.
-        var host = ImGui.GetWindowPos();
-        var hostSize = ImGui.GetWindowSize();
-        var width = MathF.Min(560 * s, hostSize.X - 48 * s);
+        // Over the page, a little narrower than it, with its top at a fixed height: it grows downwards as lines
+        // appear instead of shifting. It fades in and settles upwards.
+        var width = MathF.Min(560 * s, pageSize.X - 48 * s);
         var t = (float)Math.Clamp((ImGui.GetTime() - openedAt) / OpenSeconds, 0, 1);
         var eased = 1f - MathF.Pow(1f - t, 3f);
         var slide = Ui.ReduceMotion ? 0f : (1f - eased) * Slide * s;
-        ImGui.SetNextWindowPos(host + new Vector2(hostSize.X / 2, hostSize.Y * 0.42f + slide), ImGuiCond.Always, new Vector2(0.5f, 0.5f));
-        ImGui.SetNextWindowSize(new Vector2(width, 0));
+        var top = pageMin.Y + MathF.Max(16 * s, pageSize.Y * 0.1f);
+        var room = windowPos.Y + windowSize.Y - 16 * s - top;
+        var height = MathF.Min(panelHeight > 0 ? panelHeight : 400 * s, room);
+        var min = new Vector2(pageMin.X + (pageSize.X - width) / 2, top + slide);
+        var max = min + new Vector2(width, height);
 
-        // The fade and the row spacing hold for the whole dialog; the frame's own look is read when it begins.
+        // The fade holds for both layers and everything in them.
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, MathF.Max(0.01f, eased));
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(8, 10) * s);
+
+        // The dark layer: over the whole window, taking every click and scroll that misses the panel.
+        ImGui.SetCursorScreenPos(windowPos);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        if (ImGui.BeginChild("##importscrim", windowSize, false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            var dl = ImGui.GetWindowDrawList();
+            dl.AddRectFilled(windowPos, windowPos + windowSize, Palette.U32(Palette.WithAlpha(Palette.Scrim, 0.62f)), 16 * s);
+            ImGui.InvisibleButton("##importscrimhit", windowSize);
+            Ui.PanelShadow(dl, min, max, 14 * s);
+        }
+        ImGui.EndChild();
+        ImGui.PopStyleVar();
+
+        // The panel. Its frame is read when it begins; the row spacing holds inside it.
+        ImGui.SetCursorScreenPos(min);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(22, 20) * s);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 14 * s);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
-        ImGui.PushStyleColor(ImGuiCol.PopupBg, Palette.Raised);
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 14 * s);
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildBorderSize, 1f);
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, Palette.Raised);
         ImGui.PushStyleColor(ImGuiCol.Border, Palette.WithAlpha(Palette.Text, 0.08f));
-        const ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove
-                                       | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.AlwaysAutoResize;
-        var open = ImGui.BeginPopupModal(PopupId, flags);
+        var shown = ImGui.BeginChild("##importpanel", new Vector2(width, height), true, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.AlwaysUseWindowPadding);
         ImGui.PopStyleColor(2);
         ImGui.PopStyleVar(3);
-        if (!open)
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(8, 10) * s);
+        if (shown)
         {
-            ImGui.PopStyleVar(2);
-            return;
+            var inner = width - 44 * s;
+            if (last is { Ok: true } done) DrawImported(done, inner);
+            else DrawForm(inner);
+            // What it took, for the next frame's size: the content plus the padding below it.
+            panelHeight = ImGui.GetCursorPosY() - 10 * s + 20 * s;
         }
-
-        var dl = ImGui.GetWindowDrawList();
-        var min = ImGui.GetWindowPos();
-        Ui.PanelShadow(dl, min, min + ImGui.GetWindowSize(), 14 * s);
-        var inner = width - 44 * s;
-
-        if (last is { Ok: true } done) DrawImported(done, inner);
-        else DrawForm(inner);
-        ImGui.EndPopup();
-        ImGui.PopStyleVar(2);
+        ImGui.PopStyleVar();
+        ImGui.EndChild();
+        ImGui.PopStyleVar(); // the fade
+        return isOpen;
     }
+
+    private void Close() => isOpen = false;
 
     // ------------------------------------------------------------------ the form
 
@@ -157,7 +180,7 @@ internal sealed class ImportDialog
         if (Ui.Button("Cancel", Ui.Kind.Ghost, tooltip: pending != null ? "Stop the download and keep the order as it is." : null, id: "##importcancel"))
         {
             if (pending != null) cancel?.Cancel();
-            else ImGui.CloseCurrentPopup();
+            else Close();
         }
         ImGui.SameLine(0, 10 * s);
         var tip = !ready ? "Still reading game data" : input.Trim().Length == 0 ? "Paste something from Teamcraft first" : "Ctrl+Enter";
@@ -165,11 +188,11 @@ internal sealed class ImportDialog
 
         // Keyboard: Ctrl+Enter imports, Escape closes once the field has let go of it.
         if (canImport && ImGui.GetIO().KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.Enter)) StartImport();
-        if (!typing && pending == null && ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
+        if (!typing && pending == null && ImGui.IsKeyPressed(ImGuiKey.Escape)) Close();
     }
 
     /// <summary>The dialog's title with a round close button on the right.</summary>
-    private static void Header(string title, float width)
+    private void Header(string title, float width)
     {
         var s = Ui.S;
         var start = ImGui.GetCursorScreenPos();
@@ -184,7 +207,7 @@ internal sealed class ImportDialog
         var after = ImGui.GetCursorScreenPos();
         const float d = 28;
         ImGui.SetCursorScreenPos(new Vector2(start.X + width - d * s, start.Y + (h - d * s) / 2));
-        if (Ui.IconButton("##importclose", FontAwesomeIcon.Times, "Close", Ui.Kind.Ghost, d)) ImGui.CloseCurrentPopup();
+        if (Ui.IconButton("##importclose", FontAwesomeIcon.Times, "Close", Ui.Kind.Ghost, d)) Close();
         ImGui.SetCursorScreenPos(after);
     }
 
@@ -262,10 +285,10 @@ internal sealed class ImportDialog
         ImGui.SameLine(0, 10 * s);
         if (Ui.Button("Open plan", Ui.Kind.Primary, FontAwesomeIcon.Sitemap, id: "##importplan"))
         {
-            ImGui.CloseCurrentPopup();
+            Close();
             plugin.Main.Select<PlanPage>();
         }
-        if (ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
+        if (ImGui.IsKeyPressed(ImGuiKey.Escape)) Close();
     }
 
     // ------------------------------------------------------------------ importing

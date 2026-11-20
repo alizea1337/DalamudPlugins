@@ -33,7 +33,7 @@ internal enum RunPhase
 /// Learn books, take items out of retainers, buy from vendors, gather and fish (crafting while timed
 /// nodes and fish windows are closed), then craft the rest.
 /// </summary>
-internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn, Return }
+internal enum RunStage { Retainers, Learn, Vendors, Hunt, Gather, Craft, TurnIn, Return, ToSpot }
 
 internal sealed record RunLogEntry(DateTime Time, string Text, bool Problem);
 
@@ -86,6 +86,8 @@ internal sealed class RunEngine : IDisposable
 
     /// <summary>The crafter got this run's recipes; never build them twice (ordered items would be crafted again).</summary>
     private bool craftQueueBuilt;
+    /// <summary>The crafting spot was already gone to (or tried) for this stretch of crafting.</summary>
+    private bool spotTried;
 
     /// <summary>Trip to the next timed node's spawn area while it's still closed.</summary>
     private readonly Travel nodeTrip = new();
@@ -365,6 +367,7 @@ internal sealed class RunEngine : IDisposable
         extrasCrafted = false;
         pendingEnd = null;
         startedAt = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
+        spotTried = false;
         startGil = Integrations.GameState.BagCount(1);
         Integrations.Travel.AdvancedUnstuck = plugin.Config.Security.AdvancedUnstuck;
         Integrations.Travel.StuckAfter = TimeSpan.FromSeconds(Math.Clamp(plugin.Config.Security.StuckSeconds, 3, 30));
@@ -685,6 +688,18 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Everything gathered: craft whatever is left (or all of it when nothing was gathered).</summary>
     private void StartCrafting()
     {
+        // To the crafting spot first, when one is saved and there's something to craft.
+        if (!spotTried && plugin.Config.CraftingSpot is { Enabled: true, IsSet: true } spot && CraftingLeft())
+        {
+            spotTried = true;
+            if (Home.BeginSpot(spot))
+            {
+                Stage = RunStage.ToSpot;
+                Headline = "Going to the crafting spot";
+                Add($"Going to the crafting spot ({spot.Label}).", false);
+                return;
+            }
+        }
         Stage = RunStage.Craft;
         craftingBetween = false;
         yielding = false;
@@ -709,6 +724,19 @@ internal sealed class RunEngine : IDisposable
         Headline = "Crafting";
     }
 
+    /// <summary>Crafts still to do: the queue's rest once it's built, else whether the plan has any.</summary>
+    private bool CraftingLeft() => craftQueueBuilt ? !Crafter.Finished : CraftJobs().Count > 0;
+
+    /// <summary>On the way to the crafting spot: once there (or once it turned out it can't get there), craft.</summary>
+    private void TickToSpot()
+    {
+        Detail = Home.Status;
+        if (Phase == RunPhase.Stopping) { Stop(pendingStop ?? "Stopped.", pendingStopProblem, now: true); return; }
+        if (!Home.Finished) return;
+        if (Home.Failure is { } why) Add($"Couldn't get to the crafting spot: {why} Crafting here instead.", true);
+        StartCrafting();
+    }
+
     // ------------------------------------------------------------------ controls
 
     /// <summary>Soft pause: finishes the node being gathered, the catch under way or the item being crafted, then stops.</summary>
@@ -724,6 +752,7 @@ internal sealed class RunEngine : IDisposable
         else if (Stage == RunStage.Vendors) { Shopper.RequestPause(); Headline = "Pausing after this vendor"; }
         else if (Stage == RunStage.Retainers) { Retainers.RequestPause(); Headline = "Pausing after this retainer"; }
         else if (Stage == RunStage.Hunt) { Hunt.RequestPause(); Headline = "Pausing after this fight"; }
+        else if (Stage == RunStage.ToSpot) Headline = "Pausing at the crafting spot";
         else if (FishingNow)
         {
             // The rod stays out between casts: the fisher lands the catch under way, then reels in.
@@ -758,6 +787,7 @@ internal sealed class RunEngine : IDisposable
             RunStage.Vendors => "Buying from vendors",
             RunStage.Hunt => "Farming monster drops",
             RunStage.Return => "Heading back",
+            RunStage.ToSpot => "Going to the crafting spot",
             RunStage.TurnIn => "Turning in collectables",
             RunStage.Gather when worker == Worker.Fish => "Fishing",
             _ => "Gathering",
@@ -868,6 +898,7 @@ internal sealed class RunEngine : IDisposable
         Gather.Stop();
         StopFisher();
         Stage = RunStage.TurnIn;
+        spotTried = false; // the next round's crafting goes back to the spot
         Headline = "Turning in collectables";
         TurnIn.Begin(plugin.Plans.ScripTasks.Select(t => t.Option.ItemId));
         Add("Collectables done; turning them in for scrips.", false);
@@ -946,7 +977,7 @@ internal sealed class RunEngine : IDisposable
         // closed it (and then pauses, as Pause() asked). Never twice in one frame.
         if (Stage == RunStage.Gather && !pausedForDuty && !knockedOut && !(workerTicked && worker == Worker.Fish)
             && (Fish.Busy || Services.Condition[ConditionFlag.Fishing])) TickWorker(Worker.Fish);
-        if (Stage == RunStage.Return && !pausedForDuty && !knockedOut) Home.Tick();
+        if (Stage is RunStage.Return or RunStage.ToSpot && !pausedForDuty && !knockedOut) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
@@ -971,6 +1002,7 @@ internal sealed class RunEngine : IDisposable
             case RunStage.Vendors: TickErrand(Shopper.Finished, Shopper.Failure, Shopper.IsPaused, Shopper.Status, StartHunt); break;
             case RunStage.Hunt: TickErrand(Hunt.Finished, Hunt.Failure, Hunt.IsPaused, Hunt.Status, StartGatherOrCraft); break;
             case RunStage.Return: TickReturn(); break;
+            case RunStage.ToSpot: TickToSpot(); break;
             case RunStage.Gather: TickGathering(); break;
             case RunStage.TurnIn: TickErrand(TurnIn.Finished, TurnIn.Failure, false, TurnIn.Status, AfterTurnIn); break;
             default: TickCrafting(); break;
@@ -1034,6 +1066,7 @@ internal sealed class RunEngine : IDisposable
         revivedAt = default;
         Add("Back up; carrying on.", false);
         if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) HandBackToGathering(log: false);
+        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(plugin.Config.CraftingSpot)) StartCrafting(); // up again: the trip starts over from here
         return false;
     }
 
@@ -1056,6 +1089,7 @@ internal sealed class RunEngine : IDisposable
         pausedForDuty = false;
         Add("Duty over; carrying on.", false);
         if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) HandBackToGathering(log: false);
+        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(plugin.Config.CraftingSpot)) StartCrafting(); // back from the duty: the trip starts over from here
         return false;
     }
 

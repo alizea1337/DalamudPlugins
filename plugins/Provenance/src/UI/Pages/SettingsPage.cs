@@ -75,7 +75,7 @@ internal sealed class SettingsPage : Page
         => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(territoryId)?.PlaceName.ValueNullable?.Name.ExtractText() is { Length: > 0 } n ? n : null;
 
     private static readonly string[] Stances = { "Free", "Defender", "Attacker", "Healer" };
-    private static readonly string[] AfterPlaces = { "Stay", "Where it started", "Inn room", "Home" };
+    private static readonly string[] AfterPlaces = { "Stay", "Where it started", "Inn room", "Home", "Crafting spot" };
     private List<Integrations.Teleporter.Destination>? homes;
     private List<DropdownItem>? homeItems, innItems;
 
@@ -88,7 +88,7 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.BeginCard(width: w);
         var place = (int)a.Place;
-        if (Ui.Segmented("##afterplace", AfterPlaces, ref place, 440 * s)) { a.Place = (AfterOrderPlace)place; Config.Save(); }
+        if (Ui.Segmented("##afterplace", AfterPlaces, ref place, 560 * s)) { a.Place = (AfterOrderPlace)place; Config.Save(); }
         ImGui.Dummy(new Vector2(0, 4 * s));
         var catalog = Plans.Catalog;
         switch (a.Place)
@@ -132,6 +132,61 @@ internal sealed class SettingsPage : Page
                 Ui.Wrapped("Teleports to the house or apartment entrance (any house or apartment in your teleport list).", Palette.TextMuted);
                 break;
             }
+            case AfterOrderPlace.CraftingSpot:
+                if (Config.CraftingSpot.IsSet)
+                    Ui.Wrapped($"Goes back to the crafting spot: {Config.CraftingSpot.Label}, through the door when it's in a house or apartment.", Palette.TextMuted);
+                else
+                    Ui.Wrapped("No crafting spot saved yet. Save one on the Crafting page.", Palette.Warn);
+                break;
+        }
+        Ui.EndCard();
+    }
+
+    private string? spotProblem;
+
+    /// <summary>The crafting spot: saved where you stand, gone to before the run crafts.</summary>
+    private void DrawCraftingSpot(float w)
+    {
+        var s = Ui.S;
+        var spot = Config.CraftingSpot;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Crafting spot");
+        Ui.Wrapped("Where the run goes before it crafts: a corner of your house or apartment, an inn room, or anywhere a teleport and a walk reach. "
+                   + "Stand there and save it. Crafting while waiting for timed nodes stays out by the nodes.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        if (spot.IsSet)
+        {
+            var icon = spot.Kind switch
+            {
+                CraftingSpotKind.House => FontAwesomeIcon.Home,
+                CraftingSpotKind.Apartment => FontAwesomeIcon.Building,
+                CraftingSpotKind.InnRoom => FontAwesomeIcon.Bed,
+                _ => FontAwesomeIcon.MapMarkerAlt,
+            };
+            Ui.Icon(icon, Palette.Accent);
+            ImGui.SameLine(0, 10 * s);
+            Ui.Text(spot.Label);
+            var v = spot.Enabled;
+            if (Ui.Checkbox("Go there before crafting", ref v, "Off keeps the spot saved, and the run crafts wherever it is.")) { spot.Enabled = v; Config.Save(); }
+        }
+        else Ui.Muted("No spot saved yet.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        if (Ui.Button("Save where I'm standing", Ui.Kind.Secondary, FontAwesomeIcon.MapMarkerAlt, id: "##savespot"))
+        {
+            var (captured, why) = Run.CraftingSpots.Capture(Plans.Catalog);
+            spotProblem = why;
+            if (captured != null) { Config.CraftingSpot = captured; Config.Save(); }
+        }
+        if (spot.IsSet)
+        {
+            ImGui.SameLine(0, 10 * s);
+            if (Ui.Button("Forget it", Ui.Kind.Ghost, id: "##forgetspot")) { Config.CraftingSpot = new CraftingSpotSettings(); spotProblem = null; Config.Save(); }
+        }
+        if (spotProblem != null)
+        {
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped(spotProblem, Palette.Warn);
         }
         Ui.EndCard();
     }
@@ -396,6 +451,7 @@ internal sealed class SettingsPage : Page
         if (ImGui.SliderInt("##repair", ref repair, 0, 99, repair == 0 ? "never" : "%d%%")) { cr.RepairBelow = repair; Config.Save(); }
         Ui.Wrapped("Self-repair needs Dark Matter of a high enough grade in your bags.", Palette.TextMuted);
         Ui.EndCard();
+        DrawCraftingSpot(w);
     }
 
     /// <summary>Timed nodes and waiting, extras, collectables, materia and reduction.</summary>
