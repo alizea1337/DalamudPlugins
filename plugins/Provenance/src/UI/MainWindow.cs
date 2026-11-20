@@ -129,7 +129,8 @@ internal sealed class MainWindow : Window
         // The interface size: layout and window change at once, the fonts for the size are built meanwhile (the
         // text is stretched to the size until they're ready, see Draw).
         Ui.Scale = plugin.Config.Window.ScaleFactor;
-        Ui.F.SetScale(Ui.Scale);
+        Ui.TextScale = plugin.Config.Window.TextScaleFactor;
+        Ui.F.SetScale(Ui.TextScale, Ui.Scale);
         Ui.F.Update();
         if (MathF.Abs(Ui.Scale - appliedScale) > 0.001f)
         {
@@ -166,9 +167,9 @@ internal sealed class MainWindow : Window
 
     public override void Draw()
     {
-        // Text at the interface size even before its fonts are built: the fonts in use, stretched (children and the
+        // Text at the text size even before its fonts are built: the fonts in use, stretched (children and the
         // lists that open from here take it over). 1 once the fonts for the size are ready, so sharp from then on.
-        ImGui.SetWindowFontScale(Ui.Scale / Ui.F.Scale);
+        ImGui.SetWindowFontScale(Ui.TextScale / Ui.F.Scale);
         using var style = Ui.PushStyle();
         using var body = Ui.F.Body.Push();
         Ui.ReduceMotion = plugin.Config.Window.ReduceMotion;

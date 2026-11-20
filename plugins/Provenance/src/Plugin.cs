@@ -35,9 +35,10 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.Create<Services>();
         ECommons.ECommonsMain.Init(pluginInterface, this);
         Config = Configuration.Load();
-        fonts = new Fonts(Config.Window.ScaleFactor);
+        fonts = new Fonts(Config.Window.TextScaleFactor, Config.Window.ScaleFactor);
         Ui.Init(fonts);
         Ui.Scale = Config.Window.ScaleFactor;
+        Ui.TextScale = Config.Window.TextScaleFactor;
 
         Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);
@@ -52,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
             new("Settings", new Page[]
             {
                 new SettingsPage(this, SettingsSection.General),
+                new SettingsPage(this, SettingsSection.Interface),
                 new SettingsPage(this, SettingsSection.Crafting),
                 new SettingsPage(this, SettingsSection.Gathering),
                 new SettingsPage(this, SettingsSection.Fishing),

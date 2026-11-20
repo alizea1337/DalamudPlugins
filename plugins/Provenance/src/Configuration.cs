@@ -50,6 +50,7 @@ public sealed class Configuration : IPluginConfiguration
         // "Quests & other" is no longer a filter; a saved pick of it would hide everything.
         c.Browse.PlaceMask &= (int)(Core.Catalog.Place.OpenWorld | Core.Catalog.Place.Diadem | Core.Catalog.Place.CosmicExploration | Core.Catalog.Place.OceanFishing);
         c.Window ??= new();
+        if (c.Window.TextScale <= 0) c.Window.TextScale = c.Window.Scale;
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
@@ -285,9 +286,16 @@ public sealed class WindowSettings
     public bool ReduceMotion { get; set; } = false;
     /// <summary>How big the text in tooltips is.</summary>
     public TooltipSize TooltipSize { get; set; } = TooltipSize.Normal;
-    /// <summary>Interface size in percent (75 to 150): text, spacing, icons and the window, on top of Dalamud's own scale.</summary>
+    /// <summary>Interface scale in percent (75 to 150): spacing, buttons, icons and the window, on top of Dalamud's own scale.</summary>
     public int Scale { get; set; } = 100;
+    /// <summary>
+    /// Text size in percent (75 to 150): the window's text, apart from the interface scale. Unset (-1) in files from
+    /// before it existed, where the interface size set the text too; it starts at that size then (see Load).
+    /// </summary>
+    public int TextScale { get; set; } = -1;
 
-    /// <summary>The interface size as a factor (1 = 100%), kept within what the settings offer.</summary>
+    /// <summary>The interface scale as a factor (1 = 100%), kept within what the settings offer.</summary>
     public float ScaleFactor => Math.Clamp(Scale, 50, 200) / 100f;
+    /// <summary>The text size as a factor (1 = 100%), kept within what the settings offer.</summary>
+    public float TextScaleFactor => Math.Clamp(TextScale, 50, 200) / 100f;
 }

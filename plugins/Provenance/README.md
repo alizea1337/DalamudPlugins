@@ -5,12 +5,13 @@ crystals, shows where each one comes from, and then gets it all and crafts it fo
 books, vendors, monster drops, gathering, fishing and crafting in one run.
 
 Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and Plan on top, then
-Run under Status, Character under Tools, and the settings, one page each for General, Crafting,
+Run under Status, Character under Tools, and the settings, one page each for General, Interface, Crafting,
 Gathering, Fishing, Monster drops, After the order and Security. A *crafting spot* (Settings, Crafting:
 stand there and save it) is where the run goes before it crafts: a corner of your house or apartment
-(through the door), an inn room, or anywhere a teleport and a walk reach. Under General, *Interface size*
-(75% to 150%) scales the whole window, *Reduce motion* keeps it from sliding things around and
-*Tooltip size* sets how big the hover texts are.
+(through the door), an inn room, or anywhere a teleport and a walk reach. The Interface page sets how
+the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, icons and the window,
+*Text size* (75% to 150%) sizes all its text, *Tooltip size* sets how big the hover texts are, and
+*Reduce motion* keeps it from sliding things around.
 
 ## What it does
 

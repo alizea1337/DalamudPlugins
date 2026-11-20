@@ -1,12 +1,19 @@
 # Changelog
 
-## 0.14.2
+## 0.15.0
 
-- The interface size changes all the text in the window at once (item names, page names in the
-  sidebar, headings, buttons, chips, the drop-down lists), with the spacing and the window. Until
-  the sharp fonts for the new size are built, the text in use is stretched to it ("Sharpening the
-  text…" in the settings), so it never stays at the old size.
-- Tooltips keep their own size (Small to Largest) whatever the interface size.
+An Interface page, and a text size of its own.
+
+- Settings has a new Interface page, after General, for how the window looks: Interface scale, Text
+  size, Tooltip size and Reduce motion. They used to sit in General's Window card.
+- Interface scale and Text size are separate settings now, each 75% to 150%. Interface scale sizes
+  the spacing, buttons, icons and the window itself, on top of Dalamud's own scale. Text size sizes
+  all the text in the window: item names, page names in the sidebar, headings, buttons, chips and
+  the drop-down lists. If you'd picked an interface size before, the text starts at that size.
+- Both change at once. Until the sharp fonts for a new text size are built, the text in use is
+  stretched to it ("sharpening the text…" next to Size), so it never stays at the old size.
+- Tooltips keep their own size (Small to Largest), whatever the other two are.
+- The bug report gives the interface scale and the text size.
 
 ## 0.14.1
 

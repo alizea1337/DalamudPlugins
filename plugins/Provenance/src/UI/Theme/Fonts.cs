@@ -9,8 +9,8 @@ namespace Provenance.UI.Theme;
 /// <summary>
 /// Nunito in three weights (latin + latin-ext merged, plus the glyphs of Dalamud's UI language so item
 /// names in other client languages still render). Icons come from Dalamud's bundled FontAwesome.
-/// Built at the interface size (Settings, General): a new size builds a new set, and the old one stays in use
-/// until the new one is ready, so the window never shows the default font in between.
+/// Text is built at the text size and icons at the interface scale (Settings, Interface): a new size builds a new
+/// set, and the old one stays in use until the new one is ready (the window stretches it to the size meanwhile).
 /// </summary>
 internal sealed class Fonts : IDisposable
 {
@@ -22,7 +22,10 @@ internal sealed class Fonts : IDisposable
     /// <summary>One size's fonts.</summary>
     private sealed class Set : IDisposable
     {
+        /// <summary>Text size the text fonts are built at (1 = 100%).</summary>
         public float Scale;
+        /// <summary>Interface scale the icon fonts are built at.</summary>
+        public float IconScale;
         public IFontHandle Body = null!, Strong = null!, Small = null!, Title = null!, Display = null!, Icon = null!, IconSmall = null!;
         public readonly Dictionary<int, IFontHandle> Regular = new();
 
@@ -47,15 +50,18 @@ internal sealed class Fonts : IDisposable
     /// <summary>Fonts not built this long after asking: ask again, and log what's wrong.</summary>
     private static readonly TimeSpan BuildRetry = TimeSpan.FromSeconds(3);
 
-    public Fonts(float scale = 1f)
+    public Fonts(float textScale = 1f, float iconScale = 1f)
     {
         atlas = Services.PluginInterface.UiBuilder.FontAtlas;
         dir = Path.Combine(Services.PluginInterface.AssemblyLocation.DirectoryName!, "Resources", "Fonts");
-        current = Build(scale);
+        current = Build(textScale, iconScale);
     }
 
-    /// <summary>The interface size the fonts in use are built for (1 = 100%).</summary>
+    /// <summary>The text size the text fonts in use are built at (1 = 100%).</summary>
     public float Scale => current.Scale;
+
+    /// <summary>New sizes are being built (the ones in use stay until they're ready).</summary>
+    public bool Building => pending != null;
 
     public IFontHandle Body => current.Body;
     public IFontHandle Strong => current.Strong;
@@ -65,12 +71,13 @@ internal sealed class Fonts : IDisposable
     public IFontHandle Icon => current.Icon;
     public IFontHandle IconSmall => current.IconSmall;
 
-    /// <summary>Asks for another interface size; the fonts switch once the new set is built (see <see cref="Update"/>).</summary>
-    public void SetScale(float scale)
+    /// <summary>Asks for other sizes; the fonts switch once the new set is built (see <see cref="Update"/>).</summary>
+    public void SetScale(float textScale, float iconScale)
     {
-        if (MathF.Abs((pending?.Scale ?? current.Scale) - scale) < 0.001f) return;
+        static bool Same(Set s, float t, float i) => MathF.Abs(s.Scale - t) < 0.001f && MathF.Abs(s.IconScale - i) < 0.001f;
+        if (Same(pending ?? current, textScale, iconScale)) return;
         pending?.Dispose();
-        pending = MathF.Abs(current.Scale - scale) < 0.001f ? null : Build(scale);
+        pending = Same(current, textScale, iconScale) ? null : Build(textScale, iconScale);
         if (pending != null) AskForBuild();
     }
 
@@ -93,7 +100,7 @@ internal sealed class Fonts : IDisposable
         current = pending;
         pending = null;
         old.Dispose();
-        Services.Log.Information("Interface size {Scale:P0}: fonts switched", current.Scale);
+        Services.Log.Information("Fonts switched: text {Text:P0}, icons {Icons:P0}", current.Scale, current.IconScale);
     }
 
     /// <summary>
@@ -116,7 +123,7 @@ internal sealed class Fonts : IDisposable
 
     /// <summary>What the fonts are doing, for a bug report.</summary>
     public string Describe()
-        => $"in use {current.Scale:P0} (ready {current.Ready}), waiting {(pending == null ? "none" : $"{pending.Scale:P0} (ready {pending.Ready})")}, "
+        => $"in use text {current.Scale:P0}, icons {current.IconScale:P0} (ready {current.Ready}), waiting {(pending == null ? "none" : $"text {pending.Scale:P0}, icons {pending.IconScale:P0} (ready {pending.Ready})")}, "
            + $"atlas {atlas.AutoRebuildMode}, built {atlas.HasBuiltAtlas}, building {(atlas.BuildTask is { IsCompleted: false } ? "yes" : "no")}, "
            + $"tooltip sizes {string.Join(",", current.Regular.Select(kv => $"{kv.Key}:{(kv.Value.Available ? "ready" : "waiting")}"))}";
 
@@ -140,16 +147,17 @@ internal sealed class Fonts : IDisposable
         return handle;
     }
 
-    private Set Build(float scale) => new()
+    private Set Build(float textScale, float iconScale) => new()
     {
-        Scale = scale,
-        Body = Text(atlas, dir, 400, BodySize * scale),
-        Strong = Text(atlas, dir, 700, BodySize * scale),
-        Small = Text(atlas, dir, 400, SmallSize * scale),
-        Title = Text(atlas, dir, 800, TitleSize * scale),
-        Display = Text(atlas, dir, 800, DisplaySize * scale),
-        Icon = Icons(atlas, 14f * scale),
-        IconSmall = Icons(atlas, 11f * scale),
+        Scale = textScale,
+        IconScale = iconScale,
+        Body = Text(atlas, dir, 400, BodySize * textScale),
+        Strong = Text(atlas, dir, 700, BodySize * textScale),
+        Small = Text(atlas, dir, 400, SmallSize * textScale),
+        Title = Text(atlas, dir, 800, TitleSize * textScale),
+        Display = Text(atlas, dir, 800, DisplaySize * textScale),
+        Icon = Icons(atlas, 14f * iconScale),
+        IconSmall = Icons(atlas, 11f * iconScale),
     };
 
     private static IFontHandle Text(IFontAtlas atlas, string dir, int weight, float size)

@@ -12,6 +12,8 @@ namespace Provenance.UI.Pages;
 internal enum SettingsSection
 {
     General,
+    /// <summary>Interface scale, text size, tooltip size, motion.</summary>
+    Interface,
     Crafting,
     Gathering,
     Fishing,
@@ -34,6 +36,7 @@ internal sealed class SettingsPage : Page
     public override string Title => section switch
     {
         SettingsSection.General => "General",
+        SettingsSection.Interface => "Interface",
         SettingsSection.Crafting => "Crafting",
         SettingsSection.Gathering => "Gathering",
         SettingsSection.Fishing => "Fishing",
@@ -44,6 +47,7 @@ internal sealed class SettingsPage : Page
     public override FontAwesomeIcon Icon => section switch
     {
         SettingsSection.General => FontAwesomeIcon.SlidersH,
+        SettingsSection.Interface => FontAwesomeIcon.Desktop,
         SettingsSection.Crafting => FontAwesomeIcon.Hammer,
         SettingsSection.Gathering => FontAwesomeIcon.Leaf,
         SettingsSection.Fishing => FontAwesomeIcon.Fish,
@@ -211,26 +215,54 @@ internal sealed class SettingsPage : Page
     private List<uint> combatJobs = new();
     private List<DropdownItem>? combatJobItems;
 
-    private static readonly int[] InterfaceSizes = { 75, 90, 100, 110, 125, 150 };
-    private static readonly List<DropdownItem> InterfaceSizeItems = InterfaceSizes
+    private static readonly int[] Percentages = { 75, 90, 100, 110, 125, 150 };
+    private static readonly List<DropdownItem> PercentageItems = Percentages
         .Select(p => new DropdownItem($"{p}%", p == 100 ? "default" : null)).ToList();
 
-    /// <summary>The interface size field: text, spacing, icons and the window together.</summary>
-    private void InterfaceSizePicker()
+    /// <summary>A size in percent from a drop-down (interface scale, text size).</summary>
+    private void PercentPicker(string id, int value, Action<int> set, FontAwesomeIcon icon)
     {
         var s = Ui.S;
-        var w = Config.Window;
-        var current = Array.IndexOf(InterfaceSizes, w.Scale);
-        Ui.DropdownField("##uiscale", current >= 0 ? $"{InterfaceSizes[current]}%" : $"{w.Scale}%", "Pick a size", 220 * s, FontAwesomeIcon.ExpandArrowsAlt);
-        // While the sharp fonts for the size are built, the text is stretched to it; say why it's soft for a moment.
-        if (MathF.Abs(Ui.F.Scale - w.ScaleFactor) > 0.001f)
+        var current = Array.IndexOf(Percentages, value);
+        Ui.DropdownField(id, $"{value}%", "Pick a size", 220 * s, icon);
+        var pick = Ui.DropdownList(id, PercentageItems, current, "");
+        if (pick >= 0) { set(Percentages[pick]); Config.Save(); }
+    }
+
+    /// <summary>How big the window and its text are, the tooltips, and motion.</summary>
+    private void DrawInterface(float w)
+    {
+        var s = Ui.S;
+        var win = Config.Window;
+        Ui.Heading("Interface", "How big the window and its text are, the tooltips, and how much moves.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Size");
+        if (Ui.F.Building)
         {
-            ImGui.SameLine(0, 14 * s);
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
-            Ui.Muted("Sharpening the text…");
+            // The sharp fonts for a new size are being built; the text is stretched to it meanwhile.
+            ImGui.SameLine(0, 10 * s);
+            using (Ui.F.Small.Push()) Ui.Muted("sharpening the text…");
         }
-        var pick = Ui.DropdownList("##uiscale", InterfaceSizeItems, current, "");
-        if (pick >= 0) { w.Scale = InterfaceSizes[pick]; Config.Save(); }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.Text("Interface scale");
+        PercentPicker("##uiscale", win.Scale, v => win.Scale = v, FontAwesomeIcon.ExpandArrowsAlt);
+        using (Ui.F.Small.Push()) Ui.Wrapped("Spacing, buttons, icons and the window itself, on top of Dalamud's own scale. The text keeps its own size.", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        Ui.Text("Text size");
+        PercentPicker("##textscale", win.TextScale, v => win.TextScale = v, FontAwesomeIcon.Font);
+        using (Ui.F.Small.Push()) Ui.Wrapped("All the text in the window: item names, page names, headings and buttons.", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        Ui.Text("Tooltip size");
+        TooltipSizePicker();
+        Ui.EndCard();
+
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Motion");
+        var v = win.ReduceMotion;
+        if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { win.ReduceMotion = v; Config.Save(); }
+        Ui.EndCard();
     }
 
     private static readonly string[] TooltipSizeNames = { "Small", "Normal", "Large", "Larger", "Largest" };
@@ -366,6 +398,7 @@ internal sealed class SettingsPage : Page
         switch (section)
         {
             case SettingsSection.General: DrawGeneral(w); break;
+            case SettingsSection.Interface: DrawInterface(w); break;
             case SettingsSection.Crafting: DrawCrafting(w); break;
             case SettingsSection.Gathering: DrawGathering(w); break;
             case SettingsSection.Fishing: DrawFishing(w); break;
@@ -374,7 +407,7 @@ internal sealed class SettingsPage : Page
         }
     }
 
-    /// <summary>Owned items, vendors, scrips for books, the summoning bell, the window, and the plugins a run needs.</summary>
+    /// <summary>Owned items, vendors, scrips, the summoning bell, the plugins a run needs, and the bug report.</summary>
     private void DrawGeneral(float w)
     {
         var s = Ui.S;
@@ -461,20 +494,6 @@ internal sealed class SettingsPage : Page
             using (Ui.F.Small.Push()) Ui.Muted(dep.Role);
             ImGui.EndGroup();
         }
-        Ui.EndCard();
-
-        // Window
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Window");
-        v = Config.Window.ReduceMotion;
-        if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { Config.Window.ReduceMotion = v; Config.Save(); }
-        ImGui.Dummy(new Vector2(0, 2 * s));
-        Ui.Text("Interface size");
-        InterfaceSizePicker();
-        using (Ui.F.Small.Push()) Ui.Wrapped("All the text in the window (item names, page names, headings, buttons) with its spacing, icons and the window itself, on top of Dalamud's own scale. Tooltips keep the size below.", Palette.TextMuted);
-        ImGui.Dummy(new Vector2(0, 2 * s));
-        Ui.Text("Tooltip size");
-        TooltipSizePicker();
         Ui.EndCard();
 
         DrawBugReport(w);

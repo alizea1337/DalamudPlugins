@@ -21,12 +21,16 @@ internal static partial class Ui
     public const float IconRadius = 8f;
 
     public static Fonts F { get; private set; } = null!;
-    /// <summary>The interface size picked in the settings (1 = 100%), set by the window each frame.</summary>
+    /// <summary>The interface scale picked in the settings (1 = 100%): spacing, buttons, icons, the window. Set each frame.</summary>
     public static float Scale { get; set; } = 1f;
 
+    /// <summary>The text size picked in the settings (1 = 100%): the window's text. Set each frame.</summary>
+    public static float TextScale { get; set; } = 1f;
+
     /// <summary>
-    /// Pixels per design unit: Dalamud's global scale times the interface size (Settings, General). The text follows
-    /// at once too: until the fonts built for the size are ready, the window stretches the ones in use (see MainWindow).
+    /// Pixels per design unit: Dalamud's global scale times the interface scale (Settings, Interface). The text has a
+    /// size of its own (<see cref="TextScale"/>); until the fonts built for it are ready, the window stretches the
+    /// ones in use (see MainWindow).
     /// </summary>
     public static float S => ImGuiHelpers.GlobalScale * Scale;
 

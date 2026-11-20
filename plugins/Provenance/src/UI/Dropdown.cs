@@ -195,8 +195,8 @@ internal static partial class Ui
                                        | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoNavInputs;
         if (ImGui.BeginPopup(st.PopupId, flags))
         {
-            // The list's text at the interface size too, while its fonts are built (see MainWindow.Draw).
-            ImGui.SetWindowFontScale(Scale / F.Scale);
+            // The list's text at the text size too, while its fonts are built (see MainWindow.Draw).
+            ImGui.SetWindowFontScale(TextScale / F.Scale);
             var appearing = ImGui.IsWindowAppearing();
             var dl = ImGui.GetWindowDrawList();
             var winMin = ImGui.GetWindowPos();
