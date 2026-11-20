@@ -2,8 +2,13 @@
 
 ## 0.11.1
 
-Aetherial reduction you can follow.
+Ephemeral nodes, and aetherial reduction you can follow.
 
+- Fixed: ephemeral nodes never counted as up, so a run waited for them forever without saying when
+  they open. Every ephemeral node points at an empty placeholder row of the game's timed-node table,
+  which was read as "never up" instead of using the node's own hours. This hit most aethersands
+  (Levin Quartz, Calamus Root, Goldbranch, Electrocoal, Fire Moraine and the rest come from ephemeral
+  nodes) and anything else ordered from an ephemeral node; 90 nodes in all.
 - The Run page lists, under each item from aetherial reduction, every collectable it comes from: the
   job, the zone, and what's going on with it now ("node up now", "node opens in 12 min (04:00–08:00
   ET)", "bites now", or why the run can't get it), plus how many wait in the bags to be reduced. Almost

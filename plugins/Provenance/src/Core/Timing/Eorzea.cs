@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Provenance.Core.Timing;
 
@@ -23,6 +24,20 @@ public static class Eorzea
         var start = startHhmm / 100 % 24;
         uint mask = 0;
         for (var i = 0; i < Math.Min(hours, 24); i++) mask |= 1u << ((start + i) % 24);
+        return mask;
+    }
+
+    /// <summary>
+    /// A timed node's uptime as the game data writes it: unspoiled and legendary nodes by their rare-pop table (start
+    /// HHMM and duration HHMM per slot, 65535 for an unused slot), ephemeral nodes by their own start and end (HHMM).
+    /// Ephemeral nodes point at table row 0, an empty placeholder: that means no table, not "never up".
+    /// </summary>
+    public static uint NodeUptime(uint tableRow, IReadOnlyList<(int Start, int Duration)> table, int ephemeralStart, int ephemeralEnd)
+    {
+        if (tableRow == 0) return Between(ephemeralStart, ephemeralEnd);
+        uint mask = 0;
+        foreach (var (start, duration) in table)
+            if (start != 65535 && duration != 0) mask |= Window(start, duration);
         return mask;
     }
 

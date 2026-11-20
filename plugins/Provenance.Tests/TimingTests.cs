@@ -34,6 +34,22 @@ public class TimingTests
         Assert.Equal(Eorzea.AllHours, Eorzea.Between(0, 0));
     }
 
+    /// <summary>
+    /// Every ephemeral node points at row 0 of the rare-pop table, an empty placeholder (start 65535, duration 0).
+    /// It means "no table": the node's own start and end count, never "never up" (which left every ephemeral
+    /// node closed for good, and the run waiting for Levin Quartz, Goldbranch and the like forever).
+    /// </summary>
+    [Fact]
+    public void Ephemeral_nodes_keep_their_own_hours()
+    {
+        var placeholder = new[] { (65535, 0), (65535, 0), (65535, 0) };
+        Assert.Equal(0xFu, Eorzea.NodeUptime(0, placeholder, 0, 400));            // Levin Quartz 0-4
+        Assert.Equal(0xFu << 20, Eorzea.NodeUptime(0, placeholder, 2000, 0));     // Electrocoal 20-24
+        Assert.Equal(0xFu << 4, Eorzea.NodeUptime(0, Array.Empty<(int, int)>(), 400, 800));
+        // Unspoiled and legendary nodes go by their table.
+        Assert.Equal((0b11u << 8) | (0b11u << 20), Eorzea.NodeUptime(12, new[] { (800, 200), (2000, 200), (65535, 0) }, 0, 0));
+    }
+
     [Fact]
     public void Until_open_and_up_for()
     {

@@ -323,19 +323,18 @@ internal sealed class GameCatalog : IGameCatalog
         };
     }
 
-    /// <summary>Unspoiled/legendary nodes have a rare-pop table; ephemeral ones a start and end time (HHMM).</summary>
-    /// <summary>Eorzea hours a timed node is up, from its rare-pop table or ephemeral times.</summary>
+    /// <summary>
+    /// Eorzea hours a timed node is up: unspoiled and legendary nodes from their rare-pop table, ephemeral ones from
+    /// their start and end. Ephemeral nodes point at the table's row 0, which exists but is empty; read as a table it
+    /// made every ephemeral node "never up" (see <see cref="Core.Timing.Eorzea.NodeUptime"/>).
+    /// </summary>
     private static uint UptimeMask(GatheringPointTransient t)
     {
-        if (t.GatheringRarePopTimeTable.ValueNullable is { } table)
-        {
-            uint mask = 0;
+        var slots = new List<(int Start, int Duration)>();
+        if (t.GatheringRarePopTimeTable.RowId != 0 && t.GatheringRarePopTimeTable.ValueNullable is { } table)
             for (var i = 0; i < table.StartTime.Count && i < table.Duration.Count; i++)
-                if (table.StartTime[i] != 65535 && table.Duration[i] != 0)
-                    mask |= Core.Timing.Eorzea.Window(table.StartTime[i], table.Duration[i]);
-            return mask;
-        }
-        return Core.Timing.Eorzea.Between(t.EphemeralStartTime, t.EphemeralEndTime);
+                slots.Add((table.StartTime[i], table.Duration[i]));
+        return Core.Timing.Eorzea.NodeUptime(t.GatheringRarePopTimeTable.RowId, slots, t.EphemeralStartTime, t.EphemeralEndTime);
     }
 
     private readonly Dictionary<uint, uint> timedMasks = new();
