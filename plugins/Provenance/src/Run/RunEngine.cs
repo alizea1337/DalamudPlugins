@@ -437,14 +437,14 @@ internal sealed class RunEngine : IDisposable
         Integrations.Travel.StuckAfter = TimeSpan.FromSeconds(Math.Clamp(plugin.Config.Security.StuckSeconds, 3, 30));
         scripPhase = plugin.Plans.ScripTasks.Count > 0;
         bookStop = false;
-        if (scripPhase && BooksToBuyNow() > 0)
+        if (scripPhase && ScripBuysNow() > 0)
         {
-            // The scrips at hand buy some books now; buying them first leaves room under the cap for the round.
+            // The scrips at hand buy some books or materials now; buying them first leaves room under the cap for the round.
             BeginBookStop();
             if (Active) Notify("Run started for " + plugin.Config.Order.Name + ".", false);
             return;
         }
-        if (scripPhase) LogScripRound("Earning scrips for books first: ");
+        if (scripPhase) LogScripRound("Earning scrips first: ");
 
         // Retainers first (a book may be with a retainer), then books, vendors, gathering, crafting.
         StartRetainers();
@@ -455,19 +455,21 @@ internal sealed class RunEngine : IDisposable
     private void StartLearning()
     {
         plugin.Plans.Invalidate();
-        // Books not in the bags that an exchange sells and the scrips at hand pay for: buy them first, then read
-        // everything. Books still waiting for scrips are bought after the next round of collectables.
-        var buy = LearnPlan.Learn.Where(l => l.WillBuy && plugin.Plans.BuyNow(l.ItemId))
-            .Select(l => plugin.Plans.BookOffer(l.ItemId) is { } offer ? new BookOrder(l.ItemId, offer) : null)
-            .OfType<BookOrder>().ToList();
+        // What an exchange sells and the scrips at hand pay for: books and tomes not in the bags, and materials sold
+        // for scrips. Buy them first, then read the books. The rest waits for the next round of collectables.
+        var books = LearnPlan.Learn.Where(l => l.WillBuy && plugin.Plans.BuyNow(l.ItemId))
+            .Select(l => plugin.Plans.BookOffer(l.ItemId) is { } offer ? new BookOrder(l.ItemId, offer) : null);
+        var materials = LearnPlan.Lines.Where(l => l.Supply == Supply.Exchange && l.WillBuy && plugin.Plans.BuyNowAmount(l.ItemId) > 0)
+            .Select(l => plugin.Plans.BookOffer(l.ItemId) is { } offer ? new BookOrder(l.ItemId, offer, Math.Min(l.Remaining, plugin.Plans.BuyNowAmount(l.ItemId))) : null);
+        var buy = books.Concat(materials).OfType<BookOrder>().ToList();
         if (buy.Count > 0)
         {
             Stage = RunStage.Learn;
-            Headline = "Buying books";
+            Headline = "Buying at the scrip exchange";
             buyingBooks = true;
             learnDeadline = default;
             Books.Begin(buy);
-            Add($"Buying {buy.Count} {(buy.Count == 1 ? "book" : "books")} first: {string.Join(", ", buy.Select(b => plugin.Plans.Catalog!.ItemName(b.ItemId)))}.", false);
+            Add($"Buying with scrips first: {string.Join(", ", buy.Select(b => (b.Amount > 1 ? $"{b.Amount:N0}× " : "") + plugin.Plans.Catalog!.ItemName(b.ItemId)))}.", false);
             return;
         }
         ReadBooks();
@@ -494,17 +496,26 @@ internal sealed class RunEngine : IDisposable
     /// <summary>The plan whose books are bought and read now: the order's during a book stop, else the active one.</summary>
     private Plan LearnPlan => bookStop ? plugin.Plans.Plan : ActivePlan;
 
-    /// <summary>Order books the scrips at hand pay for now.</summary>
-    private int BooksToBuyNow() => plugin.Plans.Plan.Learn.Count(l => l.Remaining > 0 && l.WillBuy && plugin.Plans.BuyNow(l.ItemId));
+    /// <summary>Books and materials from scrip exchanges that the scrips at hand pay for now (some at least).</summary>
+    private int ScripBuysNow()
+    {
+        var plan = plugin.Plans.Plan;
+        return plan.Learn.Count(l => l.Remaining > 0 && l.WillBuy && plugin.Plans.BuyNow(l.ItemId))
+               + plan.Lines.Count(l => l.Supply == Supply.Exchange && l.WillBuy && plugin.Plans.BuyNowAmount(l.ItemId) > 0);
+    }
 
-    /// <summary>Order books still to buy (in the bags or not yet bought).</summary>
-    private int BooksToBuy() => plugin.Plans.Plan.Learn.Count(l => l.Remaining > 0);
+    /// <summary>What's still to buy with scrips: books not learned, and materials still missing (counted one by one).</summary>
+    private int ScripBuysLeft()
+    {
+        var plan = plugin.Plans.Plan;
+        return plan.Learn.Count(l => l.Remaining > 0) + plan.Lines.Where(l => l.Supply == Supply.Exchange && l.Remaining > 0).Sum(l => l.Remaining);
+    }
 
     private void BeginBookStop()
     {
         bookStop = true;
-        booksBeforeStop = BooksToBuy();
-        Add($"Buying the {BooksToBuyNow()} books your scrips pay for now, before earning more.", false);
+        booksBeforeStop = ScripBuysLeft();
+        Add("Buying what your scrips pay for now, before earning more.", false);
         StartLearning();
     }
 
@@ -513,15 +524,15 @@ internal sealed class RunEngine : IDisposable
     {
         bookStop = false;
         scripPhase = false;
-        var progress = BooksToBuy() < booksBeforeStop;
+        var progress = ScripBuysLeft() < booksBeforeStop;
         plugin.Plans.Rebuild();
         if (plugin.Plans.ScripTasks.Count > 0)
         {
             if (progress) scripRounds = 0;
             scripPhase = true;
-            LogScripRound($"{plugin.Plans.BooksForLater} books still need scrips: ");
+            LogScripRound($"{plugin.Plans.PurchasesForLater} more to buy with scrips: ");
         }
-        else Add("Books bought; on to the order.", false);
+        else Add("Bought with scrips; on to the order.", false);
         StartRetainers();
     }
 
@@ -986,8 +997,8 @@ internal sealed class RunEngine : IDisposable
         if (plugin.Plans.ScripTasks.Count > 0)
         {
             // Rounds that buy no book in between go nowhere; a batch of books that needs several rounds is fine.
-            if (++scripRounds >= 3) { Stop("Still short of scrips after three rounds of collectables without buying a book; the plan says how many are missing.", true, now: true); return; }
-            if (BooksToBuyNow() > 0) { BeginBookStop(); return; }
+            if (++scripRounds >= 3) { Stop("Still short of scrips after three rounds of collectables without buying anything with them; the plan says how many are missing.", true, now: true); return; }
+            if (ScripBuysNow() > 0) { BeginBookStop(); return; }
             scripPhase = true;
             Add("Still short of scrips; another round of collectables.", true);
         }

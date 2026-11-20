@@ -159,6 +159,32 @@ public class PlannerTests
         Assert.Equal(Supply.Gather, Planner.Build(OrderOf((Sand, 5)), catalog, new Dictionary<uint, int>(), new PlannerOptions())[Sand]!.Supply);
     }
 
+    [Fact]
+    public void Items_only_from_a_scrip_exchange_are_bought_there()
+    {
+        const uint Corn = 49229;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Corn, new ItemSources(Obtain.Exchange, 0, Places: Place.OpenWorld));
+        var asked = 0;
+        var options = new PlannerOptions { CountOwnedTargets = true, BuyExchange = (id, amount) => { asked = amount; return new BookPurchase(true, "bought with scrips"); } };
+        var plan = Planner.Build(OrderOf((Corn, 10)), catalog, new Dictionary<uint, int> { [Corn] = 3 }, options);
+        Assert.Equal(Supply.Exchange, plan[Corn]!.Supply);
+        Assert.Equal(7, asked);              // asked for what's still missing
+        Assert.True(plan[Corn]!.WillBuy);
+        Assert.True(plan.CanStart);
+
+        // The run can't buy it (no scrips and earning is off): it's one to get yourself, with the reason.
+        options = new PlannerOptions { BuyExchange = (_, _) => new BookPurchase(false, "costs 15 Orange Crafters' Scrips each") };
+        plan = Planner.Build(OrderOf((Corn, 10)), catalog, new Dictionary<uint, int>(), options);
+        Assert.False(plan[Corn]!.WillBuy);
+        Assert.Contains(plan.Missing, l => l.ItemId == Corn);
+        Assert.Contains("Orange Crafters' Scrips", plan[Corn]!.ManualReason);
+
+        // Anything else that supplies it comes first.
+        catalog.SetSources(Corn, new ItemSources(Obtain.Gather | Obtain.Exchange, 0, Places: Place.OpenWorld));
+        Assert.Equal(Supply.Gather, Planner.Build(OrderOf((Corn, 10)), catalog, new Dictionary<uint, int>(), options)[Corn]!.Supply);
+    }
+
     [Theory]
     [InlineData(Place.None, "fish collectables")]
     [InlineData(Place.Diadem, "the Diadem")]

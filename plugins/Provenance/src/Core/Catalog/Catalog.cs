@@ -86,6 +86,8 @@ public enum Obtain
     /// ones gathered in content a run can't go to (<see cref="ItemSources.Places"/> says which).
     /// </summary>
     ReduceElsewhere = 1 << 9,
+    /// <summary>Sold at a scrip exchange for scrips a run can earn with collectables (white, purple, orange).</summary>
+    Exchange = 1 << 10,
 }
 
 /// <summary>Where an item is gathered, fished or crafted. A run only goes to the open world.</summary>

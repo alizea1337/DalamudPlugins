@@ -24,7 +24,7 @@ internal sealed record ExchangeOffer(uint ItemId, uint NpcId, string NpcName, ui
 }
 
 /// <summary>
-/// Scrip and token exchanges for master books and folklore tomes. Scrip exchanges are "inclusion
+/// Scrip and token exchanges for master books, folklore tomes and materials. Scrip exchanges are "inclusion
 /// shops": an NPC (often through a greeting) opens a window with pages and subpages, each subpage one
 /// special shop. The currency mapping and the page/subpage routes follow GatherBuddy Reborn's Vulcan
 /// vendor resolver (Apache-2.0), which mirrors AllaganLib's.
@@ -50,10 +50,17 @@ internal sealed class ExchangeIndex
 
     public IReadOnlyList<ExchangeOffer> For(uint itemId) => offers.TryGetValue(itemId, out var l) ? l : Array.Empty<ExchangeOffer>();
 
+    /// <summary>Every item some reachable exchange sells.</summary>
+    public IEnumerable<uint> Items => offers.Keys;
+
+    /// <summary>The offers for a set of items.</summary>
     public static ExchangeIndex Build(IReadOnlySet<uint> wanted, IReadOnlyDictionary<uint, (uint Territory, Vector2 Position)> positions)
+        => wanted.Count == 0 ? new ExchangeIndex() : Build((item, _) => wanted.Contains(item), positions);
+
+    /// <summary>The offers for every item <paramref name="want"/> takes, asked with the item and the currency it costs.</summary>
+    public static ExchangeIndex Build(Func<uint, uint, bool> want, IReadOnlyDictionary<uint, (uint Territory, Vector2 Position)> positions)
     {
         var index = new ExchangeIndex();
-        if (wanted.Count == 0) return index;
         var items = Services.Data.GetExcelSheet<Item>();
         var tomes = new Dictionary<uint, uint>();
         foreach (var row in Services.Data.GetExcelSheet<TomestonesItem>())
@@ -64,11 +71,11 @@ internal sealed class ExchangeIndex
         foreach (var shop in Services.Data.GetExcelSheet<SpecialShop>())
             foreach (var entry in shop.Item)
             {
-                var receive = entry.ReceiveItems.Select(r => r.Item.RowId).FirstOrDefault(wanted.Contains);
-                if (receive == 0) continue;
                 var costs = entry.ItemCosts.Where(c => c.ItemCost.RowId != 0 && c.CurrencyCost > 0).ToList();
                 if (costs.Count != 1) continue; // exchanges that take several things at once are left alone
                 var currency = ConvertCurrency(shop.RowId, costs[0].ItemCost.RowId, shop.UseCurrencyType, tomes);
+                var receive = entry.ReceiveItems.Select(r => r.Item.RowId).FirstOrDefault(id => id != 0 && want(id, currency));
+                if (receive == 0) continue;
                 if (!sales.TryGetValue(shop.RowId, out var list)) sales[shop.RowId] = list = new();
                 list.Add((receive, currency, (int)costs[0].CurrencyCost));
             }

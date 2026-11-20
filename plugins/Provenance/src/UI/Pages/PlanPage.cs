@@ -58,6 +58,7 @@ internal sealed class PlanPage : Page
             if (gather > 0) parts.Add($"{gather} to gather");
             if (plan.Count(Supply.Fish) > 0) parts.Add($"{plan.Count(Supply.Fish)} to fish");
             if (plan.Count(Supply.Vendor) > 0) parts.Add($"{plan.Count(Supply.Vendor)} to buy");
+            if (plan.Count(Supply.Exchange) > 0) parts.Add($"{plan.Count(Supply.Exchange)} to buy with scrips");
             if (crafts > 0) parts.Add($"{crafts} {(crafts == 1 ? "craft" : "crafts")}");
             var what = parts.Count > 0 ? string.Join(", ", parts) : "everything is in your bags";
             return ("Ready: " + what + (total > TimeSpan.Zero ? ", " + Estimator.Describe(total) + " in total" : ""), Palette.Accent);
@@ -114,6 +115,8 @@ internal sealed class PlanPage : Page
             materials.Where(l => l.Supply == Supply.Reduce), catalog, "gathered or fished as collectables, then reduced");
         Section("To buy", FontAwesomeIcon.Store, Palette.SupplyColor(Supply.Vendor),
             materials.Where(l => l.Supply == Supply.Vendor), catalog, plan.VendorGil > 0 ? $"about {plan.VendorGil:N0} gil" : null);
+        Section("To buy with scrips", FontAwesomeIcon.Coins, Palette.SupplyColor(Supply.Exchange),
+            materials.Where(l => l.Supply == Supply.Exchange), catalog, ScripSpend(plan, catalog));
         Section("Monster drops", FontAwesomeIcon.Paw, Palette.SupplyColor(Supply.Drop),
             materials.Where(l => l.Supply == Supply.Drop), catalog, null);
         Section("To craft first", FontAwesomeIcon.Hammer, Palette.Accent,
@@ -250,6 +253,15 @@ internal sealed class PlanPage : Page
         Ui.EndCard();
     }
 
+    /// <summary>"150 Orange Crafters' Scrips": what the materials from scrip exchanges still cost, per scrip.</summary>
+    private string? ScripSpend(Plan plan, GameCatalog catalog)
+    {
+        var spend = plan.Lines.Where(l => l.Supply == Supply.Exchange && l.Remaining > 0)
+            .Select(l => Plans.BookOffer(l.ItemId) is { } o ? (Currency: o.CurrencyItemId, Cost: (long)o.Cost * l.Remaining) : (Currency: 0u, Cost: 0L))
+            .Where(x => x.Currency != 0).GroupBy(x => x.Currency).Select(g => $"{g.Sum(x => x.Cost):N0} {catalog.ItemNamePlural(g.Key)}").ToList();
+        return spend.Count > 0 ? string.Join(" and ", spend) : null;
+    }
+
     /// <summary>Collectables the run makes or gathers for scrips before the order, with what that takes.</summary>
     private void DrawScripsFirst(GameCatalog catalog)
     {
@@ -261,8 +273,8 @@ internal sealed class PlanPage : Page
         Ui.Icon(FontAwesomeIcon.Coins, Palette.Accent);
         ImGui.SameLine(0, 10 * s);
         using (Ui.F.Strong.Push()) Ui.Text("Earn scrips first", Palette.Accent);
-        Ui.Wrapped("The books cost more scrips than you have. Before the order, the run makes or gathers these collectables, turns them in at a collectable appraiser and buys the books."
-            + (Plans.SeveralScripRounds ? " Scrips stop at 4,000, so it buys what it can, earns more and buys again until every book is in." : ""));
+        Ui.Wrapped("What the order buys at scrip exchanges (books, materials) costs more scrips than you have. Before the order, the run makes or gathers these collectables, turns them in at a collectable appraiser and buys it all."
+            + (Plans.SeveralScripRounds ? " Scrips stop at 4,000, so it buys what it can, earns more and buys again until everything is in." : ""));
         ImGui.Dummy(new Vector2(0, 2 * s));
         foreach (var t in tasks)
         {
@@ -657,6 +669,16 @@ internal sealed class PlanPage : Page
                 chips.Add(new ChipText(VendorPlace(line.ItemId, catalog) is { Length: > 0 } place ? new[] { price + place, price } : new[] { price },
                     Palette.SupplyColor(Supply.Vendor)));
                 break;
+            case Supply.Exchange when Plans.BookOffer(line.ItemId) is { } offer:
+            {
+                var each = $"{offer.Cost:N0} {offer.CurrencyName} each";
+                chips.Add(new ChipText(new[] { $"{each}, {offer.Who} in {offer.PlaceName}", each, $"{offer.Cost:N0} each" },
+                    Palette.SupplyColor(Supply.Exchange), FontAwesomeIcon.Coins));
+                // Bought with the scrips at hand, or once a round of collectables has earned them.
+                if (line.WillBuy && line.Remaining > 0)
+                    chips.Add(new ChipText(Plans.BuyNowAmount(line.ItemId) >= line.Remaining ? new[] { "bought first" } : new[] { "scrips earned first", "earned first" }, Palette.Accent));
+                break;
+            }
             case Supply.Reduce:
             {
                 // The collectables the run gathers for it (the gatherer picks the node that suits best).
@@ -779,6 +801,8 @@ internal sealed class PlanPage : Page
         if (IsBait(line)) tip += BaitTip(line, catalog);
         if (line.Supply == Supply.Vendor && catalog.Vendors.For(line.ItemId).OrderBy(o => o.Price).FirstOrDefault() is { } offer)
             tip += $"\nSold by {offer.NpcName}, {offer.PlaceName}.";
+        if (line.Supply == Supply.Exchange && line.Remaining > 0 && line.Purchase is { } purchase)
+            tip += $"\n{purchase.Text}.";
         return tip;
     }
 

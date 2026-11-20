@@ -499,6 +499,9 @@ internal sealed class RunPage : Page
         {
             (FontAwesomeIcon.Box, "Take items from retainers", Config.Stock.Retainers ? "Opens your retainers at a summoning bell and takes out what the order can use." : "Off in Settings.", Config.Stock.Retainers, true),
             (FontAwesomeIcon.Book, "Learn books", plan.Learn.Count > 0 ? $"{plan.Learn.Count} master books or folklore tomes to read first" + (plan.Learn.Count(l => l.WillBuy) is > 0 and var buy ? $", {buy} bought at an exchange first." : ".") : "No books needed.", plan.Learn.Count > 0, true),
+            (FontAwesomeIcon.Coins, "Buy with scrips", plan.Count(Supply.Exchange) is > 0 and var scripItems
+                ? $"{scripItems} {(scripItems == 1 ? "item" : "items")} from scrip exchanges" + (Plans.ScripTasks.Count > 0 ? ", with scrips earned from collectables first." : ".")
+                : "Nothing to buy with scrips.", plan.Count(Supply.Exchange) > 0, true),
             (FontAwesomeIcon.Store, "Buy from vendors", plan.Count(Supply.Vendor) > 0 ? $"{plan.Count(Supply.Vendor)} items for about {plan.VendorGil:N0} gil." : "Nothing to buy for this order.", plan.Count(Supply.Vendor) > 0, true),
             (FontAwesomeIcon.Paw, "Farm monster drops", plan.Count(Supply.Drop) > 0 ? $"{plan.Count(Supply.Drop)} items from monsters, fought as {(Config.Combat.ClassJob == 0 ? "the combat job picked in Settings" : Core.Character.ClassJobs.Abbreviation(Config.Combat.ClassJob))}." : "No monster drops needed.", plan.Count(Supply.Drop) > 0, true),
             (fish > 0 && land == 0 ? FontAwesomeIcon.Fish : FontAwesomeIcon.Leaf, fish == 0 ? "Gather" : land == 0 ? "Fish" : "Gather and fish",

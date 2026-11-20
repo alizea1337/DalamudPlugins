@@ -19,6 +19,8 @@ public enum Supply
     Learn,
     /// <summary>Aetherial reduction: gathered as a collectable (see <see cref="Catalog.IGameCatalog.ReducedFrom"/>), then reduced.</summary>
     Reduce,
+    /// <summary>Bought at a scrip exchange with scrips (earned with collectables first when short).</summary>
+    Exchange,
 }
 
 public sealed class PlannerOptions
@@ -49,6 +51,12 @@ public sealed class PlannerOptions
 
     /// <summary>How a run could buy a book or tome (by item id) at an exchange; null when no exchange sells it.</summary>
     public System.Func<uint, BookPurchase?>? BuyBook { get; init; }
+
+    /// <summary>
+    /// How a run could buy an item sold at a scrip exchange (by item id and how many are still missing); null when
+    /// no exchange sells it. Asked for <see cref="Supply.Exchange"/> lines only.
+    /// </summary>
+    public System.Func<uint, int, BookPurchase?>? BuyExchange { get; init; }
 
     /// <summary>
     /// For an item put on the order: null when it isn't a master book or folklore tome, otherwise whether the
@@ -90,8 +98,8 @@ public sealed class PlannerOptions
     public System.Func<uint, string?>? BaitSource { get; init; }
 }
 
-/// <summary>A book or tome sold at a scrip or token exchange.</summary>
-/// <param name="CanBuy">The character has the currency and can reach the exchange.</param>
+/// <summary>A book, tome or material sold at a scrip or token exchange.</summary>
+/// <param name="CanBuy">The run can buy it: the scrips are at hand or it earns them, and it can reach the exchange.</param>
 /// <param name="Text">"300 Purple Crafters' Scrips at the scrip exchange in Solution Nine", or why it can't be bought.</param>
 public sealed record BookPurchase(bool CanBuy, string Text);
 
@@ -129,11 +137,11 @@ public sealed class PlanLine
     /// </summary>
     public int MissingBait { get; internal set; }
 
-    /// <summary>For books and tomes not in the bags: where the run can buy it, if anywhere.</summary>
+    /// <summary>For books and tomes not in the bags, and items from a scrip exchange: where the run can buy it, if anywhere.</summary>
     public BookPurchase? Purchase { get; internal set; }
 
-    /// <summary>A book the run buys before reading it.</summary>
-    public bool WillBuy => Supply == Supply.Learn && Remaining > 0 && Purchase is { CanBuy: true };
+    /// <summary>A book the run buys before reading it, or an item it buys at a scrip exchange.</summary>
+    public bool WillBuy => Supply is Supply.Learn or Supply.Exchange && Remaining > 0 && Purchase is { CanBuy: true };
 }
 
 /// <summary>A node of the display tree: one target and the materials under it.</summary>
@@ -157,7 +165,7 @@ public sealed class Plan
         this.lines = lines;
         CraftSteps = craftSteps;
         Tree = tree;
-        Missing = lines.Values.Where(l => (l.Supply is Supply.Manual or Supply.Learn && l.Remaining > 0 && !l.WillBuy) || l.MissingBait > 0).ToList();
+        Missing = lines.Values.Where(l => (l.Supply is Supply.Manual or Supply.Learn or Supply.Exchange && l.Remaining > 0 && !l.WillBuy) || l.MissingBait > 0).ToList();
         Learn = lines.Values.Where(l => l.Supply == Supply.Learn).ToList();
         VendorGil = lines.Values.Where(l => l.Supply == Supply.Vendor).Sum(l => (long)l.Remaining * l.VendorUnitPrice);
     }

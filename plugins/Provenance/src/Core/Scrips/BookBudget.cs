@@ -23,26 +23,8 @@ public sealed record BookBudget(IReadOnlySet<uint> BuyNow, IReadOnlyDictionary<u
     /// <param name="cap">Most of a currency the character can hold (int.MaxValue when unlimited).</param>
     public static BookBudget Allocate(IEnumerable<BookCost> books, Func<uint, int> have, Func<uint, int> cap)
     {
-        var buyNow = new HashSet<uint>();
-        var toEarn = new Dictionary<uint, int>();
-        var later = new Dictionary<uint, int>();
-        foreach (var group in books.Where(b => b.Cost > 0).DistinctBy(b => b.ItemId).GroupBy(b => b.Currency))
-        {
-            var left = Math.Max(0, have(group.Key));
-            var rest = 0L;
-            var waiting = 0;
-            // Cheapest first: the most books for the scrips at hand, and once one doesn't fit, no dearer one does.
-            foreach (var book in group.OrderBy(b => b.Cost).ThenBy(b => b.ItemId))
-            {
-                if (rest == 0 && book.Cost <= left) { buyNow.Add(book.ItemId); left -= book.Cost; }
-                else { rest += book.Cost; waiting++; }
-            }
-            if (waiting == 0) continue;
-            later[group.Key] = waiting;
-            var room = (long)Math.Max(0, cap(group.Key)) - left;
-            var earn = Math.Min(rest - left, room);
-            if (earn > 0) toEarn[group.Key] = (int)earn;
-        }
-        return new BookBudget(buyNow, toEarn, later);
+        // A book is one item: cheapest first, and once one doesn't fit, no dearer one does (see ScripBudget).
+        var b = ScripBudget.Allocate(books.Select(x => new ScripCost(x.ItemId, x.Currency, x.Cost, 1)), have, cap);
+        return new BookBudget(b.BuyNow.Keys.ToHashSet(), b.ToEarn, b.Later);
     }
 }

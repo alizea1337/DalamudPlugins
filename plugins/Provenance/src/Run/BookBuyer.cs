@@ -10,14 +10,14 @@ using Provenance.Integrations;
 
 namespace Provenance.Run;
 
-/// <summary>One book or tome to buy at one exchange.</summary>
-internal sealed record BookOrder(uint ItemId, ExchangeOffer Offer);
+/// <summary>Something to buy at one exchange: a book or tome (one), or a material (as many as <paramref name="Amount"/>).</summary>
+internal sealed record BookOrder(uint ItemId, ExchangeOffer Offer, int Amount = 1);
 
 /// <summary>
-/// Buys master books and folklore tomes with scrips or tokens: travel to the exchange, talk, pick the
-/// menu entry, then in the exchange window pick the page and subpage (scrip exchanges) or the row
-/// (plain exchanges), confirm, and check the bags. Window handling follows GatherBuddy Reborn's Vulcan
-/// vendor code (Apache-2.0). Ticked on the framework thread.
+/// Buys master books, folklore tomes and materials with scrips or tokens: travel to the exchange, talk, pick
+/// the menu entry, then in the exchange window pick the page and subpage (scrip exchanges) or the row (plain
+/// exchanges), confirm, and check the bags; for a material again until the amount is in (at most 99 at a time).
+/// Window handling follows GatherBuddy Reborn's Vulcan vendor code (Apache-2.0). Ticked on the framework thread.
 /// </summary>
 internal sealed unsafe class BookBuyer
 {
@@ -40,6 +40,10 @@ internal sealed unsafe class BookBuyer
     private int pageStep;
     private int subPage;
     private int startCount;
+    /// <summary>Bought of the current order so far (bags now less bags at the start).</summary>
+    private int got;
+    /// <summary>The exchange window hands over at most this many in one go.</summary>
+    private const int MaxPerExchange = 99;
 
     public BookBuyer(Plugin plugin, Action<string, bool> log)
     {
@@ -81,6 +85,7 @@ internal sealed unsafe class BookBuyer
         pageStep = 0;
         subPage = o.SubPage;
         startCount = GameState.BagCount(Current.ItemId);
+        got = 0;
         step = Step.Travel;
     }
 
@@ -102,7 +107,7 @@ internal sealed unsafe class BookBuyer
                 CloseWindows();
                 if (Windows.Any(Interact.IsOpen)) { Wait(0.3); return; }
                 orders.Dequeue();
-                if (orders.Count == 0) { step = Step.Done; Status = "Bought every book"; return; }
+                if (orders.Count == 0) { step = Step.Done; Status = "Bought everything"; return; }
                 StartOrder();
                 Wait(0.5);
                 return;
@@ -148,9 +153,12 @@ internal sealed unsafe class BookBuyer
         var o = order.Offer;
         var name = Name(order.ItemId);
 
-        if (GameState.BagCount(order.ItemId) > startCount)
+        var now = Math.Max(0, GameState.BagCount(order.ItemId) - startCount);
+        if (now > got) { got = now; buyTries = 0; }
+        if (got >= order.Amount)
         {
-            log($"Bought {name} for {o.Cost:N0} {o.CurrencyName}.", false);
+            log(order.Amount == 1 ? $"Bought {name} for {o.Cost:N0} {o.CurrencyName}."
+                : $"Bought {got:N0} {name} for {(long)got * o.Cost:N0} {plugin.Plans.Catalog?.ItemNamePlural(o.CurrencyItemId) ?? o.CurrencyName}.", false);
             step = Step.Closing;
             return;
         }
@@ -162,7 +170,9 @@ internal sealed unsafe class BookBuyer
         if (DateTime.UtcNow > deadline) { Fail($"Couldn't buy {name} at {o.NpcName}."); return; }
         var have = GameState.CurrencyCount(o.CurrencyItemId);
         if (have < o.Cost) { Fail($"{name} costs {o.Cost:N0} {o.CurrencyName}; you have {have:N0}."); return; }
-        Status = $"Buying {name} for {o.Cost:N0} {o.CurrencyName}";
+        // As many as are still wanted, what the scrips at hand pay for, and the window takes at once.
+        var amount = Math.Max(1, Math.Min(Math.Min(order.Amount - got, MaxPerExchange), have / Math.Max(1, o.Cost)));
+        Status = order.Amount == 1 ? $"Buying {name} for {o.Cost:N0} {o.CurrencyName}" : $"Buying {name} ({got:N0} of {order.Amount:N0})";
 
         if (Interact.Ready("InclusionShop") is var shop && shop != null)
         {
@@ -185,7 +195,7 @@ internal sealed unsafe class BookBuyer
                 return;
             }
             if (++buyTries > 4) { Fail($"The exchange didn't hand over {name}."); return; }
-            Callback.Fire(shop, true, 14, (uint)row, 1u);
+            Callback.Fire(shop, true, 14, (uint)row, (uint)amount);
             Wait(1.2);
             return;
         }
@@ -197,7 +207,7 @@ internal sealed unsafe class BookBuyer
             var row = AgentRow(order.ItemId);
             if (row < 0) { CloseWindows(); step = Step.Talk; menuTry = Math.Max(menuTry, 1); deadline = DateTime.UtcNow.AddSeconds(15); Wait(0.8); return; }
             if (++buyTries > 4) { Fail($"The exchange didn't hand over {name}."); return; }
-            Callback.Fire(exchange, true, 0, row, 1, 0);
+            Callback.Fire(exchange, true, 0, row, amount, 0);
             Wait(1.2);
             return;
         }

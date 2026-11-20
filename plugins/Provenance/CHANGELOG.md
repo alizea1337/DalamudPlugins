@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0
+
+Buying materials with scrips.
+
+- Materials only sold at a scrip exchange (white, purple or orange scrips, such as Flint Corn for
+  15 Orange Crafters' Scrips) are no longer "Get these yourself": the plan lists them under "To
+  buy with scrips", with the price, the exchange, and whether your scrips pay for them now.
+- The run buys them at the exchange before gathering, as many at a time as the exchange hands over.
+  Short of scrips, it earns them first with collectables (the setting is now "Earn scrips when
+  short"), together with any books the order needs: one budget for both, cheapest per item first,
+  and past the 4,000 cap it buys what it can, earns more and buys again.
+- Bait sold only for scrips is bought the same way.
+- Anything a run can gather, fish, buy for gil or reduce still comes from there first; the scrip
+  exchange is the last resort before "Get these yourself".
+
 ## 0.11.1
 
 Ephemeral nodes, and aetherial reduction you can follow.

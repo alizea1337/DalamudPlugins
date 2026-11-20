@@ -401,14 +401,15 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Buy instead of gathering when a vendor sells it", ref v, "Faster for common materials such as shards and basic ores.")) { Config.Buying.PreferVendor = v; Changed(); }
         Ui.EndCard();
 
-        // Books and scrips
+        // Scrips
         Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Books and scrips");
-        Ui.Wrapped("Master books and folklore tomes the order needs are bought at a scrip exchange. When they cost more scrips than you have, the run can earn them first.");
+        using (Ui.F.Strong.Push()) Ui.Text("Scrips");
+        Ui.Wrapped("Master books, folklore tomes and materials the order needs that are sold at a scrip exchange (white, purple or orange scrips) are bought there. "
+                   + "When they cost more scrips than you have, the run can earn them first.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         var rs = Config.Run;
         v = rs.EarnScrips;
-        if (Ui.Checkbox("Earn scrips for books", ref v, "Makes or gathers the quickest collectables your jobs can handle (fewest items for the scrips missing), turns them in at a collectable appraiser, buys the book, then runs the order.")) { rs.EarnScrips = v; Config.Save(); Plans.Invalidate(); }
+        if (Ui.Checkbox("Earn scrips when short", ref v, "Makes or gathers the quickest collectables your jobs can handle (fewest items for the scrips missing), turns them in at a collectable appraiser, buys what the order needs, then runs the order.")) { rs.EarnScrips = v; Config.Save(); Plans.Invalidate(); }
         Ui.EndCard();
 
         // Summoning bell

@@ -67,10 +67,12 @@ keeps the window from sliding things around and *Tooltip size* sets how big the 
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
   (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
   being crafted. Recipes whose materials aren't in your bags are skipped and listed.
-- **Books and scrips**: master books and folklore tomes the order needs are bought at a scrip or
-  token exchange and read before anything else. With *Earn scrips for books* (Settings), a run that
-  is short of scrips first makes or gathers the quickest collectables your jobs can handle, turns
-  them in at a collectable appraiser, then buys the books.
+- **Scrips**: master books and folklore tomes the order needs are bought at a scrip or token
+  exchange and read before anything else. Materials only sold for scrips (white, purple or orange,
+  such as Flint Corn for orange crafters' scrips) are bought there too. With *Earn scrips when short*
+  (Settings), a run that is short of scrips first makes or gathers the quickest collectables your
+  jobs can handle, turns them in at a collectable appraiser, then buys what the order needs; past
+  the 4,000 cap it earns and buys in rounds.
 - **Monster drops**: items only monsters drop are farmed with a basic combo on the combat job picked
   in Settings, in its highest item level gearset, one monster at a time. With Gysahl Greens in your
   bags the chocobo is called and put in the stance you pick (attacker by default). Spawn areas
@@ -95,7 +97,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M4 | The run: craft while waiting for timed nodes, pause and stop rules (done) |
 | M5 | Retainer withdrawal at a summoning bell, vendor buying (done) |
 | M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
-| Scrips | Buying books at exchanges, earning scrips with collectables (done) |
+| Scrips | Buying books and materials at scrip exchanges, earning scrips with collectables (done) |
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 
 ### To do
@@ -119,9 +121,9 @@ Orders with fish also need:
   missing);
 - the actions a fish needs: Mooch for mooch chains, Snagging, Ambitious or Modest Lure, and Gig
   for spearfishing;
-- bait: the run buys bait sold for gil, under the price cap in Settings. Bait only sold for scrips
-  or crafted has to be in your bags, unless *Versatile Lure when the bait can't be bought* is on
-  (Settings), which buys Versatile Lure in Limsa Lominsa Lower Decks instead.
+- bait: the run buys bait sold for gil, under the price cap in Settings, and bait sold for scrips at
+  a scrip exchange. Crafted bait has to be in your bags, unless *Versatile Lure when the bait can't
+  be bought* is on (Settings), which buys Versatile Lure in Limsa Lominsa Lower Decks instead.
 
 Fish that only live in a housing district need a house or apartment there in your teleport list
 (yours, your free company's or a shared one); Provenance doesn't travel between wards. Ocean

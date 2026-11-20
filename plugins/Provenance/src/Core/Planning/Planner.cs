@@ -99,6 +99,14 @@ public static class Planner
                 ManualReason = have > 0 ? null : purchase?.Text ?? "Not learned yet and not in your bags",
             };
         }
+        // Items from a scrip exchange: bought by the run (with the scrips at hand, or earned first), or why not.
+        foreach (var line in lines.Values.Where(l => l.Supply == Supply.Exchange))
+        {
+            line.Purchase = line.Remaining > 0 ? options.BuyExchange?.Invoke(line.ItemId, line.Remaining) : null;
+            line.ManualReason = line.Remaining > 0 && line.Purchase is not { CanBuy: true }
+                ? line.Purchase?.Text ?? "Sold at a scrip exchange, which a run doesn't buy from here"
+                : null;
+        }
         return new Plan(lines, craftSteps, tree);
 
         void Visit(uint itemId)
@@ -336,6 +344,8 @@ public static class Planner
             else if (vendorOk) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Drop)) line.Supply = Supply.Drop;
             else if (src.Has(Obtain.Reduce)) line.Supply = Supply.Reduce;
+            // Last of all: bought with scrips at an exchange (earned with collectables first when short).
+            else if (src.Has(Obtain.Exchange)) line.Supply = Supply.Exchange;
             else
             {
                 line.Supply = Supply.Manual;
