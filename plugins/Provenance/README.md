@@ -88,7 +88,11 @@ keeps the window from sliding things around and *Tooltip size* sets how big the 
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
-Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov tp <name>`,
+Something going wrong? *Copy bug report* (Settings, General) or `/prov bugreport` copies what Provenance knows
+right now (settings, order, plan, what the run is doing and its log, nearby nodes, your zone and position, but
+no character name) to paste into a report.
+
+Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov bugreport`, `/prov tp <name>`,
 `/prov flag`, `/prov plan | browse | character | settings` to open a page (settings opens General), and
 `/prov import` to open the Teamcraft import on the Browse page.
 

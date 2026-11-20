@@ -2,7 +2,19 @@
 
 ## 0.13.0
 
-Favourite orders.
+Favourite orders, a bug report, and nodes next to each other.
+
+- Fixed: with two nodes of what the order needs side by side, the run gathered one and then stood
+  waiting ("trying the node again soon"). The node just gathered stays targetable for a moment while
+  it despawns; the run tried to open it again, failed, and gave up on the whole node group, the node
+  next to it included. Now the node just gathered is left alone, a node of the group already in view
+  is gone to straight away, marking a node done no longer marks its neighbour, and a node that won't
+  open only sets that node aside while another of its group is in view. Choosing the next node also
+  prefers one in view over a trip to another spawn spot.
+- Bug report (Settings, General, or /prov bugreport): copies what Provenance knows right now to the
+  clipboard: settings, the order and its plan, what the run, the gatherer and the fisher are doing,
+  the run log, the gathering nodes within 120 yalms with what they hold, and the zone and position.
+  No character name, world or retainer names.
 
 - Browse has a "Favourites" chip after the content chips. With it on, the saved orders show instead
   of the items, each with a cover of its first items' icons, its name, what's on it and when it was

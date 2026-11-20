@@ -173,6 +173,17 @@ internal sealed unsafe partial class Fisher : IDisposable
             return next;
         }
     }
+    /// <summary>What the fisher is doing and knows, line by line, for a bug report.</summary>
+    public IEnumerable<string> Describe()
+    {
+        yield return $"step {step}, status \"{Status}\", waiting {Waiting}, busy {Busy}, rod out {RodOut}";
+        if (current is { } t) yield return $"target: {Name(t.ItemId)} ({t.ItemId}), {left(t)} left, collect {collect(t.ItemId)}";
+        if (spot is { } s) yield return $"spot: {SpotLabel(s)} ({s.Id}, territory {s.TerritoryId}, {(s.Spear ? "spearfishing" : "rod")}), bait {bait}";
+        yield return "targets: " + string.Join("; ", targets.Select(x => $"{Name(x.ItemId)} ({x.ItemId}), {left(x)} left"));
+        foreach (var (id, why) in unreachable) yield return $"can't fish {Name(id)} ({id}): {why}";
+        if (upkeep.Busy) yield return "upkeep: " + upkeep.Status;
+    }
+
     /// <summary>Why the collectables caught for a reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
     public string? ReduceBlocked => upkeep.ReduceBlocked;
     /// <summary>Extracting materia or reducing collectables right now (its windows open).</summary>

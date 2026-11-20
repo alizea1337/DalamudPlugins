@@ -449,6 +449,39 @@ internal sealed class SettingsPage : Page
         Ui.Text("Tooltip size");
         TooltipSizePicker();
         Ui.EndCard();
+
+        DrawBugReport(w);
+    }
+
+    private (DateTime At, int Lines)? reportCopied;
+
+    /// <summary>Copies what Provenance knows right now, to paste into a bug report.</summary>
+    private void DrawBugReport(float w)
+    {
+        var s = Ui.S;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Bug report");
+        Ui.Wrapped("Copies what Provenance knows right now: the settings, the order and its plan, what the run is doing and its log, "
+                   + "the gathering nodes around you and where you stand. Your character's name, world and retainers aren't in it. "
+                   + "Paste it into your report; in Discord a long one becomes a text file.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        if (Ui.Button("Copy bug report", Ui.Kind.Secondary, FontAwesomeIcon.Bug, id: "##bugreport"))
+        {
+            var text = Data.BugReport.Build(Plugin);
+            ImGui.SetClipboardText(text);
+            reportCopied = (DateTime.UtcNow, text.Split('\n').Length);
+        }
+        if (reportCopied is { } copied && DateTime.UtcNow - copied.At < TimeSpan.FromSeconds(6))
+        {
+            ImGui.SameLine(0, 12 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
+            Ui.Icon(FontAwesomeIcon.Check, Palette.Accent, small: true);
+            ImGui.SameLine(0, 6 * s);
+            Ui.Text($"Copied, {copied.Lines} lines", Palette.Accent);
+        }
+        using (Ui.F.Small.Push())
+            Ui.Wrapped("Copy it right when something goes wrong, while the run still shows it. In the middle of a run, /prov bugreport does the same without opening this page.", Palette.TextMuted);
+        Ui.EndCard();
     }
 
     private void DrawCrafting(float w)

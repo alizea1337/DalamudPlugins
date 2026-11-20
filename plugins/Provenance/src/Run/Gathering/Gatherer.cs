@@ -75,6 +75,14 @@ internal sealed unsafe class Gatherer
     private int landPresses, landMoves;
     private bool wasOnNode;
     private Vector3 lastNodePosition;
+    /// <summary>The node object last opened (its game object id).</summary>
+    private ulong lastNodeObject;
+    /// <summary>
+    /// Node objects to leave alone until a moment: the one just gathered (it stays targetable for a moment while it
+    /// despawns, and opening it again fails), and one that wouldn't open.
+    /// </summary>
+    private readonly Dictionary<ulong, DateTime> skipNodes = new();
+    private static readonly TimeSpan JustGathered = TimeSpan.FromSeconds(20);
 
     // Inside a node
     private IEnumerator<GatherAction>? plan;
@@ -109,6 +117,29 @@ internal sealed unsafe class Gatherer
     /// <summary>Why the collectables gathered for reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
     public string? ReduceBlocked => upkeep.ReduceBlocked;
 
+    /// <summary>What the gatherer is doing and knows, line by line, for a bug report.</summary>
+    public IEnumerable<string> Describe()
+    {
+        var now = DateTime.UtcNow;
+        yield return $"step {step}, status \"{Status}\", waiting {Waiting}, waiting to retry {WaitingToRetry}, on a node {OnNode}";
+        if (current is { } t) yield return $"target: {Catalog.ItemName(t.ItemId)} ({t.ItemId}), {t.Supply}, {left(t)} left";
+        if (node is { } n)
+        {
+            yield return $"node group (base) {n.BaseId}, territory {n.TerritoryId}, {(n.Timed ? "timed" : "regular")}, level {n.Level}, points {string.Join(",", nodePoints)}";
+            if (current is { } c)
+                foreach (var s in BasePositions(c.ItemId, n.BaseId))
+                    yield return $"  spawn spot: point {s.Point} at {s.At.X:0.0}, {s.At.Y:0.0}, {s.At.Z:0.0}{(visited.Contains((s.Point, (int)s.At.X, (int)s.At.Z)) ? " (visited)" : "")}";
+            yield return $"spot travelled to: {spot.X:0.0}, {spot.Y:0.0}, {spot.Z:0.0}";
+        }
+        yield return "targets: " + string.Join("; ", targets.Select(x => $"{Catalog.ItemName(x.ItemId)} ({x.ItemId}) {x.Supply}, {left(x)} left"));
+        foreach (var (group, until) in givenUp.Where(kv => kv.Value > now)) yield return $"group {group} given up until {until.ToLocalTime():HH:mm:ss}";
+        if (abandoned.Count > 0) yield return "groups dropped for the run: " + string.Join(", ", abandoned);
+        foreach (var (id, until) in skipNodes.Where(kv => kv.Value > now)) yield return $"node object {id:X} left alone until {until.ToLocalTime():HH:mm:ss}";
+        if (unreachable.Count > 0) yield return "unreachable: " + string.Join(", ", unreachable.Select(id => $"{Catalog.ItemName(id)} ({id})"));
+        if (upkeep.Busy) yield return "upkeep: " + upkeep.Status;
+        if (ReduceBlocked is { } blocked) yield return "reduction blocked: " + blocked;
+    }
+
     /// <summary>Extracting materia or reducing collectables right now (its windows open).</summary>
     public bool UpkeepBusy => upkeep.Busy;
 
@@ -123,6 +154,7 @@ internal sealed unsafe class Gatherer
         visited.Clear();
         givenUp.Clear();
         giveUps.Clear();
+        skipNodes.Clear();
         abandoned.Clear();
         unreachable.Clear();
         lastVisitEnd = null;
@@ -145,6 +177,7 @@ internal sealed unsafe class Gatherer
         luckUsed = false;
         collectableFull = false;
         if (node != null && current != null) MarkVisitedAt(lastNodePosition);
+        if (lastNodeObject != 0) skipNodes[lastNodeObject] = DateTime.UtcNow + JustGathered;
     }
 
     public void Pause()
@@ -228,6 +261,13 @@ internal sealed unsafe class Gatherer
 
         var best = default((GatherTarget Target, GatherPoint Point, int Score)?);
         var skipped = false;
+        // Nodes in view that can be opened, by their point: one right here beats a trip to another spawn spot.
+        var me = Services.Objects.LocalPlayer?.Position ?? Vector3.Zero;
+        var inView = Services.Objects
+            .Where(o => o.ObjectKind == ObjectKind.GatheringPoint && o.IsTargetable
+                        && !(skipNodes.TryGetValue(o.GameObjectId, out var until) && DateTime.UtcNow < until))
+            .GroupBy(o => o.BaseId)
+            .ToDictionary(g => g.Key, g => g.Min(o => Vector3.Distance(o.Position, me)));
         foreach (var t in targets)
         {
             if (left(t) <= 0) continue;
@@ -245,6 +285,8 @@ internal sealed unsafe class Gatherer
                 // Timed nodes first (short windows), then this zone, then the cheapest teleport.
                 var cost = p.TerritoryId == here ? 0 : unlocked.Where(d => d.TerritoryId == p.TerritoryId).Select(d => (int)d.GilCost).DefaultIfEmpty(5000).Min();
                 var score = (p.Timed ? 0 : 1_000_000) + cost;
+                if (p.TerritoryId == here && inView.TryGetValue(p.PointId, out var seen) && seen < InView)
+                    score -= 100_000 - (int)seen; // timed nodes still come first
                 if (best is not { } b || score < b.Score) best = (t, p, score);
             }
             if (!any && unreachable.Add(t.ItemId))
@@ -316,6 +358,16 @@ internal sealed unsafe class Gatherer
     private void NextSpot()
     {
         var me = Services.Objects.LocalPlayer!.Position;
+        // A node of this group already in view (the one next to the node just gathered): straight there.
+        if (Services.ClientState.TerritoryType == node!.TerritoryId && LiveNode() is { } seen && Vector3.Distance(seen.Position, me) < InView)
+        {
+            spot = seen.Position;
+            var standAt = Catalog.Gather.StandFor(spot);
+            travel.GoTo($"the {Catalog.ItemName(current!.Value.ItemId)} node", node.TerritoryId, new Vector2(standAt.X, standAt.Z), 2.8f,
+                () => LiveNode()?.Position is { } p ? Catalog.Gather.StandFor(p) : null);
+            Go(Step.Travel);
+            return;
+        }
         var spots = BasePositions(current!.Value.ItemId, node!.BaseId);
         var open = spots.Where(s => !visited.Contains((s.Point, (int)s.At.X, (int)s.At.Z))).ToList();
         if (open.Count == 0)
@@ -333,7 +385,20 @@ internal sealed unsafe class Gatherer
         Go(Step.Travel);
     }
 
-    private IGameObject? LiveNode() => Interact.Nearest(ObjectKind.GatheringPoint, id => nodePoints.Contains(id));
+    /// <summary>A node of the group in view this far away is gone to directly.</summary>
+    private const float InView = 100f;
+
+    /// <summary>The nearest node of the chosen group that can be opened: not the one just gathered, nor one that wouldn't open.</summary>
+    private IGameObject? LiveNode()
+    {
+        var me = Services.Objects.LocalPlayer?.Position ?? Vector3.Zero;
+        var now = DateTime.UtcNow;
+        return Services.Objects
+            .Where(o => o.ObjectKind == ObjectKind.GatheringPoint && o.IsTargetable && nodePoints.Contains(o.BaseId)
+                        && !(skipNodes.TryGetValue(o.GameObjectId, out var until) && now < until))
+            .OrderBy(o => Vector3.DistanceSquared(o.Position, me))
+            .FirstOrDefault();
+    }
 
     private void TravelTick(IGameObject me)
     {
@@ -478,11 +543,15 @@ internal sealed unsafe class Gatherer
     /// <summary>XZ distance: a node above or below still counts as here; landing and walking deal with the height.</summary>
     private static float Across(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.X, a.Z), new Vector2(b.X, b.Z));
 
-    /// <summary>Marks the known spawn spots at a position (by their own keys), so the next trip skips them.</summary>
+    /// <summary>
+    /// Marks the known spawn spot at a position, so the next trip skips it. Only the nearest one: two nodes of a group
+    /// can stand a couple of yalms apart, and the other one is still to gather.
+    /// </summary>
     private void MarkVisitedAt(Vector3 position)
     {
-        foreach (var spawn in BasePositions(current!.Value.ItemId, node!.BaseId))
-            if (Across(spawn.At, position) < 3f) visited.Add((spawn.Point, (int)spawn.At.X, (int)spawn.At.Z));
+        var nearest = BasePositions(current!.Value.ItemId, node!.BaseId)
+            .Where(s => Across(s.At, position) < 3f).OrderBy(s => Across(s.At, position)).FirstOrDefault();
+        if (nearest.Point != 0) visited.Add((nearest.Point, (int)nearest.At.X, (int)nearest.At.Z));
     }
 
     /// <summary>
@@ -493,6 +562,15 @@ internal sealed unsafe class Gatherer
     {
         Vnav.Stop();
         MarkVisitedAt(live.Position);
+        // Only this node, while another of its group is in view: that one is tried next, the group isn't given up.
+        skipNodes[live.GameObjectId] = DateTime.UtcNow + GiveUpFor;
+        if (LiveNode() is { } other && Vector3.Distance(other.Position, live.Position) < InView)
+        {
+            log($"{why} Trying the other {Catalog.ItemName(current!.Value.ItemId)} node in view.", false);
+            mustLand = false;
+            NextSpot();
+            return;
+        }
         var group = node!.BaseId;
         var times = giveUps[group] = giveUps.GetValueOrDefault(group) + 1;
         if (times >= MaxGiveUps)
@@ -565,6 +643,7 @@ internal sealed unsafe class Gatherer
         if (++interactTries > 4) { GiveUp(live, $"Couldn't open the {Catalog.ItemName(current!.Value.ItemId)} node."); return; }
         Status = "Opening the node";
         lastNodePosition = live.Position;
+        lastNodeObject = live.GameObjectId;
         Interact.With(live);
         Wait(1.2);
     }

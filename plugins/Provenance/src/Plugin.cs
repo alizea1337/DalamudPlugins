@@ -61,7 +61,7 @@ public sealed class Plugin : IDalamudPlugin
         });
         windows.AddWindow(Main);
 
-        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings | start | pause | stop | compact | tp <aetheryte> | flag" };
+        var help = new CommandInfo(OnCommand) { HelpMessage = "Open Provenance. /provenance plan | browse | import | character | settings | start | pause | stop | compact | bugreport | tp <aetheryte> | flag" };
         Services.Commands.AddHandler(Command, help);
         Services.Commands.AddHandler(Alias, new CommandInfo(OnCommand) { ShowInHelp = false });
         pluginInterface.UiBuilder.Draw += windows.Draw;
@@ -72,6 +72,8 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OpenMain() => Main.IsOpen = true;
+
+    private static void ImGuiCopy(string text) => Dalamud.Bindings.ImGui.ImGui.SetClipboardText(text);
 
     private void OpenSettings()
     {
@@ -93,6 +95,10 @@ public sealed class Plugin : IDalamudPlugin
             case "tp": TeleportCommand(rest); return;
             case "flag": FlagCommand(); return;
             case "compact": Main.IsOpen = true; Main.SetCompact(!Main.Compact); return;
+            case "bugreport":
+                ImGuiCopy(Data.BugReport.Build(this));
+                Services.Chat.Print("[Provenance] Bug report copied to the clipboard. Paste it into your report.");
+                return;
         }
         switch (trimmed.ToLowerInvariant())
         {

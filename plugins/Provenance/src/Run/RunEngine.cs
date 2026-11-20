@@ -2092,6 +2092,23 @@ internal sealed class RunEngine : IDisposable
     /// </summary>
     private List<GatherTarget> workTargets = new();
 
+    /// <summary>What the run is doing and knows, line by line, for a bug report (the workers' own lines follow it).</summary>
+    public IEnumerable<string> Describe()
+    {
+        yield return $"phase {Phase}, stage {Stage}, worker {worker}{(switchingTo is { } to ? $" (switching to {to})" : "")}, crafting meanwhile {craftingBetween}";
+        yield return $"headline \"{Headline}\", detail \"{Detail}\"";
+        if (StartedAt is { } began) yield return $"started {began:HH:mm:ss}{(EndedAt is { } ended ? $", ended {ended:HH:mm:ss}" : "")}";
+        yield return $"scrip phase {scripPhase}, book stop {bookStop}, scrip rounds {scripRounds}, crafting spot tried {spotTried}";
+        foreach (var t in Targets) yield return $"target: {ItemName(t.ItemId)} ({t.ItemId}), {t.Supply}, {Left(t)} of {t.Remaining} left, bags up to {t.Target}";
+        foreach (var t in workTargets.Where(w => reduceFor.ContainsKey(w.ItemId)))
+            yield return $"reduce from: {ItemName(t.ItemId)} ({t.ItemId}), {t.Supply}, {WorkLeft(t)} left, {GameState.Collectables(t.ItemId).Count} waiting, for {ItemName(reduceFor[t.ItemId].ItemId)}";
+        if (tripSpot is { } trip) yield return $"travelling ahead to {ItemName(tripItem)}'s spawn area in territory {trip.TerritoryId} at {trip.Position.X:0}, {trip.Position.Y:0}";
+        if (NextWindow is { } next) yield return $"next window in {Short(next)}";
+        foreach (var (id, wait) in fishWaits) yield return $"fish wait: {ItemName(id)} ({id}) {(wait is { } w ? w == TimeSpan.MaxValue ? "not within the forecast" : Short(w) : "any time")}";
+        if (Crafter.Status.Length > 0) yield return $"crafter: {Crafter.Status}, {Crafter.CraftsDone} of {Crafter.CraftsTotal} crafts";
+        if (Stage is RunStage.Return or RunStage.ToSpot || TestingSpot) yield return $"trip: {Home.Status}{(Home.Failure is { } f ? ", failed: " + f : "")}";
+    }
+
     /// <summary>
     /// The collectables an item from aetherial reduction comes from, with their state now (for the Run page): those
     /// this run gathers or fishes for it, or before gathering starts every one a run can get.
