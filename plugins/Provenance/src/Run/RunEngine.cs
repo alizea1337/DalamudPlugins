@@ -193,6 +193,63 @@ internal sealed class RunEngine : IDisposable
     public BookBuyer Books { get; }
     public Hunter Hunt { get; }
     public Homecoming Home { get; }
+
+    // ------------------------------------------------------------------ trying the crafting spot
+
+    private Homecoming? spotTest;
+
+    /// <summary>The trip to the crafting spot is being tried out (from the settings, outside a run).</summary>
+    public bool TestingSpot => spotTest != null;
+
+    /// <summary>What the try is doing, or how it ended.</summary>
+    public string SpotTestStatus { get; private set; } = "";
+
+    /// <summary>Whether the last try ended in a problem.</summary>
+    public bool SpotTestFailed { get; private set; }
+
+    /// <summary>Goes to the crafting spot now, the way a run would before crafting. Null when it set off, else why not.</summary>
+    public string? TestSpot()
+    {
+        if (Active) return "A run is going; stop it first.";
+        var spot = plugin.Config.CraftingSpot;
+        if (!spot.IsSet) return "Save a spot first.";
+        if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null) return "Log in first.";
+        Integrations.Travel.AdvancedUnstuck = plugin.Config.Security.AdvancedUnstuck;
+        Integrations.Travel.StuckAfter = TimeSpan.FromSeconds(Math.Clamp(plugin.Config.Security.StuckSeconds, 3, 30));
+        spotTest = new Homecoming(plugin, (_, _) => { });
+        SpotTestFailed = false;
+        if (!spotTest.BeginSpot(spot))
+        {
+            spotTest = null;
+            SpotTestStatus = "Already there.";
+            return null;
+        }
+        SpotTestStatus = "Setting off";
+        return null;
+    }
+
+    public void StopSpotTest()
+    {
+        if (spotTest == null) return;
+        spotTest.Cancel();
+        Integrations.Vnav.Stop();
+        spotTest = null;
+        SpotTestStatus = "Stopped.";
+    }
+
+    private void TickSpotTest()
+    {
+        var trip = spotTest!;
+        if (Services.Condition[ConditionFlag.InCombat]) { StopSpotTest(); SpotTestStatus = "Stopped: in combat."; SpotTestFailed = true; return; }
+        trip.Tick();
+        SpotTestStatus = trip.Status;
+        if (!trip.Finished) return;
+        spotTest = null;
+        SpotTestFailed = trip.Failure != null;
+        SpotTestStatus = trip.Failure is { } why ? "Couldn't get there: " + why : "Arrived.";
+        if (SpotTestFailed) Services.Chat.PrintError("[Provenance] Crafting spot: " + SpotTestStatus);
+        else Services.Chat.Print("[Provenance] At the crafting spot.");
+    }
     /// <summary>Provenance's own gatherer (nodes, the gathering window, collectables, upkeep).</summary>
     public Gathering.Gatherer Gather { get; }
     /// <summary>Provenance's own fishing (rod fishing and spearfishing) for the fish targets of the gathering stage.</summary>
@@ -961,6 +1018,11 @@ internal sealed class RunEngine : IDisposable
     public void Tick()
     {
         if (fishWindDownUntil != default) TickFishWindDown();
+        if (spotTest != null)
+        {
+            if (Active) StopSpotTest();
+            else TickSpotTest();
+        }
         if (!Active) return;
 
         // The crafter, the gatherer and the fisher need every frame; the checks below only twice a second.
@@ -1387,13 +1449,14 @@ internal sealed class RunEngine : IDisposable
         var reach = new Dictionary<uint, bool>();
         (uint, TimedSpot, TimeSpan)? best = null;
         var bestWait = TimeSpan.MaxValue;
-        foreach (var t in Targets.Where(t => t.Supply == Supply.GatherTimed && Left(t) > 0 && !Gather.Unreachable.Contains(t.ItemId)))
-            foreach (var s in catalog.TimedSpots(t.ItemId))
+        foreach (var t in Targets.Where(t => LandTimed(t) && Left(t) > 0 && !LandUnreachable(t)))
+        foreach (var item in LandItems(t))
+            foreach (var s in catalog.TimedSpots(item))
             {
                 if (tripFailed.Contains(s) || Core.Timing.Eorzea.UntilOpen(s.Mask, now) is not { } wait) continue;
                 if (wait > bestWait || (wait == bestWait && s.TerritoryId != Services.ClientState.TerritoryType)) continue;
                 if (!(reach.TryGetValue(s.TerritoryId, out var ok) ? ok : reach[s.TerritoryId] = Teleporter.CanReach(s.TerritoryId))) continue;
-                best = (t.ItemId, s, wait);
+                best = (item, s, wait);
                 bestWait = wait;
             }
         return best;
@@ -1435,15 +1498,16 @@ internal sealed class RunEngine : IDisposable
     {
         var catalog = plugin.Plans.Catalog!;
         // Targets neither worker can get don't hold the stage in gathering (their worker reports them).
-        var targets = Targets.Select(t => new ScheduledTarget(t.ItemId, t.Supply, Reachable(t) ? Left(t) : 0,
-            t.Supply == Supply.GatherTimed ? catalog.TimedMask(t.ItemId) : 0,
+        var targets = Targets.Select(t => new ScheduledTarget(t.ItemId,
+            t.Supply == Supply.Fish ? Supply.Fish : LandTimed(t) ? Supply.GatherTimed : Supply.Gather,
+            Reachable(t) ? Left(t) : 0, LandMask(t),
             t.Supply == Supply.Fish ? FishWait(t.ItemId) : null));
         var allowed = Settings.CraftWhileWaiting && Crafter.HasReadyWork();
         return Interleave.Decide(targets, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(Settings.TimedLeadMinutes), allowed);
     }
 
     private bool Reachable(GatherTarget t)
-        => t.Supply == Supply.Fish ? !Fish.Unreachable.Contains(t.ItemId) : !Gather.Unreachable.Contains(t.ItemId);
+        => t.Supply == Supply.Fish ? !Fish.Unreachable.Contains(t.ItemId) : !LandUnreachable(t);
 
     private void TickCrafting()
     {
@@ -1599,7 +1663,7 @@ internal sealed class RunEngine : IDisposable
         if (LandHasWork()) return (Worker.Land, true);
         if (fishNow) return (Worker.Fish, true);
 
-        var landLeft = Targets.Any(t => t.Supply != Supply.Fish && Left(t) > 0 && !Gather.Unreachable.Contains(t.ItemId));
+        var landLeft = Targets.Any(t => t.Supply != Supply.Fish && Left(t) > 0 && !LandUnreachable(t));
         var fishLeft = fishWaits.Keys.Any(id => !Fish.Unreachable.Contains(id));
         if (landLeft != fishLeft) return (landLeft ? Worker.Land : Worker.Fish, false);
         if (!landLeft) return (null, false);
@@ -1658,9 +1722,9 @@ internal sealed class RunEngine : IDisposable
         var lead = TimeSpan.FromMinutes(Settings.TimedLeadMinutes);
         foreach (var t in Targets)
         {
-            if (t.Supply == Supply.Fish || Left(t) <= 0 || Gather.Unreachable.Contains(t.ItemId)) continue;
-            if (t.Supply != Supply.GatherTimed) return true;
-            var mask = catalog.TimedMask(t.ItemId);
+            if (t.Supply == Supply.Fish || Left(t) <= 0 || LandUnreachable(t)) continue;
+            if (!LandTimed(t)) return true;
+            var mask = LandMask(t);
             if (mask == 0 || Core.Timing.Eorzea.UntilOpen(mask, now) is { } w && w <= lead) return true;
         }
         return false;
@@ -1675,8 +1739,8 @@ internal sealed class RunEngine : IDisposable
         var catalog = plugin.Plans.Catalog!;
         var now = DateTimeOffset.UtcNow;
         TimeSpan? best = null;
-        foreach (var t in Targets.Where(t => t.Supply == Supply.GatherTimed && Left(t) > 0 && !Gather.Unreachable.Contains(t.ItemId)))
-            if (catalog.TimedMask(t.ItemId) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w
+        foreach (var t in Targets.Where(t => LandTimed(t) && Left(t) > 0 && !LandUnreachable(t)))
+            if (LandMask(t) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w
                 && (!closed || w > TimeSpan.Zero) && (best == null || w < best))
                 best = w;
         return best;
@@ -1983,7 +2047,43 @@ internal sealed class RunEngine : IDisposable
     /// predator's (<see cref="Fishing.Fisher.Windowed"/>; "Also from timed nodes and rare fish").
     /// </summary>
     private bool Windowed(GatherTarget t)
-        => t.Supply == Supply.GatherTimed || (t.Supply == Supply.Fish && Fish.Windowed(t.ItemId));
+        => LandTimed(t) || (t.Supply == Supply.Fish && Fish.Windowed(t.ItemId));
+
+    /// <summary>
+    /// What the gatherer really goes for: the target itself, or for an item from aetherial reduction the
+    /// collectables it comes from (those this run gathers for it, else every one the catalog knows).
+    /// </summary>
+    private IReadOnlyList<uint> LandItems(GatherTarget t)
+    {
+        if (t.Supply != Supply.Reduce) return new[] { t.ItemId };
+        var forRun = reduceFor.Where(kv => kv.Value.ItemId == t.ItemId).Select(kv => kv.Key).ToList();
+        return forRun.Count > 0 ? forRun : plugin.Plans.Catalog!.ReducedFrom(t.ItemId);
+    }
+
+    /// <summary>
+    /// Only on timed nodes, as the gatherer sees it: a timed target, or a reduction target whose collectables
+    /// all grow on timed nodes only (Levin Quartz and Calamus Root on ephemeral nodes, for Levinchrome Aethersand).
+    /// </summary>
+    private bool LandTimed(GatherTarget t)
+    {
+        if (t.Supply == Supply.GatherTimed) return true;
+        if (t.Supply != Supply.Reduce) return false;
+        var catalog = plugin.Plans.Catalog!;
+        var items = LandItems(t);
+        return items.Count > 0 && items.All(id => !catalog.Sources(id).Has(Obtain.Gather) && catalog.TimedMask(id) != 0);
+    }
+
+    /// <summary>Eorzea hours a land target can be gathered (its collectables' nodes together for a reduction); 0 for always.</summary>
+    private uint LandMask(GatherTarget t)
+    {
+        if (!LandTimed(t)) return 0;
+        var catalog = plugin.Plans.Catalog!;
+        return LandItems(t).Aggregate(0u, (mask, id) => mask | catalog.TimedMask(id));
+    }
+
+    /// <summary>The gatherer reported it can't get it: the item, or for a reduction every collectable it comes from.</summary>
+    private bool LandUnreachable(GatherTarget t)
+        => t.Supply == Supply.Reduce ? LandItems(t).All(Gather.Unreachable.Contains) : Gather.Unreachable.Contains(t.ItemId);
 
     /// <summary>
     /// The gathered targets whose extras the clean-up throws away (Settings), each with how many to keep.

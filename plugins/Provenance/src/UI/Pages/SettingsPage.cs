@@ -171,7 +171,8 @@ internal sealed class SettingsPage : Page
         }
         else Ui.Muted("No spot saved yet.");
         ImGui.Dummy(new Vector2(0, 2 * s));
-        if (Ui.Button("Save where I'm standing", Ui.Kind.Secondary, FontAwesomeIcon.MapMarkerAlt, id: "##savespot"))
+        var runs = Plugin.Runs;
+        if (Ui.Button("Save where I'm standing", Ui.Kind.Secondary, FontAwesomeIcon.MapMarkerAlt, enabled: !runs.TestingSpot, id: "##savespot"))
         {
             var (captured, why) = Run.CraftingSpots.Capture(Plans.Catalog);
             spotProblem = why;
@@ -179,8 +180,24 @@ internal sealed class SettingsPage : Page
         }
         if (spot.IsSet)
         {
+            // Trying it out: the trip alone, the way a run makes it before crafting.
             ImGui.SameLine(0, 10 * s);
-            if (Ui.Button("Forget it", Ui.Kind.Ghost, id: "##forgetspot")) { Config.CraftingSpot = new CraftingSpotSettings(); spotProblem = null; Config.Save(); }
+            if (runs.TestingSpot)
+            {
+                if (Ui.Button("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, id: "##stopspot")) runs.StopSpotTest();
+            }
+            else if (Ui.Button("Go there now", Ui.Kind.Secondary, FontAwesomeIcon.Play, enabled: !runs.Active,
+                         tooltip: runs.Active ? "A run is going." : "Makes the trip a run makes before crafting, so you can watch it.", id: "##testspot"))
+                spotProblem = runs.TestSpot();
+            ImGui.SameLine(0, 10 * s);
+            if (Ui.Button("Forget it", Ui.Kind.Ghost, enabled: !runs.TestingSpot, id: "##forgetspot")) { Config.CraftingSpot = new CraftingSpotSettings(); spotProblem = null; Config.Save(); }
+        }
+        if (runs.TestingSpot || runs.SpotTestStatus.Length > 0)
+        {
+            var color = runs.TestingSpot ? Palette.Accent : runs.SpotTestFailed ? Palette.Warn : Palette.TextMuted;
+            Ui.Icon(runs.TestingSpot ? FontAwesomeIcon.Route : runs.SpotTestFailed ? FontAwesomeIcon.ExclamationTriangle : FontAwesomeIcon.CheckCircle, color, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped(runs.SpotTestStatus.Length > 0 ? runs.SpotTestStatus : "Setting off", runs.TestingSpot ? Palette.Text : color);
         }
         if (spotProblem != null)
         {

@@ -46,11 +46,15 @@ internal static unsafe class CraftingSpots
             var id = hm->GetCurrentIndoorHouseId();
             if (!id.IsApartment && id.RoomNumber > 0)
                 return (null, "Private chambers can't be a crafting spot yet. Stand in the house's main rooms.");
-            var homes = Teleporter.Homes()
-                .Where(d => d.Apartment == id.IsApartment && d.Ward == id.WardIndex && (id.IsApartment || d.Plot == id.PlotIndex)).ToList();
-            var home = homes.FirstOrDefault(d => d.TerritoryId == id.TerritoryTypeId) ?? (homes.Count == 1 ? homes[0] : null);
+            var homes = Teleporter.Homes();
+            var home = MatchHome(homes, id);
             if (home == null)
-                return (null, "This house isn't in your teleport list, so a run couldn't come back to it. Use your own house, your free company's, a shared house or your apartment.");
+            {
+                Services.Log.Information("Crafting spot: no teleport entry matches the house here (ward {Ward}, plot {Plot}, room {Room}, apartment {Apartment}, district {District}, world {World}, id {Id:X}). Estates in the teleport list: {Homes}",
+                    id.WardIndex, id.PlotIndex, id.RoomNumber, id.IsApartment, id.TerritoryTypeId, id.WorldId, id.Id,
+                    string.Join("; ", homes.Select(d => $"{d.Estate} [{d.Kind}, ward {d.Ward}, plot {d.Plot}, district {d.TerritoryId}, id {d.House:X}]")));
+                return (null, "This house isn't in your teleport list, so a run couldn't come back to it. Use your own house, your free company's, a shared house or your apartment. (What was compared is in /xllog.)");
+            }
             spot.Kind = id.IsApartment ? CraftingSpotKind.Apartment : CraftingSpotKind.House;
             spot.District = home.TerritoryId;
             spot.Ward = id.WardIndex;
@@ -77,6 +81,44 @@ internal static unsafe class CraftingSpots
         spot.Kind = CraftingSpotKind.OpenWorld;
         spot.Label = row?.PlaceName.ValueNullable?.Name.ExtractText() is { Length: > 0 } place ? place : "Zone " + territory;
         return (spot, null);
+    }
+
+    /// <summary>
+    /// The teleport list's entry for the house you're in. The game's own id of each entry first; then which of
+    /// your estates (free company, personal, shared, apartment) this is; then ward and plot.
+    /// </summary>
+    private static Teleporter.Destination? MatchHome(List<Teleporter.Destination> homes, HouseId here)
+    {
+        if (homes.FirstOrDefault(d => d.House != 0 && SameHouse(d.House, here)) is { } byId) return byId;
+
+        var kinds = new (EstateType Kind, int Index)[]
+        {
+            (EstateType.FreeCompanyEstate, 0), (EstateType.PersonalEstate, 0), (EstateType.SharedEstate, 0),
+            (EstateType.SharedEstate, 1), (EstateType.ApartmentRoom, 0),
+        };
+        foreach (var (kind, index) in kinds)
+        {
+            HouseId owned;
+            try { owned = HousingManager.GetOwnedHouseId(kind, index); }
+            catch (Exception) { continue; }
+            if (owned.Id == 0 || owned.Id == ulong.MaxValue || !SameHouse(owned, here)) continue;
+            var ofKind = homes.Where(d => d.Kind == kind || (kind == EstateType.ApartmentRoom && d.Apartment)).ToList();
+            if (ofKind.Count == 1 || (ofKind.Count > 1 && kind != EstateType.SharedEstate)) return ofKind[0];
+            if (ofKind.Count > index) return ofKind[index];
+        }
+
+        var byPlot = homes.Where(d => d.Apartment == here.IsApartment && d.Ward == here.WardIndex && (here.IsApartment || d.Plot == here.PlotIndex)).ToList();
+        return byPlot.FirstOrDefault(d => d.TerritoryId == here.TerritoryTypeId) ?? (byPlot.Count == 1 ? byPlot[0] : null);
+    }
+
+    /// <summary>The same house (or apartment): ward, plot or room, district and world, where both ids say.</summary>
+    private static bool SameHouse(HouseId a, HouseId b)
+    {
+        if (a.IsApartment != b.IsApartment || a.WardIndex != b.WardIndex) return false;
+        if (a.IsApartment ? a.ApartmentDivision != b.ApartmentDivision || (a.RoomNumber != b.RoomNumber && a.RoomNumber > 0 && b.RoomNumber > 0)
+                          : a.PlotIndex != b.PlotIndex) return false;
+        if (a.TerritoryTypeId != 0 && b.TerritoryTypeId != 0 && a.TerritoryTypeId != b.TerritoryTypeId) return false;
+        return a.WorldId == 0 || b.WorldId == 0 || a.WorldId == b.WorldId;
     }
 
     /// <summary>In the spot's zone, and for a house or apartment inside the right one: what's left is a walk.</summary>

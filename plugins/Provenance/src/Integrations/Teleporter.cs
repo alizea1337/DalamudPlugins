@@ -17,8 +17,11 @@ internal static unsafe class Teleporter
     /// <param name="Estate">For houses and apartments: "Mist, ward 5, plot 12 (free company)"; null for aetherytes.</param>
     /// <param name="Ward">For houses and apartments: the ward (0-based).</param>
     /// <param name="Plot">For houses: the plot (0-based).</param>
+    /// <param name="House">For houses and apartments: the game's id of the house (a HouseId), 0 for aetherytes.</param>
+    /// <param name="Kind">For houses and apartments: what kind of estate it is.</param>
     public sealed record Destination(uint AetheryteId, byte SubIndex, string Name, uint TerritoryId, uint GilCost, string? Estate = null,
-        int Ward = -1, int Plot = -1, bool Apartment = false);
+        int Ward = -1, int Plot = -1, bool Apartment = false, ulong House = 0,
+        FFXIVClientStructs.FFXIV.Client.Game.EstateType Kind = FFXIVClientStructs.FFXIV.Client.Game.EstateType.Unknown3);
 
     /// <summary>Aetherytes the character can teleport to right now, with their current gil cost.</summary>
     public static List<Destination> Unlocked()
@@ -34,7 +37,7 @@ internal static unsafe class Teleporter
             var row = sheet.GetRowOrDefault(info.AetheryteId);
             var name = row?.PlaceName.ValueNullable?.Name.ExtractText() ?? "Aetheryte " + info.AetheryteId;
             result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost, EstateLabel(info),
-                info.Ward, info.Plot, info.IsApartment));
+                info.Ward, info.Plot, info.IsApartment, info.HouseId.Id, info.EstateType));
         }
         return result;
     }
