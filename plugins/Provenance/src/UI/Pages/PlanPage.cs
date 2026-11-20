@@ -31,6 +31,7 @@ internal sealed class PlanPage : Page
     public PlanPage(Plugin plugin) : base(plugin) { }
 
     public override string Title => "Plan";
+    public override FontAwesomeIcon Icon => FontAwesomeIcon.Sitemap;
 
     public override (int Count, Vector4 Color)? Badge
     {

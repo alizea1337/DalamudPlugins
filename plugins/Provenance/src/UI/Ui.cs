@@ -11,7 +11,8 @@ namespace Provenance.UI;
 
 /// <summary>
 /// The widget kit. Shape rule: actions and chips are pills, cards 14, inputs and rows 8, item icons 8.
-/// Motion: only easing on values that change because of the user or the run (tab marker, bars).
+/// Motion: only easing on values that change because of the user or the run (the sidebar pill, switches,
+/// bars, a page coming in). With "Reduce motion" on, movement snaps into place and only fades remain.
 /// </summary>
 internal static partial class Ui
 {
@@ -27,8 +28,22 @@ internal static partial class Ui
 
     public static void Init(Fonts fonts) => F = fonts;
 
-    /// <summary>Moves a stored value toward its target; framerate independent, settles in ~150 ms.</summary>
+    /// <summary>The "Reduce motion" setting, set by the window each frame: movement snaps, fades stay.</summary>
+    public static bool ReduceMotion { get; set; }
+
+    /// <summary>
+    /// Moves a stored value toward its target; framerate independent, settles in ~150 ms. For movement: with
+    /// "Reduce motion" it jumps straight to the target.
+    /// </summary>
     public static float Ease(uint id, float target, float speed = 18f)
+    {
+        if (!ReduceMotion) return Fade(id, target, speed);
+        Eased[id] = target;
+        return target;
+    }
+
+    /// <summary>Like <see cref="Ease"/>, for opacity and colour: it eases even with "Reduce motion".</summary>
+    public static float Fade(uint id, float target, float speed = 18f)
     {
         if (!Eased.TryGetValue(id, out var v)) v = target;
         v += (target - v) * (1f - MathF.Exp(-speed * ImGui.GetIO().DeltaTime));

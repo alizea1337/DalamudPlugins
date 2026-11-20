@@ -8,6 +8,18 @@ using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
 
+/// <summary>The settings pages in the sidebar, one per part of a run.</summary>
+internal enum SettingsSection
+{
+    General,
+    Crafting,
+    Gathering,
+    Fishing,
+    MonsterDrops,
+    AfterOrder,
+}
+
+/// <summary>One of the settings pages; which one is fixed when it's created.</summary>
 internal sealed class SettingsPage : Page
 {
     private static readonly (string InternalName, string Name, string Role)[] Dependencies =
@@ -15,9 +27,29 @@ internal sealed class SettingsPage : Page
         ("vnavmesh", "vnavmesh", "Walks and flies to vendors, summoning bells, nodes, fishing spots and monsters."),
     };
 
-    public SettingsPage(Plugin plugin) : base(plugin) { }
+    private readonly SettingsSection section;
 
-    public override string Title => "Settings";
+    public SettingsPage(Plugin plugin, SettingsSection section) : base(plugin) => this.section = section;
+
+    public override string Title => section switch
+    {
+        SettingsSection.General => "General",
+        SettingsSection.Crafting => "Crafting",
+        SettingsSection.Gathering => "Gathering",
+        SettingsSection.Fishing => "Fishing",
+        SettingsSection.MonsterDrops => "Monster drops",
+        _ => "After the order",
+    };
+
+    public override FontAwesomeIcon Icon => section switch
+    {
+        SettingsSection.General => FontAwesomeIcon.SlidersH,
+        SettingsSection.Crafting => FontAwesomeIcon.Hammer,
+        SettingsSection.Gathering => FontAwesomeIcon.Leaf,
+        SettingsSection.Fishing => FontAwesomeIcon.Fish,
+        SettingsSection.MonsterDrops => FontAwesomeIcon.Paw,
+        _ => FontAwesomeIcon.Home,
+    };
 
     public override (string Text, Vector4 Color)? Status => ("Changes are saved as you make them", Palette.TextFaint);
 
@@ -52,10 +84,9 @@ internal sealed class SettingsPage : Page
     {
         var s = Ui.S;
         var a = Config.AfterOrder;
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("After the order");
-        Ui.Wrapped("Where to go once an order is finished. A stopped run stays where it is.");
+        Ui.Heading("After the order", "Where to go once an order is finished. A stopped run stays where it is.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.BeginCard(width: w);
         var place = (int)a.Place;
         if (Ui.Segmented("##afterplace", AfterPlaces, ref place, 440 * s)) { a.Place = (AfterOrderPlace)place; Config.Save(); }
         ImGui.Dummy(new Vector2(0, 4 * s));
@@ -137,10 +168,9 @@ internal sealed class SettingsPage : Page
     {
         var s = Ui.S;
         var c = Config.Combat;
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Monster drops");
-        Ui.Wrapped("Items only monsters drop are farmed with a basic combo on this job, in its highest item level gearset. One monster at a time; whatever attacks you is fought first.");
+        Ui.Heading("Monster drops", "Items only monsters drop are farmed with a basic combo on the job picked here, in its highest item level gearset. One monster at a time; whatever attacks you is fought first.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.BeginCard(width: w);
         CombatJobPicker();
         ImGui.Dummy(new Vector2(0, 2 * s));
         var v = c.Chocobo;
@@ -170,12 +200,11 @@ internal sealed class SettingsPage : Page
     {
         var s = Ui.S;
         var f = Config.Fishing;
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Fishing");
-        Ui.Wrapped("Fish are caught from recorded places to stand, with the bait each one bites on. Only the fish the order needs, and the ones that lead to them (mooching, Fisher's Intuition), are hooked; anything else is let go.");
+        Ui.Heading("Fishing", "Fish are caught from recorded places to stand, with the bait each one bites on. Only the fish the order needs, and the ones that lead to them (mooching, Fisher's Intuition), are hooked; anything else is let go.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.BeginCard(width: w);
         var v = f.BuyBait;
-        if (Ui.Checkbox("Buy bait", ref v, "Buys the bait each fish needs from a gil vendor before fishing (up to the price cap under Vendors), and more if it runs out during the run.")) { f.BuyBait = v; Changed(); }
+        if (Ui.Checkbox("Buy bait", ref v, "Buys the bait each fish needs from a gil vendor before fishing (up to the vendor price cap under General), and more if it runs out during the run.")) { f.BuyBait = v; Changed(); }
         if (f.BuyBait)
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
@@ -216,9 +245,23 @@ internal sealed class SettingsPage : Page
 
     public override void Draw()
     {
+        var w = MathF.Min(ImGui.GetContentRegionAvail().X, 720 * Ui.S);
+        switch (section)
+        {
+            case SettingsSection.General: DrawGeneral(w); break;
+            case SettingsSection.Crafting: DrawCrafting(w); break;
+            case SettingsSection.Gathering: DrawGathering(w); break;
+            case SettingsSection.Fishing: DrawFishing(w); break;
+            case SettingsSection.MonsterDrops: DrawCombat(w); break;
+            default: DrawAfterOrder(w); break;
+        }
+    }
+
+    /// <summary>Owned items, vendors, scrips for books, the summoning bell, the window, and the plugins a run needs.</summary>
+    private void DrawGeneral(float w)
+    {
         var s = Ui.S;
-        var w = MathF.Min(ImGui.GetContentRegionAvail().X, 720 * s);
-        Ui.Heading("Settings");
+        Ui.Heading("General", "What a run counts as yours, what it may buy, and what it works with.");
         ImGui.Dummy(new Vector2(0, 2 * s));
 
         // Owned items
@@ -264,79 +307,12 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Buy instead of gathering when a vendor sells it", ref v, "Faster for common materials such as shards and basic ores.")) { Config.Buying.PreferVendor = v; Changed(); }
         Ui.EndCard();
 
-        // Crafting
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Crafting");
-        Ui.Wrapped("Rotations come from Raphael and are worked out for your stats right before each recipe, with the food and medicine from the Character page.");
-        ImGui.Dummy(new Vector2(0, 2 * s));
-        var cr = Config.Crafting;
-        v = cr.AimForHq;
-        if (Ui.Checkbox("High quality by default", ref v, "New items in the order start with HQ on; switch it per item in Browse or on the plan. Intermediate materials always get the fastest rotation.")) { cr.AimForHq = v; Config.Save(); }
-        v = cr.UseSpecialistActions;
-        if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
-        Ui.Text("Repair gear below");
-        ImGui.SameLine(0, 10 * s);
-        var repair = cr.RepairBelow;
-        ImGui.SetNextItemWidth(160 * s);
-        if (ImGui.SliderInt("##repair", ref repair, 0, 99, repair == 0 ? "never" : "%d%%")) { cr.RepairBelow = repair; Config.Save(); }
-        Ui.Wrapped("Self-repair needs Dark Matter of a high enough grade in your bags.", Palette.TextMuted);
-        Ui.EndCard();
-
-        // Run
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Gathering");
-        Ui.Wrapped("When only timed nodes and fish with time or weather windows are left and none is open, the run crafts what it already has materials for "
-                   + "and hands back to gathering or fishing shortly before the next window opens. For a timed node it first goes to where the node spawns.");
-        ImGui.Dummy(new Vector2(0, 2 * s));
-        var rs = Config.Run;
-        v = rs.CraftWhileWaiting;
-        if (Ui.Checkbox("Craft while waiting for timed nodes and fish windows", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
-        v = rs.TravelAhead;
-        if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits or crafts there.")) { rs.TravelAhead = v; Config.Save(); }
-        Ui.Text("Back to gathering");
-        ImGui.SameLine(0, 10 * s);
-        var lead = rs.TimedLeadMinutes;
-        ImGui.SetNextItemWidth(160 * s);
-        if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
-        Ui.Wrapped("Real minutes before a timed node or fish window opens; enough for the craft under way and the trip there. "
-                   + "For fish, \"Be at the fishing hole\" under Fishing counts instead when it is longer.", Palette.TextMuted);
-        ImGui.Dummy(new Vector2(0, 4 * s));
-        v = rs.DiscardExtras;
-        if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
-        if (rs.DiscardExtras)
-        {
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
-            v = rs.DiscardTimedExtras;
-            if (Ui.Checkbox("Also from timed nodes and rare fish", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Rare fish are the ones that only bite at some hours or in some weather. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
-        }
-        v = rs.WaitForCollectableGp;
-        if (Ui.Checkbox("Wait for GP before collectables", ref v, "The top reward needs the full collectable rotation (Scrutiny, Solid Reason), which takes 600 GP. On regular nodes the run waits next to the node until the GP is back; timed nodes are never waited for.")) { rs.WaitForCollectableGp = v; Config.Save(); }
-        if (rs.WaitForCollectableGp)
-        {
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
-            v = rs.UseCordials;
-            if (Ui.Checkbox("Drink cordials instead of waiting", ref v, "Uses a Hi-Cordial, Cordial or Watered Cordial from your bags, the smallest that fills the gap, whenever one is off cooldown. Never buys any.")) { rs.UseCordials = v; Config.Save(); }
-        }
-        v = rs.ExtractMateria;
-        if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
-        v = rs.ReduceCollectables;
-        if (Ui.Checkbox("Reduce spare collectables", ref v, "When the bags run low on space, aetherially reduces collectables the order doesn't need. Never runs while a reducible collectable the order or the scrip earning needs is in the bags.")) { rs.ReduceCollectables = v; Config.Save(); }
-        Ui.EndCard();
-
-        // Fishing
-        DrawFishing(w);
-
-        // After the order
-        DrawAfterOrder(w);
-
-        // Monster drops
-        DrawCombat(w);
-
         // Books and scrips
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Books and scrips");
         Ui.Wrapped("Master books and folklore tomes the order needs are bought at a scrip exchange. When they cost more scrips than you have, the run can earn them first.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        var rs = Config.Run;
         v = rs.EarnScrips;
         if (Ui.Checkbox("Earn scrips for books", ref v, "Makes or gathers the quickest collectables your jobs can handle (fewest items for the scrips missing), turns them in at a collectable appraiser, buys the book, then runs the order.")) { rs.EarnScrips = v; Config.Save(); Plans.Invalidate(); }
         Ui.EndCard();
@@ -369,6 +345,75 @@ internal sealed class SettingsPage : Page
         }
         Ui.EndCard();
 
-        using (Ui.F.Small.Push()) Ui.Muted($"Provenance {Plugin.Version}");
+        // Window
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Window");
+        v = Config.Window.ReduceMotion;
+        if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { Config.Window.ReduceMotion = v; Config.Save(); }
+        Ui.EndCard();
+    }
+
+    private void DrawCrafting(float w)
+    {
+        var s = Ui.S;
+        Ui.Heading("Crafting", "Rotations come from Raphael and are worked out for your stats right before each recipe, with the food and medicine from the Character page.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.BeginCard(width: w);
+        var cr = Config.Crafting;
+        var v = cr.AimForHq;
+        if (Ui.Checkbox("High quality by default", ref v, "New items in the order start with HQ on; switch it per item in Browse or on the plan. Intermediate materials always get the fastest rotation.")) { cr.AimForHq = v; Config.Save(); }
+        v = cr.UseSpecialistActions;
+        if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
+        Ui.Text("Repair gear below");
+        ImGui.SameLine(0, 10 * s);
+        var repair = cr.RepairBelow;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##repair", ref repair, 0, 99, repair == 0 ? "never" : "%d%%")) { cr.RepairBelow = repair; Config.Save(); }
+        Ui.Wrapped("Self-repair needs Dark Matter of a high enough grade in your bags.", Palette.TextMuted);
+        Ui.EndCard();
+    }
+
+    /// <summary>Timed nodes and waiting, extras, collectables, materia and reduction.</summary>
+    private void DrawGathering(float w)
+    {
+        var s = Ui.S;
+        Ui.Heading("Gathering", "When only timed nodes and fish with time or weather windows are left and none is open, the run crafts what it already has materials for "
+                   + "and hands back to gathering or fishing shortly before the next window opens. For a timed node it first goes to where the node spawns.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.BeginCard(width: w);
+        var rs = Config.Run;
+        var v = rs.CraftWhileWaiting;
+        if (Ui.Checkbox("Craft while waiting for timed nodes and fish windows", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
+        v = rs.TravelAhead;
+        if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits or crafts there.")) { rs.TravelAhead = v; Config.Save(); }
+        Ui.Text("Back to gathering");
+        ImGui.SameLine(0, 10 * s);
+        var lead = rs.TimedLeadMinutes;
+        ImGui.SetNextItemWidth(160 * s);
+        if (ImGui.SliderInt("##lead", ref lead, 1, 10, "%d min before")) { rs.TimedLeadMinutes = lead; Config.Save(); }
+        Ui.Wrapped("Real minutes before a timed node or fish window opens; enough for the craft under way and the trip there. "
+                   + "For fish, \"Be at the fishing hole\" under Fishing counts instead when it is longer.", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        v = rs.DiscardExtras;
+        if (Ui.Checkbox("Throw away extra gathered items", ref v, "A node is always gathered to the end, so the last one usually brings in a few more than the order needs. With this on, the run throws those away once gathering is done (normal quality only, never what you had before).")) { rs.DiscardExtras = v; Config.Save(); }
+        if (rs.DiscardExtras)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            v = rs.DiscardTimedExtras;
+            if (Ui.Checkbox("Also from timed nodes and rare fish", ref v, "Unspoiled, legendary and ephemeral nodes often bring in far more than the order needs. Rare fish are the ones that only bite at some hours or in some weather. Off keeps those extras.")) { rs.DiscardTimedExtras = v; Config.Save(); }
+        }
+        v = rs.WaitForCollectableGp;
+        if (Ui.Checkbox("Wait for GP before collectables", ref v, "The top reward needs the full collectable rotation (Scrutiny, Solid Reason), which takes 600 GP. On regular nodes the run waits next to the node until the GP is back; timed nodes are never waited for.")) { rs.WaitForCollectableGp = v; Config.Save(); }
+        if (rs.WaitForCollectableGp)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
+            v = rs.UseCordials;
+            if (Ui.Checkbox("Drink cordials instead of waiting", ref v, "Uses a Hi-Cordial, Cordial or Watered Cordial from your bags, the smallest that fills the gap, whenever one is off cooldown. Never buys any.")) { rs.UseCordials = v; Config.Save(); }
+        }
+        v = rs.ExtractMateria;
+        if (Ui.Checkbox("Extract materia", ref v, "Between nodes, extracts materia from gear at 100% spiritbond (needs the materia extraction quest).")) { rs.ExtractMateria = v; Config.Save(); }
+        v = rs.ReduceCollectables;
+        if (Ui.Checkbox("Reduce spare collectables", ref v, "When the bags run low on space, aetherially reduces collectables the order doesn't need. Never runs while a reducible collectable the order or the scrip earning needs is in the bags.")) { rs.ReduceCollectables = v; Config.Save(); }
+        Ui.EndCard();
     }
 }

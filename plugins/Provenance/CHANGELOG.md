@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0 (testing)
+
+A sidebar instead of tabs.
+
+- The pages are listed down the left side of the window, in groups: Browse and Plan on top, then
+  Run (Status), Character (Tools) and the settings. The selection slides to the page you pick and
+  stretches on the way; the page comes in with a short fade, rising from below or settling from
+  above depending on where it sits in the list.
+- Settings are split into pages: General (items you already have, vendors, books and scrips, the
+  summoning bell, the plugins a run needs), Crafting, Gathering, Fishing, Monster drops, After the
+  order, and Security.
+- While a run is going, a dot on Run shows it from any page: pulsing while it works, amber while
+  it pauses or stops. The plan's count of things to sort out first sits on Plan.
+- Each page keeps its own scroll position.
+- "Reduce motion" (General, Window) turns the sliding off; fades stay, shorter. It also stops the
+  drop-down lists and the import window from sliding in.
+- The Character page puts the crafter cards two to a row when the window is too narrow for four.
+- The window starts a little larger (1100 by 720) and can't go narrower than 960.
+
 ## 0.9.0
 
 Books on the order, and items that only come from aetherial reduction.

@@ -43,14 +43,21 @@ public sealed class Plugin : IDalamudPlugin
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
-        Main = new MainWindow(this, new Page[]
+        Main = new MainWindow(this, new NavGroup[]
         {
-            new BrowsePage(this),
-            new PlanPage(this),
-            new RunPage(this),
-            new CharacterPage(this),
-            new SettingsPage(this),
-            new SecurityPage(this),
+            new(null, new Page[] { new BrowsePage(this), new PlanPage(this) }),
+            new("Status", new Page[] { new RunPage(this) }),
+            new("Tools", new Page[] { new CharacterPage(this) }),
+            new("Settings", new Page[]
+            {
+                new SettingsPage(this, SettingsSection.General),
+                new SettingsPage(this, SettingsSection.Crafting),
+                new SettingsPage(this, SettingsSection.Gathering),
+                new SettingsPage(this, SettingsSection.Fishing),
+                new SettingsPage(this, SettingsSection.MonsterDrops),
+                new SettingsPage(this, SettingsSection.AfterOrder),
+                new SecurityPage(this),
+            }),
         });
         windows.AddWindow(Main);
 

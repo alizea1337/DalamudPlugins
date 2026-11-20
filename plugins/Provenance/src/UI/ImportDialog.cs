@@ -72,7 +72,8 @@ internal sealed class ImportDialog
         var width = MathF.Min(560 * s, hostSize.X - 48 * s);
         var t = (float)Math.Clamp((ImGui.GetTime() - openedAt) / OpenSeconds, 0, 1);
         var eased = 1f - MathF.Pow(1f - t, 3f);
-        ImGui.SetNextWindowPos(host + new Vector2(hostSize.X / 2, hostSize.Y * 0.42f + (1f - eased) * Slide * s), ImGuiCond.Always, new Vector2(0.5f, 0.5f));
+        var slide = Ui.ReduceMotion ? 0f : (1f - eased) * Slide * s;
+        ImGui.SetNextWindowPos(host + new Vector2(hostSize.X / 2, hostSize.Y * 0.42f + slide), ImGuiCond.Always, new Vector2(0.5f, 0.5f));
         ImGui.SetNextWindowSize(new Vector2(width, 0));
 
         // The fade and the row spacing hold for the whole dialog; the frame's own look is read when it begins.

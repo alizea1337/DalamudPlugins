@@ -179,7 +179,7 @@ internal static partial class Ui
         // Opening: fades in and slides out of the field (ease-out), in a sixth of a second.
         var t = (float)Math.Clamp((ImGui.GetTime() - st.OpenedAt) / DropdownOpenSeconds, 0, 1);
         var eased = 1f - MathF.Pow(1f - t, 3f);
-        y += (down ? -1 : 1) * (1f - eased) * DropdownSlide * s;
+        if (!Ui.ReduceMotion) y += (down ? -1 : 1) * (1f - eased) * DropdownSlide * s;
         ImGui.SetNextWindowPos(new Vector2(x, y));
         ImGui.SetNextWindowSize(size);
 

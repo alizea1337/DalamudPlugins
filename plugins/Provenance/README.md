@@ -4,11 +4,14 @@ Turns a Teamcraft list into finished items. Provenance works out every material 
 crystals, shows where each one comes from, and then gets it all and crafts it for you: retainers,
 books, vendors, monster drops, gathering, fishing and crafting in one run.
 
-Open it with `/provenance` (or `/prov`).
+Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and Plan on top, then
+Run under Status, Character under Tools, and the settings, one page each for General, Crafting,
+Gathering, Fishing, Monster drops, After the order and Security. *Reduce motion* under General
+keeps the window from sliding things around.
 
 ## What it does
 
-- **Import** a Teamcraft list (*Import list* on the Browse tab) in any of three forms:
+- **Import** a Teamcraft list (*Import list* on the Browse page) in any of three forms:
   - a list link (`ffxivteamcraft.com/list/…`), downloaded from Teamcraft's public database,
     with item and recipe ids, so it works in any client language;
   - an import string (`ffxivteamcraft.com/import/…` or the bare string);
@@ -76,8 +79,8 @@ Open it with `/provenance` (or `/prov`).
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
 Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov tp <name>`,
-`/prov flag`, `/prov plan | browse | character | settings` to open a tab, and `/prov import` to open the
-Teamcraft import on the Browse tab.
+`/prov flag`, `/prov plan | browse | character | settings` to open a page (settings opens General), and
+`/prov import` to open the Teamcraft import on the Browse page.
 
 ## Planned
 
@@ -103,7 +106,7 @@ Teamcraft import on the Browse tab.
 
 ## Requirements for a run
 
-vnavmesh. Planning works without it; the settings page shows whether it is loaded. GatherBuddy
+vnavmesh. Planning works without it; the General settings page shows whether it is loaded. GatherBuddy
 Reborn and AutoHook are no longer needed.
 
 Orders with fish also need:

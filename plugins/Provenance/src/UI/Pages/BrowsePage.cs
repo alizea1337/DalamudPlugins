@@ -36,6 +36,7 @@ internal sealed class BrowsePage : Page
     public void OpenImport() => import.Open();
 
     public override string Title => "Browse";
+    public override FontAwesomeIcon Icon => FontAwesomeIcon.Search;
 
     public override (string Text, Vector4 Color)? Status
         => (ImportDialog.OrderSummary(Config.Order), Config.Order.IsEmpty ? Palette.TextFaint : Palette.Accent);

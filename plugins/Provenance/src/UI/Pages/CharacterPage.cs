@@ -29,6 +29,7 @@ internal sealed class CharacterPage : Page
     public CharacterPage(Plugin plugin) : base(plugin) { }
 
     public override string Title => "Character";
+    public override FontAwesomeIcon Icon => FontAwesomeIcon.User;
 
     public override (string Text, Vector4 Color)? Status
     {
@@ -208,6 +209,9 @@ internal sealed class CharacterPage : Page
         addNotes[section] = (text, added.Count == 0 || skipped.Count > 0, DateTime.UtcNow);
     }
 
+    /// <summary>Narrowest a job tile gets before the grid drops to fewer columns (8 crafters: 4, then 2).</summary>
+    private const float MinTileWidth = 190f;
+
     private static void SectionTitle(string text)
     {
         ImGui.Dummy(new Vector2(0, 2 * Ui.S));
@@ -219,6 +223,8 @@ internal sealed class CharacterPage : Page
         var s = Ui.S;
         var gap = 12 * s;
         var avail = ImGui.GetContentRegionAvail().X;
+        while (columns > 1 && (avail - gap * (columns - 1)) / columns < MinTileWidth * s)
+            columns = columns % 2 == 0 && columns > 2 ? columns / 2 : columns - 1;
         var w = (avail - gap * (columns - 1)) / columns;
         var h = TileHeight * s;
         var origin = ImGui.GetCursorScreenPos();

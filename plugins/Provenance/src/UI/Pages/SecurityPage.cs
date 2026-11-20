@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
@@ -11,6 +12,7 @@ internal sealed class SecurityPage : Page
     public SecurityPage(Plugin plugin) : base(plugin) { }
 
     public override string Title => "Security";
+    public override FontAwesomeIcon Icon => FontAwesomeIcon.ShieldAlt;
 
     public override (string Text, Vector4 Color)? Status => ("Changes are saved as you make them", Palette.TextFaint);
 

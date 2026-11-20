@@ -18,6 +18,14 @@ internal sealed class RunPage : Page
     public RunPage(Plugin plugin) : base(plugin) { }
 
     public override string Title => "Run";
+    public override FontAwesomeIcon Icon => FontAwesomeIcon.Running;
+
+    public override (Vector4 Color, bool Pulse)? Live => Runs.Phase switch
+    {
+        RunPhase.Running => (Palette.Accent, true),
+        RunPhase.Pausing or RunPhase.Paused or RunPhase.Stopping => (Palette.Warn, false),
+        _ => null,
+    };
 
     private RunEngine Runs => Plugin.Runs;
 
