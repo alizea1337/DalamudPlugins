@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "Aetherial reduction from fish.\n\n- Items that come from reducing fish collectables are now fetched by a run, rod fishing and\n  spearfishing alike (Dawnborne, Seaborne and Everdeep Aethersand, the fish behind Levinchrome\n  Aethersand, and the rest). The fisher turns Collector's Glove on for those fish only, keeps them\n  as collectables, and reduces them between catches; every other fish still comes in as a normal item\n  with the glove off. Items with both gathered and fished collectables are worked from whichever is up.\n- Browse shows these with the teal \"aetherial reduction\" tag under FSH; amber is left for\n  collectables from content a run can't go to.\n- The run's scheduling goes by the collectables an item is reduced from, gathered or fished: it waits\n  for their windows, travels ahead and crafts in the meantime, and reduces what's in the bags before\n  going on.\r\n",
+    "Changelog": "Ephemeral nodes, and aetherial reduction you can follow.\n\n- Fixed: ephemeral nodes never counted as up, so a run waited for them forever without saying when\n  they open. Every ephemeral node points at an empty placeholder row of the game's timed-node table,\n  which was read as \"never up\" instead of using the node's own hours. This hit most aethersands\n  (Levin Quartz, Calamus Root, Goldbranch, Electrocoal, Fire Moraine and the rest come from ephemeral\n  nodes) and anything else ordered from an ephemeral node; 90 nodes in all.\n- The Run page lists, under each item from aetherial reduction, every collectable it comes from: the\n  job, the zone, and what's going on with it now (\"node up now\", \"node opens in 12 min (04:00–08:00\n  ET)\", \"bites now\", or why the run can't get it), plus how many wait in the bags to be reduced. Almost\n  every aethersand comes from ephemeral or unspoiled nodes, so a run often waits for one to open; now\n  it says which and when.\n- The run log says where each reduction item comes from when gathering starts.\n- The aetherial reduction windows close when the reduction is done (the result, the automatic run and\n  the item list); the run waits for that before calling the order done.\n- No trip to the crafting spot when the order has nothing to craft (an order of aethersand only).\n- Crafting spots out in a housing district (in a ward, not inside a house) are saved with the ward\n  and reached through the teleport to your house or apartment there; before, the run couldn't get\n  back to them (\"No unlocked aetheryte leads there\"). A spot is only saved where a run can get back\n  from anywhere, not just from where you stand.\n- A run no longer stands still when collectables are waiting to be reduced while the character is on\n  a mount (after travelling ahead to a node, or when the run starts mounted): it gets off (landing\n  first when flying) and reduces them.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.11.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.11.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.11.0/latest.zip",
+    "AssemblyVersion": "0.11.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.11.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.11.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795186560
+    "LastUpdate": 1795188400
   }
 ]
