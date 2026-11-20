@@ -150,12 +150,30 @@ internal static partial class Ui
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowTooltip(text);
     }
 
+    /// <summary>The "Tooltip size" setting, set by the window each frame.</summary>
+    public static TooltipSize TooltipSize { get; set; } = TooltipSize.Normal;
+
+    /// <summary>Pixel size of the tooltip text for a setting.</summary>
+    public static int TooltipPixels(TooltipSize size) => size switch
+    {
+        TooltipSize.Small => 12,
+        TooltipSize.Large => 16,
+        TooltipSize.Larger => 18,
+        TooltipSize.Largest => 20,
+        _ => (int)Fonts.BodySize,
+    };
+
     public static void ShowTooltip(string text)
     {
-        using (F.Body.Push())
+        var px = TooltipPixels(TooltipSize);
+        var font = F.Regular(px);
+        // A size picked a moment ago may still be building: the normal size until it's there.
+        if (!font.Available) { font = F.Body; px = (int)Fonts.BodySize; }
+        using (font.Push())
         {
             ImGui.BeginTooltip();
-            ImGui.PushTextWrapPos(320 * S);
+            // The line grows with the text, so a line holds about as many words at every size.
+            ImGui.PushTextWrapPos(320 * S * px / Fonts.BodySize);
             ImGui.TextUnformatted(text);
             ImGui.PopTextWrapPos();
             ImGui.EndTooltip();

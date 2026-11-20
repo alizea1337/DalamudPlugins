@@ -16,6 +16,8 @@ A sidebar instead of tabs.
 - Each page keeps its own scroll position.
 - "Reduce motion" (General, Window) turns the sliding off; fades stay, shorter. It also stops the
   drop-down lists and the import window from sliding in.
+- "Tooltip size" (General, Window) picks how big the text in tooltips is: Small, Normal, Large,
+  Larger or Largest. Their lines get wider with the text. Next to it, "Hover for a sample" shows one.
 - The Character page puts the crafter cards two to a row when the window is too narrow for four.
 - The window starts a little larger (1100 by 720) and can't go narrower than 960.
 

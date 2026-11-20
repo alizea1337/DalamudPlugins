@@ -6,8 +6,8 @@ books, vendors, monster drops, gathering, fishing and crafting in one run.
 
 Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and Plan on top, then
 Run under Status, Character under Tools, and the settings, one page each for General, Crafting,
-Gathering, Fishing, Monster drops, After the order and Security. *Reduce motion* under General
-keeps the window from sliding things around.
+Gathering, Fishing, Monster drops, After the order and Security. Under General, *Reduce motion*
+keeps the window from sliding things around and *Tooltip size* sets how big the hover texts are.
 
 ## What it does
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Dalamud.Interface.ManagedFontAtlas;
 
@@ -23,10 +24,14 @@ internal sealed class Fonts : IDisposable
     public IFontHandle Icon { get; }
     public IFontHandle IconSmall { get; }
 
+    private readonly IFontAtlas atlas;
+    private readonly string dir;
+    private readonly Dictionary<int, IFontHandle> regular = new();
+
     public Fonts()
     {
-        var atlas = Services.PluginInterface.UiBuilder.FontAtlas;
-        var dir = Path.Combine(Services.PluginInterface.AssemblyLocation.DirectoryName!, "Resources", "Fonts");
+        atlas = Services.PluginInterface.UiBuilder.FontAtlas;
+        dir = Path.Combine(Services.PluginInterface.AssemblyLocation.DirectoryName!, "Resources", "Fonts");
 
         Body = Text(atlas, dir, 400, BodySize);
         Strong = Text(atlas, dir, 700, BodySize);
@@ -35,6 +40,18 @@ internal sealed class Fonts : IDisposable
         Display = Text(atlas, dir, 800, DisplaySize);
         Icon = Icons(atlas, 14f);
         IconSmall = Icons(atlas, 11f);
+    }
+
+    /// <summary>
+    /// Regular text at this pixel size (for tooltips). Sizes other than Small and Body are built the first time
+    /// they're asked for, and only then: until the atlas has built one, <see cref="IFontHandle.Available"/> is false.
+    /// </summary>
+    public IFontHandle Regular(int size)
+    {
+        if (size == (int)SmallSize) return Small;
+        if (size == (int)BodySize) return Body;
+        if (!regular.TryGetValue(size, out var handle)) regular[size] = handle = Text(atlas, dir, 400, size);
+        return handle;
     }
 
     private static IFontHandle Text(IFontAtlas atlas, string dir, int weight, float size)
@@ -61,5 +78,7 @@ internal sealed class Fonts : IDisposable
     public void Dispose()
     {
         Body.Dispose(); Strong.Dispose(); Small.Dispose(); Title.Dispose(); Display.Dispose(); Icon.Dispose(); IconSmall.Dispose();
+        foreach (var handle in regular.Values) handle.Dispose();
+        regular.Clear();
     }
 }

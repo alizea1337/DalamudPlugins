@@ -177,6 +177,9 @@ public sealed class SecuritySettings
 
 public enum AfterOrderPlace { Stay, WhereStarted, Inn, Home }
 
+/// <summary>Text size of the tooltips (12, 14, 16, 18 and 20 px).</summary>
+public enum TooltipSize { Small, Normal, Large, Larger, Largest }
+
 /// <summary>Where to go once an order is finished.</summary>
 [Serializable]
 public sealed class AfterOrderSettings
@@ -240,4 +243,6 @@ public sealed class WindowSettings
     public float FullHeight { get; set; } = 720;
     /// <summary>Pages, the sidebar and switches change in place instead of sliding; fades stay, shorter.</summary>
     public bool ReduceMotion { get; set; } = false;
+    /// <summary>How big the text in tooltips is.</summary>
+    public TooltipSize TooltipSize { get; set; } = TooltipSize.Normal;
 }

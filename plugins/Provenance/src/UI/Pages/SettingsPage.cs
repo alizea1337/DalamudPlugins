@@ -138,6 +138,28 @@ internal sealed class SettingsPage : Page
     private List<uint> combatJobs = new();
     private List<DropdownItem>? combatJobItems;
 
+    private static readonly string[] TooltipSizeNames = { "Small", "Normal", "Large", "Larger", "Largest" };
+    private static readonly List<DropdownItem> TooltipSizeItems = TooltipSizeNames
+        .Select(n => new DropdownItem(n, n == "Normal" ? "default" : null)).ToList();
+
+    /// <summary>The tooltip size field, with a sample to hover next to it.</summary>
+    private void TooltipSizePicker()
+    {
+        var s = Ui.S;
+        var current = (int)Config.Window.TooltipSize;
+        Ui.DropdownField("##tooltipsize", TooltipSizeNames[current], "Pick a size", 220 * s, FontAwesomeIcon.CommentAlt);
+        ImGui.SameLine(0, 14 * s);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
+        ImGui.BeginGroup();
+        Ui.Icon(FontAwesomeIcon.InfoCircle, Palette.TextFaint, small: true);
+        ImGui.SameLine(0, 6 * s);
+        Ui.Muted("Hover for a sample");
+        ImGui.EndGroup();
+        Ui.Tooltip("Tooltips look like this. They explain the chips, buttons and plan rows you hover across Provenance.");
+        var pick = Ui.DropdownList("##tooltipsize", TooltipSizeItems, current, "");
+        if (pick >= 0) { Config.Window.TooltipSize = (TooltipSize)pick; Config.Save(); }
+    }
+
     /// <summary>A field with the picked job; it opens a searchable list of combat jobs with a saved gearset.</summary>
     private void CombatJobPicker()
     {
@@ -350,6 +372,9 @@ internal sealed class SettingsPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Window");
         v = Config.Window.ReduceMotion;
         if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { Config.Window.ReduceMotion = v; Config.Save(); }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.Text("Tooltip size");
+        TooltipSizePicker();
         Ui.EndCard();
     }
 

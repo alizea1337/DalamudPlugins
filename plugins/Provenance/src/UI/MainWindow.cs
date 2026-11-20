@@ -142,6 +142,7 @@ internal sealed class MainWindow : Window
         using var style = Ui.PushStyle();
         using var body = Ui.F.Body.Push();
         Ui.ReduceMotion = plugin.Config.Window.ReduceMotion;
+        Ui.TooltipSize = plugin.Config.Window.TooltipSize;
         var s = Ui.S;
         var pos = ImGui.GetWindowPos();
         var size = ImGui.GetWindowSize();
