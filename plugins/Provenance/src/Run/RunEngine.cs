@@ -777,9 +777,9 @@ internal sealed class RunEngine : IDisposable
             craftQueueBuilt = true;
             Add($"Crafting {jobs.Sum(j => j.Crafts)} items across {jobs.Count} {(jobs.Count == 1 ? "recipe" : "recipes")}.", false);
         }
-        else if (Crafter.Finished)
+        else if (Crafter.Finished || Crafter.CraftsTotal == 0)
         {
-            // Everything was already crafted between timed nodes.
+            // Everything was already crafted between timed nodes (or the order had nothing to craft).
             if (Crafter.Failure is { } failure) Stop(failure, true, now: true);
             else Finish();
             return;
@@ -791,7 +791,7 @@ internal sealed class RunEngine : IDisposable
     }
 
     /// <summary>Crafts still to do: the queue's rest once it's built, else whether the plan has any.</summary>
-    private bool CraftingLeft() => craftQueueBuilt ? !Crafter.Finished : CraftJobs().Count > 0;
+    private bool CraftingLeft() => craftQueueBuilt ? Crafter.CraftsDone < Crafter.CraftsTotal : CraftJobs().Count > 0;
 
     /// <summary>On the way to the crafting spot: once there (or once it turned out it can't get there), craft.</summary>
     private void TickToSpot()
@@ -1278,6 +1278,14 @@ internal sealed class RunEngine : IDisposable
                 Detail = "The order's amount is in; gathering what's left on the node.";
                 return;
             }
+            // The amount came in with a reduction: let it finish and close its windows.
+            if (!craftingBetween && (Gather.UpkeepBusy || Fish.UpkeepBusy))
+            {
+                Headline = "Finishing the reduction";
+                Detail = "The order's amount is in; closing the aetherial reduction.";
+                return;
+            }
+            Gathering.Upkeep.CloseReductionWindows();
             // The fisher's by-catch tally is read before it stops.
             var byCatch = fishBegun ? ByCatchToDiscard().ToList() : new List<(uint, int)>();
             Gather.Pause();
@@ -1728,7 +1736,7 @@ internal sealed class RunEngine : IDisposable
 
     /// <summary>Materia extraction or aetherial reduction is open (the gatherer's upkeep between nodes): not a moment to hand over.</summary>
     private static bool UpkeepOpen => Interact.IsOpen("Materialize") || Interact.IsOpen("MaterializeDialog")
-        || Interact.IsOpen("PurifyItemSelector") || Interact.IsOpen("PurifyResult");
+        || Interact.IsOpen("PurifyItemSelector") || Interact.IsOpen("PurifyResult") || Interact.IsOpen("PurifyAutoDialog");
 
     /// <summary>A land target is up now or opens within the lead, going by the targets alone.</summary>
     private bool LandWorkByTargets()

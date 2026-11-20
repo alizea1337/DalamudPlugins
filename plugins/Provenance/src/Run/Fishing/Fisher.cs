@@ -175,6 +175,8 @@ internal sealed unsafe partial class Fisher : IDisposable
     }
     /// <summary>Why the collectables caught for a reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
     public string? ReduceBlocked => upkeep.ReduceBlocked;
+    /// <summary>Extracting materia or reducing collectables right now (its windows open).</summary>
+    public bool UpkeepBusy => upkeep.Busy;
     /// <summary>Fish the fisher can't get (no usable spot, no bait, missing actions).</summary>
     public IReadOnlyCollection<uint> Unreachable => unreachable.Keys;
     /// <summary>Fish caught on the side that the order doesn't need (item id → count), for throwing away afterwards.</summary>

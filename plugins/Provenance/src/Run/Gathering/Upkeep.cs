@@ -38,6 +38,8 @@ internal sealed unsafe class Upkeep
     private DateTime waitUntil;
     private DateTime deadline;
     private int extracted;
+    /// <summary>Times "Automatic" was pressed in this reduction (it reduces the rest in one go).</summary>
+    private int automatics;
 
     public Upkeep(Plugin plugin, Action<string, bool> log)
     {
@@ -134,6 +136,7 @@ internal sealed unsafe class Upkeep
             else
             {
                 step = Step.Reduce;
+                automatics = 0;
                 deadline = DateTime.UtcNow.AddSeconds(120);
                 Status = "Aetherial reduction";
                 log($"Reducing {string.Join(", ", r.Spare.Where(reduceNow.Contains).Distinct().Select(Name))}.", false);
@@ -145,6 +148,7 @@ internal sealed unsafe class Upkeep
             && Reducible() is { Spare.Count: > 0, AnyNeeded: false })
         {
             step = Step.Reduce;
+            automatics = 0;
             deadline = DateTime.UtcNow.AddSeconds(120);
             Status = "Aetherial reduction";
             log("Bags are filling up; reducing spare collectables.", false);
@@ -188,33 +192,56 @@ internal sealed unsafe class Upkeep
                 return;
 
             case Step.Reduce:
+            {
+                // "Automatic" reduces the rest on its own: wait while it works, then close its window.
+                if (Interact.Ready("PurifyAutoDialog") is var auto && auto != null)
+                {
+                    var running = new AddonMaster.PurifyAutoDialog(auto);
+                    if (running.PurificationActive) { Wait(0.5); return; }
+                    running.CancelExit();
+                    Wait(1);
+                    return;
+                }
+                var (spare, anyNeeded) = Reducible();
+                var more = spare.Count > 0 && !anyNeeded;
+                // The result of one reduction: the rest in one go while there is more, else close it.
                 if (Interact.Ready("PurifyResult") is var result && result != null)
                 {
                     if (occupied) { Wait(0.5); return; }
-                    // Reduce everything the selector offers in one go, then close.
-                    new AddonMaster.PurifyResult(result).Automatic();
-                    Wait(2);
+                    var r = new AddonMaster.PurifyResult(result);
+                    if (more && automatics < 2) { automatics++; r.Automatic(); Wait(2); return; }
+                    r.Close();
+                    Wait(1);
                     return;
                 }
                 if (occupied) { Wait(0.5); return; }
                 if (Interact.Ready("PurifyItemSelector") is var selector && selector != null)
                 {
-                    var (spare, anyNeeded) = Reducible();
-                    if (spare.Count == 0 || anyNeeded) { Callback.Fire(selector, true, -1); Finish(null); return; }
+                    if (!more) { Callback.Fire(selector, true, -1); Wait(0.5); Finish(null); return; }
                     Callback.Fire(selector, true, 12, 0u);
                     Wait(1.5);
                     return;
                 }
+                // Every window closed: done once nothing is left to reduce.
+                if (!more) { Finish(null); return; }
                 ActionManager.Instance()->UseAction(ActionType.GeneralAction, 21);
                 Wait(1.2);
                 return;
+            }
         }
+    }
+
+    /// <summary>Closes the aetherial reduction windows left open (the automatic run's, the result, the item list).</summary>
+    public static void CloseReductionWindows()
+    {
+        if (Interact.Ready("PurifyAutoDialog") is var a && a != null) new AddonMaster.PurifyAutoDialog(a).CancelExit();
+        if (Interact.Ready("PurifyResult") is var r && r != null) new AddonMaster.PurifyResult(r).Close();
+        if (Interact.Ready("PurifyItemSelector") is var s && s != null) Callback.Fire(s, true, -1);
     }
 
     private void Finish(string? problem)
     {
-        if (Interact.Ready("PurifyResult") is var r && r != null) Callback.Fire(r, true, -1);
-        if (Interact.Ready("PurifyItemSelector") is var s && s != null) Callback.Fire(s, true, -1);
+        CloseReductionWindows();
         if (problem != null) log($"{Status}: {problem}.", true);
         step = Step.Idle;
         Status = "";

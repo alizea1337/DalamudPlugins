@@ -109,6 +109,9 @@ internal sealed unsafe class Gatherer
     /// <summary>Why the collectables gathered for reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
     public string? ReduceBlocked => upkeep.ReduceBlocked;
 
+    /// <summary>Extracting materia or reducing collectables right now (its windows open).</summary>
+    public bool UpkeepBusy => upkeep.Busy;
+
     /// <param name="reduceNow">Collectables gathered to be reduced; reduced between nodes as soon as they're in the bags.</param>
     public void Begin(IEnumerable<GatherTarget> gatherTargets, Func<GatherTarget, int> leftOf, Func<IReadOnlySet<uint>> collectablesNeeded,
         Func<IReadOnlySet<uint>>? reduceNow = null)

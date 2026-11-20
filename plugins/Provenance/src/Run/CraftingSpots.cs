@@ -68,6 +68,25 @@ internal static unsafe class CraftingSpots
         }
 
         var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(territory);
+        var zone = row?.PlaceName.ValueNullable?.Name.ExtractText() is { Length: > 0 } place ? place : "Zone " + territory;
+
+        // Out in a housing district: no aetheryte of its own, and each ward is a world apart. A run gets back through
+        // the teleport to a house or apartment of yours in this ward.
+        if (hm != null && hm->IsOutside())
+        {
+            var ward = hm->GetCurrentWard();
+            var home = Teleporter.Homes().FirstOrDefault(d => d.TerritoryId == territory && WardOf(d) == ward);
+            if (home == null)
+                return (null, $"Out in {zone}, a run can only come back to a ward with a house or apartment of yours in the teleport list. Stand inside one, or in its ward.");
+            spot.Kind = CraftingSpotKind.OpenWorld;
+            spot.District = territory;
+            spot.Ward = ward;
+            spot.Aetheryte = home.AetheryteId;
+            spot.SubIndex = home.SubIndex;
+            spot.Label = $"{zone}, ward {ward + 1}";
+            return (spot, null);
+        }
+
         if (row?.TerritoryIntendedUse.RowId == 2)
         {
             var inn = catalog?.Inns.FirstOrDefault(i => i.RoomTerritory == territory);
@@ -76,12 +95,23 @@ internal static unsafe class CraftingSpots
             spot.Label = "Inn room in " + inn.City;
             return (spot, null);
         }
-        if (!Teleporter.CanReach(territory))
+        // Reachable from anywhere, not just from here: an aetheryte of the zone, or the aethernet.
+        if (!Teleporter.Unlocked().Any(d => d.TerritoryId == territory && d.Estate == null) && Teleporter.AethernetRoute(territory) == null)
             return (null, "A run can't travel back here by itself (a duty, an instance, or somewhere without an aetheryte).");
         spot.Kind = CraftingSpotKind.OpenWorld;
-        spot.Label = row?.PlaceName.ValueNullable?.Name.ExtractText() is { Length: > 0 } place ? place : "Zone " + territory;
+        spot.Label = zone;
         return (spot, null);
     }
+
+    /// <summary>The ward of a house or apartment in the teleport list (0-based): from the game's house id, else the list's own ward.</summary>
+    private static int WardOf(Teleporter.Destination d)
+    {
+        if (d.House != 0 && d.House != ulong.MaxValue) return ((HouseId)d.House).WardIndex;
+        return d.Ward;
+    }
+
+    /// <summary>Out in a housing ward (saved there, reached through an estate's teleport), not inside a house.</summary>
+    public static bool InHousingWard(CraftingSpotSettings s) => s.Kind == CraftingSpotKind.OpenWorld && s.Aetheryte != 0;
 
     /// <summary>
     /// The teleport list's entry for the house you're in. The game's own id of each entry first; then which of
@@ -125,6 +155,7 @@ internal static unsafe class CraftingSpots
     public static bool InPlace(CraftingSpotSettings s)
     {
         if (Services.ClientState.TerritoryType != s.Territory) return false;
+        if (InHousingWard(s)) return OutsideInWard(s);
         if (s.Kind is not (CraftingSpotKind.House or CraftingSpotKind.Apartment)) return true;
         var hm = HousingManager.Instance();
         if (hm == null || !hm->IsInside()) return false;

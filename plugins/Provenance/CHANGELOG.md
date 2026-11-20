@@ -15,6 +15,13 @@ Ephemeral nodes, and aetherial reduction you can follow.
   every aethersand comes from ephemeral or unspoiled nodes, so a run often waits for one to open; now
   it says which and when.
 - The run log says where each reduction item comes from when gathering starts.
+- The aetherial reduction windows close when the reduction is done (the result, the automatic run and
+  the item list); the run waits for that before calling the order done.
+- No trip to the crafting spot when the order has nothing to craft (an order of aethersand only).
+- Crafting spots out in a housing district (in a ward, not inside a house) are saved with the ward
+  and reached through the teleport to your house or apartment there; before, the run couldn't get
+  back to them ("No unlocked aetheryte leads there"). A spot is only saved where a run can get back
+  from anywhere, not just from where you stand.
 - A run no longer stands still when collectables are waiting to be reduced while the character is on
   a mount (after travelling ahead to a node, or when the run starts mounted): it gets off (landing
   first when flying) and reduces them.

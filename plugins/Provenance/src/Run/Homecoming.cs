@@ -137,9 +137,10 @@ internal sealed unsafe class Homecoming
     {
         var s = spot!;
         if (++legs > MaxLegs) { Fail("Couldn't get there: every way in led somewhere else."); return; }
-        if (CraftingSpots.InPlace(s) || s.Kind == CraftingSpotKind.OpenWorld)
+        var outInWard = CraftingSpots.InHousingWard(s);
+        if (CraftingSpots.InPlace(s) || (s.Kind == CraftingSpotKind.OpenWorld && !outInWard))
         {
-            if (s.Kind == CraftingSpotKind.OpenWorld && !Teleporter.CanReach(s.Territory)) { Fail("No unlocked aetheryte leads there any more."); return; }
+            if (!CraftingSpots.InPlace(s) && !Teleporter.CanReach(s.Territory)) { Fail("No unlocked aetheryte leads there any more."); return; }
             Walk("the crafting spot", s.Territory, new Vector2(s.X, s.Z), 1.5f, Then.Done);
             return;
         }
@@ -152,8 +153,10 @@ internal sealed unsafe class Homecoming
                 return;
 
             default:
-                // A house or an apartment: through its door, from outside in its ward; else teleport there first.
-                if (CraftingSpots.OutsideInWard(s) && CraftingSpots.Door(s) is { } door)
+                // A house or an apartment: through its door, from outside in its ward; else teleport there first. Out in
+                // a housing ward: the estate's teleport lands in the ward, and the walk follows.
+                if (outInWard && teleported) { Fail("The teleport didn't land in the spot's ward."); return; }
+                if (!outInWard && CraftingSpots.OutsideInWard(s) && CraftingSpots.Door(s) is { } door)
                 {
                     Walk("the entrance", s.District, new Vector2(door.Position.X, door.Position.Z), 2.5f, Then.Door, () => CraftingSpots.Door(s)?.Position);
                     return;
