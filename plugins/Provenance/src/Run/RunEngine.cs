@@ -716,27 +716,28 @@ internal sealed class RunEngine : IDisposable
         Crafter.DeferMissing = true;
         Crafter.RequestPause();
 
-        Gather.Begin(GathererTargets(targets), GathererLeft, NeededCollectables, ReduceNow);
+        workTargets = GathererTargets(targets);
+        Gather.Begin(workTargets, GathererLeft, NeededCollectables, ReduceNow);
         // Reduced only from collectables the order wants as themselves: nothing would ever gather for it.
         if (targets.FirstOrDefault(t => t.Supply == Supply.Reduce && !reduceFor.ContainsValue(t)) is { ItemId: not 0 } orphan)
         {
             Stop($"Can't get {ItemName(orphan.ItemId)}: the collectables it's reduced from are on the order as themselves. Get it yourself.", true, now: true);
             return;
         }
-        Fish.Begin(targets.Where(t => t.Supply == Supply.Fish), Left, NeededCollectables, OnUsedAsBait);
+        Fish.Begin(workTargets.Where(t => t.Supply == Supply.Fish), GathererLeft, NeededCollectables, OnUsedAsBait, ReduceNow, reduceFor.ContainsKey);
         fishBegun = true;
         landActiveSince = DateTime.UtcNow;
         UpdateFishWaits();
         // Whoever has work now starts; the other waits paused until the run hands over.
-        var land = targets.Count(t => t.Supply != Supply.Fish && (t.Supply != Supply.Reduce || reduceFor.ContainsValue(t)));
-        var fish = targets.Count - land;
+        var land = workTargets.Count(t => t.Supply != Supply.Fish);
+        var fish = workTargets.Count - land;
         var (want, _) = WantedWorker();
         worker = want ?? (land > 0 ? Worker.Land : Worker.Fish);
         if (worker == Worker.Fish) Gather.Pause();
         else Fish.Pause();
         Headline = worker == Worker.Fish ? "Fishing" : "Gathering";
 
-        var fishText = fish == 1 ? $"fishing for {ItemName(targets.First(t => t.Supply == Supply.Fish).ItemId)}" : $"fishing for {fish} kinds of fish";
+        var fishText = fish == 1 ? $"fishing for {ItemName(workTargets.First(t => t.Supply == Supply.Fish).ItemId)}" : $"fishing for {fish} kinds of fish";
         Add(fish == 0 ? $"Gathering {land} {(land == 1 ? "item" : "items")}."
             : land == 0 ? char.ToUpperInvariant(fishText[0]) + fishText[1..] + "."
             : $"Gathering {land} {(land == 1 ? "item" : "items")} and {fishText}.", false);
@@ -1219,7 +1220,9 @@ internal sealed class RunEngine : IDisposable
     {
         if (Gather.Failure is { } failure) { Stop(failure, true, now: true); return; }
         // The collectables for a reduction are in, but reducing them would take something else too: say what.
-        if (Gather.Waiting && Gather.ReduceBlocked is { } blocked && reduceFor.Values.Any(t => Left(t) > 0))
+        if (((Gather.Waiting && Gather.ReduceBlocked is { } landBlocked ? landBlocked : null)
+             ?? (!Fish.Running && Fish.ReduceBlocked is { } fishBlocked ? fishBlocked : null)) is { } blocked
+            && reduceFor.Values.Any(t => Left(t) > 0))
         {
             Stop($"Can't reduce the collectables for {string.Join(", ", reduceFor.Values.Where(t => Left(t) > 0).Select(t => ItemName(t.ItemId)).Distinct())}: {blocked}.", true, now: true);
             return;
@@ -1275,8 +1278,8 @@ internal sealed class RunEngine : IDisposable
             CancelNodeTrip();
             LearnRates();
             NextWindow = null;
-            Add(Targets.All(t => t.Supply == Supply.Fish) ? "Fishing done."
-                : Targets.Any(t => t.Supply == Supply.Fish) ? "Gathering and fishing done." : "Gathering done.", false);
+            Add(workTargets.All(t => t.Supply == Supply.Fish) ? "Fishing done."
+                : workTargets.Any(t => t.Supply == Supply.Fish) ? "Gathering and fishing done." : "Gathering done.", false);
             if (usedAsBait.Count > 0)
                 Add("Caught and used as bait along the way: " + string.Join(", ", usedAsBait.Select(kv => $"{kv.Value}× {ItemName(kv.Key)}")) + ".", false);
             fishWaits.Clear();
@@ -1449,14 +1452,13 @@ internal sealed class RunEngine : IDisposable
         var reach = new Dictionary<uint, bool>();
         (uint, TimedSpot, TimeSpan)? best = null;
         var bestWait = TimeSpan.MaxValue;
-        foreach (var t in Targets.Where(t => LandTimed(t) && Left(t) > 0 && !LandUnreachable(t)))
-        foreach (var item in LandItems(t))
-            foreach (var s in catalog.TimedSpots(item))
+        foreach (var t in workTargets.Where(t => Timed(t) && WorkLeft(t) > 0 && !Gather.Unreachable.Contains(t.ItemId)))
+            foreach (var s in catalog.TimedSpots(t.ItemId))
             {
                 if (tripFailed.Contains(s) || Core.Timing.Eorzea.UntilOpen(s.Mask, now) is not { } wait) continue;
                 if (wait > bestWait || (wait == bestWait && s.TerritoryId != Services.ClientState.TerritoryType)) continue;
                 if (!(reach.TryGetValue(s.TerritoryId, out var ok) ? ok : reach[s.TerritoryId] = Teleporter.CanReach(s.TerritoryId))) continue;
-                best = (item, s, wait);
+                best = (t.ItemId, s, wait);
                 bestWait = wait;
             }
         return best;
@@ -1498,16 +1500,22 @@ internal sealed class RunEngine : IDisposable
     {
         var catalog = plugin.Plans.Catalog!;
         // Targets neither worker can get don't hold the stage in gathering (their worker reports them).
-        var targets = Targets.Select(t => new ScheduledTarget(t.ItemId,
-            t.Supply == Supply.Fish ? Supply.Fish : LandTimed(t) ? Supply.GatherTimed : Supply.Gather,
-            Reachable(t) ? Left(t) : 0, LandMask(t),
+        var targets = workTargets.Select(t => new ScheduledTarget(t.ItemId,
+            t.Supply == Supply.Fish ? Supply.Fish : Timed(t) ? Supply.GatherTimed : Supply.Gather,
+            Reachable(t) ? WorkLeft(t) : 0, Timed(t) ? catalog.TimedMask(t.ItemId) : 0,
             t.Supply == Supply.Fish ? FishWait(t.ItemId) : null));
         var allowed = Settings.CraftWhileWaiting && Crafter.HasReadyWork();
         return Interleave.Decide(targets, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(Settings.TimedLeadMinutes), allowed);
     }
 
     private bool Reachable(GatherTarget t)
-        => t.Supply == Supply.Fish ? !Fish.Unreachable.Contains(t.ItemId) : !LandUnreachable(t);
+        => t.Supply switch
+        {
+            Supply.Fish => !Fish.Unreachable.Contains(t.ItemId),
+            // An item from reduction: any of its collectables that a worker can still get.
+            Supply.Reduce => workTargets.Any(w => reduceFor.TryGetValue(w.ItemId, out var r) && r.ItemId == t.ItemId && Reachable(w)),
+            _ => !Gather.Unreachable.Contains(t.ItemId),
+        };
 
     private void TickCrafting()
     {
@@ -1663,7 +1671,7 @@ internal sealed class RunEngine : IDisposable
         if (LandHasWork()) return (Worker.Land, true);
         if (fishNow) return (Worker.Fish, true);
 
-        var landLeft = Targets.Any(t => t.Supply != Supply.Fish && Left(t) > 0 && !LandUnreachable(t));
+        var landLeft = workTargets.Any(t => t.Supply != Supply.Fish && WorkLeft(t) > 0 && !Gather.Unreachable.Contains(t.ItemId));
         var fishLeft = fishWaits.Keys.Any(id => !Fish.Unreachable.Contains(id));
         if (landLeft != fishLeft) return (landLeft ? Worker.Land : Worker.Fish, false);
         if (!landLeft) return (null, false);
@@ -1720,11 +1728,11 @@ internal sealed class RunEngine : IDisposable
         var catalog = plugin.Plans.Catalog!;
         var now = DateTimeOffset.UtcNow;
         var lead = TimeSpan.FromMinutes(Settings.TimedLeadMinutes);
-        foreach (var t in Targets)
+        foreach (var t in workTargets)
         {
-            if (t.Supply == Supply.Fish || Left(t) <= 0 || LandUnreachable(t)) continue;
-            if (!LandTimed(t)) return true;
-            var mask = LandMask(t);
+            if (t.Supply == Supply.Fish || WorkLeft(t) <= 0 || Gather.Unreachable.Contains(t.ItemId)) continue;
+            if (!Timed(t)) return true;
+            var mask = catalog.TimedMask(t.ItemId);
             if (mask == 0 || Core.Timing.Eorzea.UntilOpen(mask, now) is { } w && w <= lead) return true;
         }
         return false;
@@ -1739,8 +1747,8 @@ internal sealed class RunEngine : IDisposable
         var catalog = plugin.Plans.Catalog!;
         var now = DateTimeOffset.UtcNow;
         TimeSpan? best = null;
-        foreach (var t in Targets.Where(t => LandTimed(t) && Left(t) > 0 && !LandUnreachable(t)))
-            if (LandMask(t) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w
+        foreach (var t in workTargets.Where(t => Timed(t) && WorkLeft(t) > 0 && !Gather.Unreachable.Contains(t.ItemId)))
+            if (catalog.TimedMask(t.ItemId) is var mask and not 0 && Core.Timing.Eorzea.UntilOpen(mask, now) is { } w
                 && (!closed || w > TimeSpan.Zero) && (best == null || w < best))
                 best = w;
         return best;
@@ -1779,12 +1787,13 @@ internal sealed class RunEngine : IDisposable
         fishWaits.Clear();
         var perMinute = Math.Max(0.05, plugin.Config.Timings.FishPerMinute);
         var end = TimeSpan.Zero;
-        foreach (var t in Targets)
+        foreach (var t in workTargets)
         {
             if (t.Supply != Supply.Fish) continue;
-            var left = Left(t);
+            var left = WorkLeft(t);
             if (left <= 0) continue;
-            var wait = Fish.WaitFor(t.ItemId);
+            // Collectables waiting to be reduced: that's work now, whatever the fish's window.
+            var wait = GathererLeft(t) <= 0 ? TimeSpan.Zero : Fish.WaitFor(t.ItemId);
             fishWaits[t.ItemId] = wait;
             if (wait is { } w && w != TimeSpan.MaxValue && w + TimeSpan.FromMinutes(left / perMinute) is var done && done > end) end = done;
         }
@@ -2047,43 +2056,27 @@ internal sealed class RunEngine : IDisposable
     /// predator's (<see cref="Fishing.Fisher.Windowed"/>; "Also from timed nodes and rare fish").
     /// </summary>
     private bool Windowed(GatherTarget t)
-        => LandTimed(t) || (t.Supply == Supply.Fish && Fish.Windowed(t.ItemId));
+        => t.Supply == Supply.GatherTimed || (t.Supply == Supply.Fish && Fish.Windowed(t.ItemId));
 
     /// <summary>
-    /// What the gatherer really goes for: the target itself, or for an item from aetherial reduction the
-    /// collectables it comes from (those this run gathers for it, else every one the catalog knows).
+    /// What the gatherer and the fisher go for: the targets, with each item from aetherial reduction swapped for the
+    /// collectables it comes from (Levin Quartz and Calamus Root on ephemeral nodes, Purple Palate fished, for
+    /// Levinchrome Aethersand). The run's scheduling goes by these; the order's progress by <see cref="Targets"/>.
     /// </summary>
-    private IReadOnlyList<uint> LandItems(GatherTarget t)
-    {
-        if (t.Supply != Supply.Reduce) return new[] { t.ItemId };
-        var forRun = reduceFor.Where(kv => kv.Value.ItemId == t.ItemId).Select(kv => kv.Key).ToList();
-        return forRun.Count > 0 ? forRun : plugin.Plans.Catalog!.ReducedFrom(t.ItemId);
-    }
+    private List<GatherTarget> workTargets = new();
+
+    /// <summary>Collectables gathered or fished for a reduction wait in the bags while the item still lacks.</summary>
+    private bool ReducePending(GatherTarget t)
+        => reduceFor.TryGetValue(t.ItemId, out var target) && Left(target) > 0 && GameState.Collectables(t.ItemId).Count > 0;
 
     /// <summary>
-    /// Only on timed nodes, as the gatherer sees it: a timed target, or a reduction target whose collectables
-    /// all grow on timed nodes only (Levin Quartz and Calamus Root on ephemeral nodes, for Levinchrome Aethersand).
+    /// What's left of a work target for the scheduling: what its worker still has to get, and at least one while its
+    /// collectables wait to be reduced, so that worker stays on and reduces them (between nodes or catches).
     /// </summary>
-    private bool LandTimed(GatherTarget t)
-    {
-        if (t.Supply == Supply.GatherTimed) return true;
-        if (t.Supply != Supply.Reduce) return false;
-        var catalog = plugin.Plans.Catalog!;
-        var items = LandItems(t);
-        return items.Count > 0 && items.All(id => !catalog.Sources(id).Has(Obtain.Gather) && catalog.TimedMask(id) != 0);
-    }
+    private int WorkLeft(GatherTarget t) => Math.Max(GathererLeft(t), ReducePending(t) ? 1 : 0);
 
-    /// <summary>Eorzea hours a land target can be gathered (its collectables' nodes together for a reduction); 0 for always.</summary>
-    private uint LandMask(GatherTarget t)
-    {
-        if (!LandTimed(t)) return 0;
-        var catalog = plugin.Plans.Catalog!;
-        return LandItems(t).Aggregate(0u, (mask, id) => mask | catalog.TimedMask(id));
-    }
-
-    /// <summary>The gatherer reported it can't get it: the item, or for a reduction every collectable it comes from.</summary>
-    private bool LandUnreachable(GatherTarget t)
-        => t.Supply == Supply.Reduce ? LandItems(t).All(Gather.Unreachable.Contains) : Gather.Unreachable.Contains(t.ItemId);
+    /// <summary>A timed node's item to wait for; not while its collectables are there to reduce now.</summary>
+    private bool Timed(GatherTarget t) => t.Supply == Supply.GatherTimed && !(GathererLeft(t) <= 0 && ReducePending(t));
 
     /// <summary>
     /// The gathered targets whose extras the clean-up throws away (Settings), each with how many to keep.
@@ -2100,7 +2093,7 @@ internal sealed class RunEngine : IDisposable
     /// </summary>
     private readonly Dictionary<uint, GatherTarget> reduceFor = new();
 
-    /// <summary>The gatherer's targets: reduction targets swapped for the collectables they come from.</summary>
+    /// <summary>The workers' targets: reduction targets swapped for the collectables they come from (gathered or fished).</summary>
     private List<GatherTarget> GathererTargets(List<GatherTarget> targets)
     {
         reduceFor.Clear();
@@ -2114,8 +2107,10 @@ internal sealed class RunEngine : IDisposable
             {
                 if (direct.Contains(source) || reduceFor.ContainsKey(source)) continue;
                 reduceFor[source] = t;
-                var timed = !catalog.Sources(source).Has(Obtain.Gather);
-                list.Add(new GatherTarget(source, timed ? Supply.GatherTimed : Supply.Gather, t.Remaining, 0));
+                // Gathered (regular or timed nodes) or fished (rod or spearfishing), as a collectable.
+                var src = catalog.Sources(source);
+                var supply = src.Has(Obtain.Gather) ? Supply.Gather : src.Has(Obtain.GatherTimed) ? Supply.GatherTimed : Supply.Fish;
+                list.Add(new GatherTarget(source, supply, t.Remaining, 0));
             }
         }
         return list;

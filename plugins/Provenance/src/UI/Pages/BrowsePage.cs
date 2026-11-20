@@ -268,12 +268,12 @@ internal sealed class BrowsePage : Page
                 if (e.ReducedByRun)
                 {
                     Ui.Chip("aetherial reduction", Palette.SupplyColor(Core.Planning.Supply.Reduce), FontAwesomeIcon.Magic);
-                    Ui.Tooltip($"Comes from reducing collectables: {names}. A run gathers them as collectables and reduces them.");
+                    Ui.Tooltip($"Comes from reducing collectables: {names}. A run gathers or fishes them as collectables and reduces them.");
                 }
                 else
                 {
                     Ui.Chip("aetherial reduction", Palette.Warn, FontAwesomeIcon.Magic);
-                    Ui.Tooltip($"Comes from reducing collectables: {names}. A run can't do these yet (fish collectables, or content it can't go to): added to the order, it's listed under things to get yourself.");
+                    Ui.Tooltip($"Comes from reducing collectables: {names}. They come from content a run can't go to: added to the order, it's listed under things to get yourself.");
                 }
                 break;
             }

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0
+
+Aetherial reduction from fish.
+
+- Items that come from reducing fish collectables are now fetched by a run, rod fishing and
+  spearfishing alike (Dawnborne, Seaborne and Everdeep Aethersand, the fish behind Levinchrome
+  Aethersand, and the rest). The fisher turns Collector's Glove on for those fish only, keeps them
+  as collectables, and reduces them between catches; every other fish still comes in as a normal item
+  with the glove off. Items with both gathered and fished collectables are worked from whichever is up.
+- Browse shows these with the teal "aetherial reduction" tag under FSH; amber is left for
+  collectables from content a run can't go to.
+- The run's scheduling goes by the collectables an item is reduced from, gathered or fished: it waits
+  for their windows, travels ahead and crafts in the meantime, and reduces what's in the bags before
+  going on.
+
 ## 0.10.0
 
 A sidebar instead of tabs.

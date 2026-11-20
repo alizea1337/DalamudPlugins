@@ -369,7 +369,7 @@ internal sealed unsafe partial class Fisher
         if (c[ConditionFlag.InCombat]) { Status = "In combat; fishing after the fight"; Wait(1); return; }
         if (c[ConditionFlag.InFlight] || c[ConditionFlag.Mounted]) { landPresses = landMoves = 0; Go(Step.Land); return; }
         if (GameState.CurrentJob != FishAccess.Fisher) { Go(Step.Gear); return; }
-        if (CollectOff()) return;
+        if (SetCollect(t.ItemId)) return;
         if (GameState.BagCount(bait) <= 0) { Go(Step.Bait); return; }
         if (Angler.CanCastHere())
         {

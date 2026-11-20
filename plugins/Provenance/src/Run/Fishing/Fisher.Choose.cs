@@ -315,7 +315,7 @@ internal sealed partial class Fisher
         Waiting = false;
         if (SomethingOut) { Settle(Step.Choose); return; }
         if (pausing) { PauseOnceIn(); return; }
-        if (upkeep.Begin(neededCollectables())) { Go(Step.Upkeep); return; }
+        if (upkeep.Begin(neededCollectables(), reduceNow())) { Go(Step.Upkeep); return; }
 
         var needed = targets.Where(t => left(t) > 0).ToList();
         if (needed.Count == 0)

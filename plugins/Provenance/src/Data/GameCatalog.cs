@@ -76,7 +76,7 @@ internal sealed class GameCatalog : IGameCatalog
     private readonly Dictionary<(uint Item, uint Job), (int Level, bool Normal, BrowseKind Kind, Place Places)> gatherBrowse = new();
     /// <summary>Browser rows (item, job) that come from aetherial reduction, and whether a run can do it.</summary>
     private readonly Dictionary<(uint Item, uint Job), bool> reducedBrowse = new();
-    /// <summary>Item → the gatherable collectables (open world) whose aetherial reduction gives it.</summary>
+    /// <summary>Item → the collectables a run can get (gathered or fished in the open world) whose aetherial reduction gives it.</summary>
     private readonly Dictionary<uint, List<uint>> reducedFrom = new();
     /// <summary>Item → every collectable that reduces into it (fish and special content too), for the plan's text.</summary>
     private readonly Dictionary<uint, List<uint>> reductionSources = new();
@@ -775,8 +775,8 @@ internal sealed class GameCatalog : IGameCatalog
     /// <summary>
     /// Aetherial reduction (Resources/reduction.json, from Teamcraft): items that only come from reducing
     /// collectables. A source counts only when it really is a reducible collectable (the data has a stray row of
-    /// crystals). Miners' and botanists' collectables in the open world make the item <see cref="Obtain.Reduce"/>;
-    /// fish collectables (a run doesn't reduce those yet) and special content make it <see cref="Obtain.ReduceElsewhere"/>.
+    /// crystals). Miners', botanists' and fishers' collectables in the open world (rod or spearfishing) make the item
+    /// <see cref="Obtain.Reduce"/>; collectables from special content make it <see cref="Obtain.ReduceElsewhere"/>.
     /// Crystals are left out: they're gathered directly.
     /// </summary>
     private void IndexReduction()
@@ -802,7 +802,6 @@ internal sealed class GameCatalog : IGameCatalog
                 var land = new List<uint>();
                 var all = new List<uint>();
                 var elsewhere = Place.None;
-                var fish = false;
                 foreach (var s in row.Value.EnumerateArray())
                 {
                     var source = s.GetUInt32();
@@ -817,9 +816,10 @@ internal sealed class GameCatalog : IGameCatalog
                     }
                     else if (src.Has(Obtain.Fish))
                     {
-                        fish = true;
+                        // Caught as a collectable (Collect on) by the run's fisher, then reduced.
+                        land.Add(source);
                         var level = Gather.Fish(source)?.Spots.Select(Gather.Spot).OfType<Core.Fishing.FishingSpotInfo>().Select(x => x.Level).DefaultIfEmpty(1).Min() ?? 1;
-                        NoteReduced(result, 18, level, true, BrowseKind.Fish, Place.OpenWorld, false);
+                        NoteReduced(result, 18, level, true, BrowseKind.Fish, Place.OpenWorld, true);
                     }
                     else if (src.Has(Obtain.GatherElsewhere | Obtain.FishElsewhere))
                     {
@@ -836,7 +836,7 @@ internal sealed class GameCatalog : IGameCatalog
                     reducedFrom[result] = land;
                     Add(result, Obtain.Reduce, Place.OpenWorld);
                 }
-                else if (fish || elsewhere != Place.None) Add(result, Obtain.ReduceElsewhere, elsewhere);
+                else if (elsewhere != Place.None) Add(result, Obtain.ReduceElsewhere, elsewhere);
             }
     }
 

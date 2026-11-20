@@ -43,7 +43,9 @@ keeps the window from sliding things around and *Tooltip size* sets how big the 
   they are up, then the current zone, then the cheapest teleport), changes into the gatherer's
   best gearset, travels and flies there, finds the node among its known spawn spots, and works the
   gathering window with a rotation solver (ported from GatherBuddy Reborn) or the collectable
-  rotation, always to the end of the node. Between nodes it extracts materia and reduces spare
+  rotation, always to the end of the node. Items that only come from aetherial reduction are gathered
+  or fished as collectables (Collector's Glove on for those fish, rod or spearfishing) and reduced
+  between nodes and catches. Between nodes it extracts materia and reduces spare
   collectables. Node positions it sees are remembered on your PC (never uploaded). *Pause*
   finishes the current node (or catch) first. The run stops on its own when you are knocked out, when only a
   few inventory slots are left, or when vnavmesh is unloaded; a duty pauses it until the duty ends.

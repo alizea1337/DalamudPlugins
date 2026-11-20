@@ -360,7 +360,7 @@ internal sealed unsafe partial class Fisher
         if (GameState.CurrentJob != FishAccess.Fisher) { Go(Step.Gear); return; }
         // A pause asked for before this node was opened: it isn't opened at all.
         if (pausing && openTries == 0) { PauseOnceIn(); return; }
-        if (CollectOff()) return;
+        if (current is { } ct && SetCollect(ct.ItemId)) return;
         if (++openTries > 4) { GiveUpNode(live, "Couldn't open the spearfishing node"); return; }
         Status = "Opening the node";
         Interact.With(live);
@@ -404,6 +404,8 @@ internal sealed unsafe partial class Fisher
     private void StartSpear()
     {
         if (wanted.Count == 0 && fish != null) wanted = new List<FishInfo> { fish };
+        // Gigged for aetherial reduction: as collectables.
+        spear.Collect = current is { } ct && collect(ct.ItemId);
         spear.Begin(wanted);
         nodeGigs = 0;
         lastGigAt = DateTime.UtcNow;

@@ -111,7 +111,7 @@ internal sealed class PlanPage : Page
         Section("To fish", FontAwesomeIcon.Fish, Palette.SupplyColor(Supply.Fish),
             materials.Where(l => l.Supply == Supply.Fish), catalog, null);
         Section("To reduce", FontAwesomeIcon.Magic, Palette.SupplyColor(Supply.Reduce),
-            materials.Where(l => l.Supply == Supply.Reduce), catalog, "gathered as collectables, then reduced");
+            materials.Where(l => l.Supply == Supply.Reduce), catalog, "gathered or fished as collectables, then reduced");
         Section("To buy", FontAwesomeIcon.Store, Palette.SupplyColor(Supply.Vendor),
             materials.Where(l => l.Supply == Supply.Vendor), catalog, plan.VendorGil > 0 ? $"about {plan.VendorGil:N0} gil" : null);
         Section("Monster drops", FontAwesomeIcon.Paw, Palette.SupplyColor(Supply.Drop),

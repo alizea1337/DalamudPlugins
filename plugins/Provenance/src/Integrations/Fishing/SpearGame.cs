@@ -26,8 +26,8 @@ namespace Provenance.Integrations.Fishing;
 /// instead of the wanted fish shows up under its own item id. One action per frame at most, then nothing
 /// for a random 600–1000 ms (Gig has its own 1 s recast too). No GP is spent (Nature's Bounty, Baited
 /// Breath, Veteran Trade, Electric Current, cordials): the order only needs the fish. The one other action
-/// is the Collect toggle, switched off when it was left on (<see cref="KeepCollectOff"/>), so the fish come
-/// in as normal items. Gigging is ported from AutoHook's AutoGig (BSD-3, Puni.sh); node recognition
+/// is the Collect toggle, set the way <see cref="Collect"/> asks (off for an order's fish, so they come in as normal
+/// items; on for fish gigged to be reduced). Gigging is ported from AutoHook's AutoGig (BSD-3, Puni.sh); node recognition
 /// follows GatherBuddy Reborn's AutoGather spearfishing (Apache-2.0).
 /// Framework thread; <see cref="Tick"/> every frame.
 /// </summary>
@@ -69,10 +69,10 @@ internal sealed unsafe class SpearGame
     public event Action<uint, int>? Caught;
 
     /// <summary>
-    /// Switch the Collect toggle off when it's on in the window, so the fish come in as normal items (what an
-    /// order counts; collectables don't). On by default; once per <see cref="Begin"/>.
+    /// Gig the fish as collectables (for aetherial reduction): the Collect toggle is switched to match once per
+    /// <see cref="Begin"/>. Off by default, so the fish come in as normal items (what an order counts).
     /// </summary>
-    public bool KeepCollectOff { get; set; } = true;
+    public bool Collect { get; set; }
     /// <summary>Gigs thrown since <see cref="Begin"/>.</summary>
     public int Gigs { get; private set; }
     /// <summary>Fish caught since <see cref="Begin"/>, wanted or not.</summary>
@@ -176,7 +176,9 @@ internal sealed unsafe class SpearGame
             return;
         }
         Status = watching + caught;
-        if (Environment.TickCount64 < blockUntil || !CanAct()) return;
+        if (Environment.TickCount64 < blockUntil) return;
+        if (Collect && KeepCollectable()) return;
+        if (!CanAct()) return;
         if (CollectFirst()) return;
         GigIfInHitbox(addon);
     }
@@ -353,11 +355,26 @@ internal sealed unsafe class SpearGame
     /// </summary>
     private bool CollectFirst()
     {
-        if (!KeepCollectOff || collectToggled || !HasStatus(CollectStatus)) return false;
+        if (collectToggled || HasStatus(CollectStatus) == Collect) return false;
         if (!Ready(FishAccess.Collect)) return DateTime.UtcNow - openedAt < CollectHold;
         collectToggled = true;
         Use(FishAccess.Collect);
-        Services.Log.Information("Spearfishing: Collect was on; turned it off so the fish come in as normal items");
+        Services.Log.Information(Collect ? "Spearfishing: turned Collect on, for collectables to reduce"
+            : "Spearfishing: Collect was on; turned it off so the fish come in as normal items");
+        return true;
+    }
+
+    /// <summary>
+    /// With Collect on, a catch may ask whether to keep it as a collectable: keep it. Never the question about
+    /// abandoning the teeming waters. True when it answered (then wait, as after any action).
+    /// </summary>
+    private bool KeepCollectable()
+    {
+        var yesno = Interact.Ready("SelectYesno");
+        if (yesno == null || AbandonPrompt() != null) return false;
+        new AddonMaster.SelectYesno((nint)yesno).Yes();
+        blockUntil = Environment.TickCount64 + rng.Next(MinDelayMs, MaxDelayMs + 1);
+        Services.Log.Debug("Spearfishing: kept a catch as a collectable");
         return true;
     }
 

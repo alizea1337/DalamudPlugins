@@ -73,7 +73,10 @@ internal sealed unsafe partial class Fisher : IDisposable
 
     /// <summary>GeneralAction 23: lands when flying, gets off the mount on the ground (as the gatherer uses it).</summary>
     private const uint LandOrDismount = 23;
-    /// <summary>Status 805: Collector's Glove. Fish for an order come in as normal items, so it stays off.</summary>
+    /// <summary>
+    /// Status 805: Collector's Glove. Fish for an order come in as normal items, so it stays off; fish caught for
+    /// aetherial reduction come in as collectables, so it's on for those.
+    /// </summary>
     private const uint CollectStatus = 805;
 
     private readonly Plugin plugin;
@@ -88,6 +91,10 @@ internal sealed unsafe partial class Fisher : IDisposable
     private List<GatherTarget> targets = new();
     private Func<GatherTarget, int> left = _ => 0;
     private Func<IReadOnlySet<uint>> neededCollectables = () => new HashSet<uint>();
+    private Func<IReadOnlySet<uint>> reduceNow = () => new HashSet<uint>();
+    /// <summary>Fish caught as collectables (for aetherial reduction), with Collector's Glove on.</summary>
+    private Func<uint, bool> collect = _ => false;
+    private int collectTries;
     /// <summary>Kept from <see cref="Begin"/> for the contract; no mooch is reported through it (see <see cref="OnUsedAsBait"/> for why).</summary>
     private Action<uint, int> consumed = (_, _) => { };
 
@@ -166,6 +173,8 @@ internal sealed unsafe partial class Fisher : IDisposable
             return next;
         }
     }
+    /// <summary>Why the collectables caught for a reduction can't be reduced now (see <see cref="Upkeep.ReduceBlocked"/>).</summary>
+    public string? ReduceBlocked => upkeep.ReduceBlocked;
     /// <summary>Fish the fisher can't get (no usable spot, no bait, missing actions).</summary>
     public IReadOnlyCollection<uint> Unreachable => unreachable.Keys;
     /// <summary>Fish caught on the side that the order doesn't need (item id → count), for throwing away afterwards.</summary>
@@ -205,12 +214,18 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// <param name="left">How many of a target are still wanted (the run's count, including what mooching used up).</param>
     /// <param name="neededCollectables">Items the order needs, which must never be reduced or thrown away.</param>
     /// <param name="consumed">Called when fish the run counts leave the bags as bait (mooch, swimbait): item id, amount.</param>
-    public void Begin(IEnumerable<GatherTarget> targets, Func<GatherTarget, int> left, Func<IReadOnlySet<uint>> neededCollectables, Action<uint, int> consumed)
+    /// <param name="reduceNow">Collectables caught to be reduced; reduced between catches as soon as they're in the bags.</param>
+    /// <param name="collect">Fish to catch as collectables (for aetherial reduction): Collector's Glove goes on for them.</param>
+    public void Begin(IEnumerable<GatherTarget> targets, Func<GatherTarget, int> left, Func<IReadOnlySet<uint>> neededCollectables, Action<uint, int> consumed,
+        Func<IReadOnlySet<uint>>? reduceNow = null, Func<uint, bool>? collect = null)
     {
         this.targets = targets.Where(t => t.Supply == Supply.Fish).ToList();
         this.left = left;
         this.neededCollectables = neededCollectables;
         this.consumed = consumed;
+        this.reduceNow = reduceNow ?? (() => new HashSet<uint>());
+        this.collect = collect ?? (_ => false);
+        collectTries = 0;
         travel.Cancel();
         shopper.Cancel();
         if (spear.Active) spear.Stop();
@@ -587,14 +602,26 @@ internal sealed unsafe partial class Fisher : IDisposable
         if (am != null && am->GetActionStatus(ActionType.Action, FishAccess.Quit) == 0) am->UseAction(ActionType.Action, FishAccess.Quit);
     }
 
-    /// <summary>Collector's Glove is on: fish would come in as collectables, which the run doesn't count.</summary>
+    /// <summary>Collector's Glove is on: fish come in as collectables.</summary>
     private static bool CollectOn => GatherActions.HasStatus(CollectStatus);
 
-    /// <summary>Turns Collector's Glove off when it's on. True when the action went off (wait for it).</summary>
-    private bool CollectOff()
+    /// <summary>
+    /// Collector's Glove on for a fish caught to be reduced, off for anything else (an order counts normal fish).
+    /// True while switching it (wait), or when the fisher gave up because it wouldn't come on.
+    /// </summary>
+    private bool SetCollect(uint itemId)
     {
-        if (!CollectOn || !GatherActions.Use(FishAccess.Collect)) return false;
-        Status = "Turning Collector's Glove off";
+        var on = collect(itemId);
+        if (CollectOn == on) { collectTries = 0; return false; }
+        if (++collectTries > 8)
+        {
+            collectTries = 0;
+            if (!on) return false; // left on: the angler keeps whatever the collectable prompt asks about
+            Fail("Couldn't turn Collector's Glove on, which fish caught for aetherial reduction need.");
+            return true;
+        }
+        if (!GatherActions.Use(FishAccess.Collect)) { Wait(0.5); return true; }
+        Status = on ? "Turning Collector's Glove on" : "Turning Collector's Glove off";
         Wait(1);
         return true;
     }
