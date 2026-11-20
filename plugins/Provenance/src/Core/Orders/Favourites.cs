@@ -34,6 +34,17 @@ public static class Favourites
     public static string ToTeamcraftText(IEnumerable<OrderLine> lines, Func<uint, string> name)
         => string.Join("\n", lines.Where(l => l.Quantity > 0).GroupBy(l => l.ItemId).Select(g => $"{g.Sum(l => l.Quantity)}x {name(g.Key)}"));
 
+    /// <summary>A favourite that is just this one item (in any amount, quality or recipe): what a star in Browse saves.</summary>
+    public static bool IsJust(FavouriteOrder favourite, uint itemId)
+    {
+        var lines = favourite.Lines.Where(l => l.Quantity > 0).ToList();
+        return lines.Count > 0 && lines.All(l => l.ItemId == itemId);
+    }
+
+    /// <summary>One item as a favourite order of its own (a star in Browse).</summary>
+    public static FavouriteOrder OfItem(uint itemId, int quantity, uint recipeId, bool hq, string name, DateTime nowUtc)
+        => new() { Name = name, Lines = new List<OrderLine> { new(itemId, Math.Max(1, quantity), recipeId, hq) }, SavedUtc = nowUtc };
+
     /// <summary>A name no other favourite has: "Popcorn", then "Popcorn (2)", "Popcorn (3)" (ignoring case).</summary>
     public static string UniqueName(string wanted, IEnumerable<string> taken)
     {

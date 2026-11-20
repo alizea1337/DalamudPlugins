@@ -17,6 +17,8 @@ Filters in the Browse search, and a reset for the Interface page.
 - *Reset filters* next to the number of items clears the search, the chips and the level range at once.
   The search is now kept when you close the window, like the chips.
 - Hovering an item's name in Browse shows its category and item level.
+- A star on every Browse row saves that item as a favourite order of its own, with the amount and
+  HQ choice set on the row. The star shows amber while it's a favourite; clicking it again removes it.
 - Settings, Interface: *Reset to defaults* puts the interface scale, text size, tooltip size and the
   window's size back to how they started. It shows while any of them is changed. Reduce motion stays.
 

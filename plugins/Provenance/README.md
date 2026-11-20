@@ -27,7 +27,7 @@ the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, ic
 - **Browse** every recipe and gatherable (mining, botany, fishing) with a name search, job filter and job-level range, and add
   recipes to the order. The search takes filters too, such as `job:fsh is:reduction level:50-70` or `is:ready cat:metal`:
   see [Searching in Browse](docs/search.md), or the *?* next to the search.
-- **Favourite orders** (Browse, the *Favourites* chip): save the order as it is to make it again
+- **Favourite orders** (Browse, the *Favourites* chip, or the star on an item to keep just that item): save the order as it is to make it again
   later. Each favourite loads with one click (replacing the order, or added to it), renames in
   place, takes the current order over it, and copies out as Teamcraft text (one "10x Item" per
   line, which Teamcraft and Provenance's own import read back).

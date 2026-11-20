@@ -12,6 +12,23 @@ public class FavouritesTests
     private static readonly Dictionary<uint, string> Names = new() { [1] = "Caramel Popcorn", [2] = "Sungilt Aethersand", [3] = "Flint Corn" };
 
     [Fact]
+    public void A_starred_item_is_a_favourite_of_its_own()
+    {
+        var f = Favourites.OfItem(1, 0, 37825, true, "Caramel Popcorn", new System.DateTime(2026, 11, 20));
+        var line = Assert.Single(f.Lines);
+        Assert.Equal((1u, 1, 37825u, true), (line.ItemId, line.Quantity, line.RecipeId, line.Hq));
+        Assert.True(Favourites.IsJust(f, 1));
+        Assert.False(Favourites.IsJust(f, 2));
+
+        // Several lines of the same item still count as just that item; another item on it doesn't.
+        f.Lines.Add(new OrderLine(1, 5, 0, false));
+        Assert.True(Favourites.IsJust(f, 1));
+        f.Lines.Add(new OrderLine(3, 2));
+        Assert.False(Favourites.IsJust(f, 1));
+        Assert.False(Favourites.IsJust(new FavouriteOrder(), 1));
+    }
+
+    [Fact]
     public void Exported_text_is_teamcrafts_and_comes_back_in()
     {
         var lines = new List<OrderLine> { new(1, 30, 0, true), new(2, 10), new(1, 5, 0, false), new(3, 0) };

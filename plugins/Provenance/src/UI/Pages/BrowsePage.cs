@@ -393,6 +393,9 @@ internal sealed partial class BrowsePage : Page
         var addW = Ui.ButtonWidth("Add", FontAwesomeIcon.Plus);
         var qtyW = 96 * s;
         var hqW = e.CanHq ? 62 * s : 0;
+        // The star sits left of the HQ chip and the amount; the "in the order" note moves over for it.
+        var starD = 30 * s;
+        var starW = starD + 6 * s;
         var right = pos.X + width - 8 * s;
         var y = pos.Y + (h - 4 * s - 34 * s) / 2;
         if (inOrder > 0)
@@ -401,10 +404,28 @@ internal sealed partial class BrowsePage : Page
             using (Ui.F.Small.Push())
             {
                 var lw = ImGui.CalcTextSize(label).X;
-                dl.AddText(new Vector2(right - addW - qtyW - hqW - 20 * s - lw, pos.Y + (h - 4 * s - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.Accent), label);
+                dl.AddText(new Vector2(right - addW - qtyW - hqW - starW - 20 * s - lw, pos.Y + (h - 4 * s - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.Accent), label);
             }
         }
         var hq = e.CanHq && hqChoice.GetValueOrDefault(e.Key, Config.Crafting.AimForHq);
+
+        // The star: this item as a favourite order of its own, with the amount and quality set here.
+        var starred = Config.Favourites.FirstOrDefault(f => Core.Orders.Favourites.IsJust(f, e.ItemId));
+        ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s - hqW - starW, y + (34 * s - starD) / 2));
+        var amount = quantities.GetValueOrDefault(e.Key, 1);
+        if (StarButton("##star" + e.Key, starred != null, starred != null
+                ? $"In your favourites as \"{starred.Name}\". Click to remove it."
+                : $"Save {amount}× {e.Name}{(hq ? " (HQ)" : "")} as a favourite order of its own."))
+        {
+            if (starred != null) Config.Favourites.Remove(starred);
+            else
+            {
+                var name = Core.Orders.Favourites.UniqueName(e.Name, Config.Favourites.Select(f => f.Name));
+                Config.Favourites.Insert(0, Core.Orders.Favourites.OfItem(e.ItemId, amount, e.RecipeId, hq, name, DateTime.UtcNow));
+            }
+            Config.Save();
+        }
+
         if (e.CanHq)
         {
             ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s - hqW, y + 2 * s));
@@ -560,6 +581,34 @@ internal sealed partial class BrowsePage : Page
             using (Ui.F.Small.Push()) Ui.Wrapped(what, Palette.TextMuted);
         }
         ImGui.EndTable();
+    }
+
+    /// <summary>
+    /// A star to click: amber when on, faint when off (brighter on hover, with a soft round backdrop). The icon font
+    /// has only the filled star, so colour carries the state, and the tooltip says it in words.
+    /// </summary>
+    private static bool StarButton(string id, bool on, string tooltip)
+    {
+        var s = Ui.S;
+        var d = 30 * s;
+        var at = ImGui.GetCursorScreenPos();
+        var pressed = ImGui.InvisibleButton(id, new Vector2(d));
+        var hovered = ImGui.IsItemHovered();
+        Ui.Tooltip(tooltip);
+        var dl = ImGui.GetWindowDrawList();
+        if (hovered)
+        {
+            dl.AddCircleFilled(at + new Vector2(d / 2), d / 2, Palette.U32(Palette.RaisedHover));
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        }
+        using (Ui.F.IconSmall.Push())
+        {
+            var glyph = FontAwesomeIcon.Star.ToIconString();
+            var size = ImGui.CalcTextSize(glyph);
+            var color = on ? Palette.Warn : hovered ? Palette.TextMuted : Palette.WithAlpha(Palette.TextFaint, 0.7f);
+            dl.AddText(at + (new Vector2(d) - size) / 2, Palette.U32(color), glyph);
+        }
+        return pressed;
     }
 
     /// <summary>"MIN", "MIN and BTN", "CRP, BSM and ARM".</summary>
