@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.1
+
+- Fixed: the text didn't change with the interface size (nor with the tooltip size). Fonts made after
+  the plugin loaded waited for a rebuild of the font atlas that nothing asked for, so the new size
+  never came. The atlas is now asked to build them, and asked again if they're still missing a few
+  seconds later; anything that goes wrong is written to /xllog.
+- The bug report says which interface size is in use and how the fonts are doing.
+
 ## 0.14.0
 
 Crafting somewhere safe, and an interface size.

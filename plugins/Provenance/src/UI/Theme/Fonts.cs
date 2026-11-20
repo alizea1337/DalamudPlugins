@@ -42,6 +42,10 @@ internal sealed class Fonts : IDisposable
     private Set current;
     /// <summary>A new size being built; it takes over once every font of it is ready.</summary>
     private Set? pending;
+    /// <summary>When the atlas was last asked to build (fonts made after the first build wait for one).</summary>
+    private DateTime buildAskedAt;
+    /// <summary>Fonts not built this long after asking: ask again, and log what's wrong.</summary>
+    private static readonly TimeSpan BuildRetry = TimeSpan.FromSeconds(3);
 
     public Fonts(float scale = 1f)
     {
@@ -67,17 +71,54 @@ internal sealed class Fonts : IDisposable
         if (MathF.Abs((pending?.Scale ?? current.Scale) - scale) < 0.001f) return;
         pending?.Dispose();
         pending = MathF.Abs(current.Scale - scale) < 0.001f ? null : Build(scale);
+        if (pending != null) AskForBuild();
     }
 
     /// <summary>Once a frame, before any font is pushed: switches to a new size once it's built.</summary>
     public void Update()
     {
-        if (pending is not { Ready: true } ready) return;
+        if (pending == null) return;
+        if (!pending.Ready)
+        {
+            // Not built yet: the atlas may not rebuild by itself for fonts made after its first build. Ask again now and then.
+            if (DateTime.UtcNow - buildAskedAt > BuildRetry)
+            {
+                foreach (var h in pending.All.Where(h => h.LoadException != null))
+                    Services.Log.Warning(h.LoadException!, "A font for interface size {Scale} couldn't be built", pending.Scale);
+                AskForBuild(always: true);
+            }
+            return;
+        }
         var old = current;
-        current = ready;
+        current = pending;
         pending = null;
         old.Dispose();
+        Services.Log.Information("Interface size {Scale:P0}: fonts switched", current.Scale);
     }
+
+    /// <summary>
+    /// Asks the atlas to build the fonts made since its last build. One that rebuilds by itself (Async) is left to it
+    /// at first; the others are told to build now, and every atlas once the fonts are still missing a while later.
+    /// </summary>
+    private void AskForBuild(bool always = false)
+    {
+        buildAskedAt = DateTime.UtcNow;
+        try
+        {
+            if (always || atlas.AutoRebuildMode != FontAtlasAutoRebuildMode.Async)
+                if (atlas.BuildTask is not { IsCompleted: false }) _ = atlas.BuildFontsAsync();
+        }
+        catch (Exception e)
+        {
+            Services.Log.Warning(e, "Couldn't ask the font atlas to build");
+        }
+    }
+
+    /// <summary>What the fonts are doing, for a bug report.</summary>
+    public string Describe()
+        => $"in use {current.Scale:P0} (ready {current.Ready}), waiting {(pending == null ? "none" : $"{pending.Scale:P0} (ready {pending.Ready})")}, "
+           + $"atlas {atlas.AutoRebuildMode}, built {atlas.HasBuiltAtlas}, building {(atlas.BuildTask is { IsCompleted: false } ? "yes" : "no")}, "
+           + $"tooltip sizes {string.Join(",", current.Regular.Select(kv => $"{kv.Key}:{(kv.Value.Available ? "ready" : "waiting")}"))}";
 
     /// <summary>
     /// Regular text at this pixel size, before the interface size (for tooltips). Sizes other than Small and Body
@@ -88,7 +129,11 @@ internal sealed class Fonts : IDisposable
     {
         if (size == (int)SmallSize) return Small;
         if (size == (int)BodySize) return Body;
-        if (!current.Regular.TryGetValue(size, out var handle)) current.Regular[size] = handle = Text(atlas, dir, 400, size * current.Scale);
+        if (!current.Regular.TryGetValue(size, out var handle))
+        {
+            current.Regular[size] = handle = Text(atlas, dir, 400, size * current.Scale);
+            AskForBuild();
+        }
         return handle;
     }
 

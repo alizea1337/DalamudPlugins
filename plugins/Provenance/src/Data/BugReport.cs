@@ -41,6 +41,7 @@ internal static class BugReport
         Line("Provenance bug report");
         Line($"Version {Plugin.Version}, game language {Services.ClientState.ClientLanguage}, made {DateTime.Now:yyyy-MM-dd HH:mm} local ({now:HH:mm} UTC), Eorzea {EorzeaTime(now)}");
         Line("No character name, world or retainer names are in this report.");
+        Line($"Interface size {plugin.Config.Window.Scale}%, Dalamud scale {Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale:0.00}; fonts: {UI.Ui.F.Describe()}");
 
         // ---------------------------------------------------------------- where and what
         Section("Character");
