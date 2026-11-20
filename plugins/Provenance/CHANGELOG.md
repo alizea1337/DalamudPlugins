@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 (testing)
+## 0.9.0
 
 Books on the order, and items that only come from aetherial reduction.
 
