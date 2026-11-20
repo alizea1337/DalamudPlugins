@@ -138,20 +138,66 @@ internal static unsafe class Teleporter
            || Unlocked().Any(d => d.TerritoryId == territoryId)
            || AethernetRoute(territoryId) != null;
 
-    /// <summary>Picks an aethernet destination in the open aethernet window. False until the window has its list.</summary>
-    public static bool TakeAethernet(uint shardId)
+    /// <summary>What picking a destination in the aethernet window came to.</summary>
+    public enum AethernetPick
+    {
+        /// <summary>The window has no list yet.</summary>
+        NotReady,
+        Taken,
+        /// <summary>The list doesn't have the destination.</summary>
+        Missing,
+        /// <summary>The destination isn't attuned.</summary>
+        Locked,
+    }
+
+    /// <summary>Picks an aethernet destination in the open aethernet window.</summary>
+    public static AethernetPick TakeAethernet(uint shardId)
     {
         var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentTelepotTown.Instance();
-        if (agent == null || agent->Data == null) return false;
+        if (agent == null || agent->Data == null) return AethernetPick.NotReady;
         var data = agent->Data;
+        if (data->AetheryteCount == 0) return AethernetPick.NotReady;
         for (byte i = 0; i < data->AetheryteCount && i < 64; i++)
         {
             if (data->Entries[i].AetheryteId != shardId) continue;
-            if (data->Entries[i].IsLocked) return false;
+            if (data->Entries[i].IsLocked) return AethernetPick.Locked;
             agent->TeleportToAetheryte(i);
-            return true;
+            return AethernetPick.Taken;
         }
-        return false;
+        return AethernetPick.Missing;
+    }
+
+    /// <summary>An aetheryte row is a city's main aetheryte (not an aethernet shard).</summary>
+    public static bool IsMainAetheryte(uint aetheryteId)
+        => Services.Data.GetExcelSheet<Aetheryte>().GetRowOrDefault(aetheryteId) is { IsAetheryte: true };
+
+    /// <summary>What the aethernet calls a stop ("Gladiators' Guild").</summary>
+    public static string AethernetName(uint aetheryteId)
+        => Services.Data.GetExcelSheet<Aetheryte>().GetRowOrDefault(aetheryteId)?.AethernetName.ValueNullable?.Name.ExtractText() is { Length: > 0 } name ? name : "that stop";
+
+    private static string? aethernetMenuText;
+
+    /// <summary>
+    /// The aetheryte menu's entry for the city's aethernet, in the client's language, from the game's own text
+    /// ("Aethernet", "Ätherytennetz", "Réseau de transport urbain éthéré", "都市転送網"). Empty when it can't be read.
+    /// </summary>
+    public static string AethernetMenuText
+    {
+        get
+        {
+            if (aethernetMenuText != null) return aethernetMenuText;
+            try
+            {
+                var sheet = Services.Data.Excel.GetSheet<Lumina.Excel.RawRow>(Dalamud.Utility.ClientLanguageExtensions.ToLumina(Services.Data.Language), "transport/Aetheryte");
+                aethernetMenuText = sheet.GetRowOrDefault(1)?.ReadStringColumn(1).ExtractText().Trim().TrimEnd('.') ?? "";
+            }
+            catch (Exception e)
+            {
+                Services.Log.Debug("The aetheryte menu's text couldn't be read: {Message}", e.Message);
+                aethernetMenuText = "";
+            }
+            return aethernetMenuText;
+        }
     }
 
     private static readonly Dictionary<uint, Vector3?> positions = new();

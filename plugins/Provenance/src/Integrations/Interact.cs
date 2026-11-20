@@ -24,6 +24,39 @@ internal static unsafe class Interact
             .FirstOrDefault();
     }
 
+    /// <summary>Event object names of an aethernet shard, in the client's language ("Aethernet shard", "aetheryte shard").</summary>
+    private static readonly Lazy<HashSet<string>> ShardNames = new(() =>
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sheet = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.EObjName>();
+        foreach (var id in new uint[] { 2000151, 2014665, 2003395 })
+            if (sheet.GetRowOrDefault(id)?.Singular.ExtractText() is { Length: > 0 } name) names.Add(name);
+        return names;
+    });
+
+    /// <summary>
+    /// The crystal of an Aetheryte row, to talk to for the aethernet. A city's main aetheryte is an aetheryte
+    /// object with the row as its id. An aethernet shard is an event object named "Aethernet shard" with an id of
+    /// its own, so it is found by where the game's data puts that shard.
+    /// </summary>
+    public static IGameObject? Crystal(uint aetheryteId)
+    {
+        if (Nearest(ObjectKind.Aetheryte, id => id == aetheryteId) is { } main) return main;
+        if (Teleporter.Position(aetheryteId) is not { } at) return null;
+        var spot = new Vector2(at.X, at.Z);
+        return Services.Objects
+            .Where(o => o.IsTargetable && (o.ObjectKind == ObjectKind.Aetheryte
+                                           || (o.ObjectKind == ObjectKind.EventObj && ShardNames.Value.Contains(o.Name.TextValue))))
+            .Select(o => (Object: o, Away: Vector2.Distance(new Vector2(o.Position.X, o.Position.Z), spot)))
+            .Where(x => x.Away <= CrystalWithin)
+            .OrderBy(x => x.Away)
+            .Select(x => x.Object)
+            .FirstOrDefault();
+    }
+
+    /// <summary>A crystal this close to where the data puts it (a map marker, so not exact) is the one meant.</summary>
+    private const float CrystalWithin = 15f;
+
     public static float Distance(IGameObject o)
         => Services.Objects.LocalPlayer is { } p ? Vector3.Distance(p.Position, o.Position) : float.MaxValue;
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -16,7 +17,13 @@ internal sealed unsafe class Travel
 {
     public enum State { Idle, Teleporting, ToCrystal, Aethernet, Arriving, WaitingForMap, Walking, Arrived, Failed }
 
-    private static readonly string[] AethernetEntry = { "Aethernet", "Ätheryten", "éthernet", "エーテライト" };
+    /// <summary>The aetheryte menu's aethernet entry, should the game's own text for it not be readable.</summary>
+    private static readonly string[] AethernetEntry = { "Aethernet", "Ätherytennetz", "Réseau de transport urbain", "都市転送網" };
+    /// <summary>How close to walk to a main aetheryte (big, with a wide base) and to an aethernet shard (small).</summary>
+    private const float MainCrystalRange = 6f;
+    private const float ShardRange = 3.5f;
+    /// <summary>The aethernet window open this long without the destination in it: give up.</summary>
+    private static readonly TimeSpan ListPatience = TimeSpan.FromSeconds(6);
 
     /// <summary>From the Security tab: escalating unstuck steps, and how long without progress counts as stuck.</summary>
     public static bool AdvancedUnstuck { get; set; } = true;
@@ -48,6 +55,10 @@ internal sealed unsafe class Travel
     /// <summary>The area has no aetheryte of its own; a teleport can't restart the trip.</summary>
     private bool aethernetOnly;
     private int tries;
+    /// <summary>When the aethernet window was first seen open on this try.</summary>
+    private DateTime listSince;
+    /// <summary>What the aethernet step saw last (for the failure text).</summary>
+    private string aethernetSaw = "";
     private DateTime mountUntil;
     private bool flying;
     /// <summary>An unstuck move (backing off, side-stepping) is playing out until then.</summary>
@@ -92,8 +103,9 @@ internal sealed unsafe class Travel
         hopTo = to;
         var crystal = Teleporter.Position(from) ?? Vector3.Zero;
         crystalTrip = new Travel { hopped = true };
-        crystalTrip.GoTo("the aethernet", crystalTerritory, new Vector2(crystal.X, crystal.Z), 6f,
-            () => Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == from)?.Position);
+        crystalTrip.GoTo("the aethernet", crystalTerritory, new Vector2(crystal.X, crystal.Z),
+            Teleporter.IsMainAetheryte(from) ? MainCrystalRange : ShardRange,
+            () => Interact.Crystal(from)?.Position);
         crystalTrip.hopped = true; // the walk to the crystal itself never hops
         Enter(State.ToCrystal, 120);
     }
@@ -136,7 +148,7 @@ internal sealed unsafe class Travel
                 crystalTrip!.Tick();
                 Status = crystalTrip.Status;
                 if (crystalTrip.Current == State.Failed) { Fail(crystalTrip.Failure!); return; }
-                if (crystalTrip.Current == State.Arrived) { tries = 0; Enter(State.Aethernet, 20); }
+                if (crystalTrip.Current == State.Arrived) { StartAethernet(); }
                 return;
 
             case State.Aethernet:
@@ -144,19 +156,45 @@ internal sealed unsafe class Travel
                 if (DateTime.UtcNow < nextTry) return;
                 if (Interact.Ready("TelepotTown") != null)
                 {
-                    if (Teleporter.TakeAethernet(hopTo)) { sawLoading = false; Enter(State.Arriving, 40); }
-                    else nextTry = DateTime.UtcNow.AddSeconds(0.5);
+                    if (listSince == default) listSince = DateTime.UtcNow;
+                    var pick = Teleporter.TakeAethernet(hopTo);
+                    if (pick == Teleporter.AethernetPick.Taken) { sawLoading = false; Enter(State.Arriving, 40); return; }
+                    if (pick != Teleporter.AethernetPick.NotReady && DateTime.UtcNow - listSince > ListPatience)
+                    {
+                        // The window is open but can't take us there: close it, so the character isn't left in it.
+                        Interact.Close("TelepotTown");
+                        var stop = Teleporter.AethernetName(hopTo);
+                        Fail(pick == Teleporter.AethernetPick.Locked
+                            ? $"The aethernet stop {stop} isn't attuned."
+                            : $"The aethernet here doesn't list {stop}.");
+                        return;
+                    }
+                    nextTry = DateTime.UtcNow.AddSeconds(0.5);
                     return;
                 }
+                listSince = default;
                 if (Interact.Menu() is { Count: > 0 } menu)
                 {
-                    if (!Interact.Choose(AethernetEntry)) menu[0].Select();
+                    aethernetSaw = "a menu came up (" + string.Join(" / ", menu.Select(e => e.Text.Trim())) + "), but not the aethernet";
+                    if (!ChooseAethernet(menu)) menu[0].Select();
                     nextTry = DateTime.UtcNow.AddSeconds(1);
                     return;
                 }
-                if (DateTime.UtcNow > deadline || ++tries > 6) { Fail("The aethernet didn't open."); return; }
-                if (Interact.Nearest(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte, id => id == hopFrom) is { } crystalObj)
-                    Interact.With(crystalObj);
+                if (DateTime.UtcNow > deadline || ++tries > 6)
+                {
+                    var failure = $"The aethernet didn't open at {Teleporter.AethernetName(hopFrom)}: {aethernetSaw}.";
+                    Services.Log.Warning("Travel: {Failure}", failure);
+                    Fail(failure);
+                    return;
+                }
+                if (Interact.Crystal(hopFrom) is { } crystalObj)
+                {
+                    var away = Interact.Distance(crystalObj);
+                    aethernetSaw = Interact.With(crystalObj)
+                        ? $"talking to the crystal ({away:0.0} yalms away) opened nothing"
+                        : $"the crystal ({away:0.0} yalms away) couldn't be talked to";
+                }
+                else aethernetSaw = "no aetheryte or aethernet shard was found there";
                 nextTry = DateTime.UtcNow.AddSeconds(1.5);
                 return;
 
@@ -166,7 +204,7 @@ internal sealed unsafe class Travel
                 if (!sawLoading && !Services.Condition[ConditionFlag.Casting] && DateTime.UtcNow > deadline - TimeSpan.FromSeconds(30))
                 {
                     // Nothing happened (cast interrupted, window closed); try again.
-                    if (hopTo != 0) { tries = 0; Enter(State.Aethernet, 20); }
+                    if (hopTo != 0) StartAethernet();
                     else Enter(State.Teleporting, 20);
                     return;
                 }
@@ -341,6 +379,28 @@ internal sealed unsafe class Travel
         var set = row?.AetherCurrentCompFlgSet.RowId ?? 0;
         var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
         return set != 0 && ps != null && ps->IsAetherCurrentZoneComplete(set);
+    }
+
+    /// <summary>At the crystal: talk to it and pick the stop.</summary>
+    private void StartAethernet()
+    {
+        tries = 0;
+        listSince = default;
+        aethernetSaw = "nothing happened";
+        Enter(State.Aethernet, 20);
+    }
+
+    /// <summary>
+    /// Picks the city's aethernet in a main aetheryte's menu. "Residential District Aethernet." holds the same word,
+    /// so of the entries that match, the shortest is the city's own.
+    /// </summary>
+    private static bool ChooseAethernet(List<(string Text, Action Select)> menu)
+    {
+        var labels = AethernetEntry.Prepend(Teleporter.AethernetMenuText).Where(l => l.Length > 0).ToList();
+        var hits = menu.Where(e => labels.Any(l => e.Text.Contains(l, StringComparison.OrdinalIgnoreCase))).OrderBy(e => e.Text.Trim().Length).ToList();
+        if (hits.Count == 0) return false;
+        hits[0].Select();
+        return true;
     }
 
     private void Enter(State next, double seconds = 20)

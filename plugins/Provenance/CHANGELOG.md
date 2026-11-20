@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.2
+
+- Fixed: "The aethernet didn't open" when a trip started at an aethernet shard (anywhere in Ul'dah -
+  Steps of Thal, Limsa's Upper Decks, Old Gridania, and at any shard nearer than the city's
+  aetheryte). Shards weren't recognised as something to talk to, only the big aetherytes were. The
+  run also walks right up to a shard now.
+- At a city's aetheryte the run picks "Aethernet" by the game's own text for it, in every client
+  language, and no longer risks "Residential District Aethernet".
+- An aethernet window that doesn't list the stop (or lists it as not attuned) is closed and the run
+  says so, instead of waiting in it.
+- When the aethernet still doesn't open, the run log says what happened at the crystal: none found,
+  how far away it was, or which menu came up.
+
 ## 0.15.1
 
 - Fixed: HQ items came out HQ only sometimes. A hard recipe like Caramel Popcorn reached about two
