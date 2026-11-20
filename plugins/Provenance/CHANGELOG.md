@@ -26,6 +26,10 @@ Books on the order, and items that only come from aetherial reduction.
   "Get these yourself" with the reason; a run doesn't fish collectables for reduction yet.
 - Browse lists the items that come from reduction under the job that gathers their collectables,
   tagged "aetherial reduction"; the tag is amber when a run can't do it.
+- The Import tab is gone: "Import list" on the Browse tab (next to the search) opens the Teamcraft
+  import in a smaller window over the page, with the same field and options. Ctrl+Enter imports,
+  Escape closes, Cancel stops a download that's under way, and after an import it shows what came
+  in, with "Open plan". `/prov import` opens it too.
 - Plan page: a "To reduce" section with the collectables each item comes from. The character check
   blocks reduction until its quest ("No Longer a Collectable") is done and warns when the
   collectables are above your gatherer's level.

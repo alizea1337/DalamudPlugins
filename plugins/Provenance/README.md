@@ -8,7 +8,7 @@ Open it with `/provenance` (or `/prov`).
 
 ## What it does
 
-- **Import** a Teamcraft list in any of three forms:
+- **Import** a Teamcraft list (*Import list* on the Browse tab) in any of three forms:
   - a list link (`ffxivteamcraft.com/list/…`), downloaded from Teamcraft's public database,
     with item and recipe ids, so it works in any client language;
   - an import string (`ffxivteamcraft.com/import/…` or the bare string);
@@ -76,7 +76,8 @@ Open it with `/provenance` (or `/prov`).
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
 Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov tp <name>`,
-`/prov flag`, and `/prov plan | browse | import | character | settings` to open a tab.
+`/prov flag`, `/prov plan | browse | character | settings` to open a tab, and `/prov import` to open the
+Teamcraft import on the Browse tab.
 
 ## Planned
 

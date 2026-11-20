@@ -127,7 +127,11 @@ internal sealed class PlanPage : Page
         var s = Ui.S;
         Ui.Heading("Nothing planned yet", "Import a Teamcraft list or pick recipes in Browse. The plan lists every material down to the crystals and where each one comes from.");
         ImGui.Dummy(new Vector2(0, 6 * s));
-        if (Ui.Button("Import a list", Ui.Kind.Primary, FontAwesomeIcon.FileImport)) Go<ImportPage>();
+        if (Ui.Button("Import a list", Ui.Kind.Primary, FontAwesomeIcon.FileImport))
+        {
+            Go<BrowsePage>();
+            Plugin.Main.Page<BrowsePage>()?.OpenImport();
+        }
         ImGui.SameLine(0, 10 * s);
         if (Ui.Button("Browse recipes", Ui.Kind.Secondary, FontAwesomeIcon.Search)) Go<BrowsePage>();
     }

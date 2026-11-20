@@ -45,7 +45,6 @@ public sealed class Plugin : IDalamudPlugin
         guard = new Run.Guard(this);
         Main = new MainWindow(this, new Page[]
         {
-            new ImportPage(this),
             new BrowsePage(this),
             new PlanPage(this),
             new RunPage(this),
@@ -92,7 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             case "plan": Main.IsOpen = true; Main.Select<PlanPage>(); break;
             case "browse": Main.IsOpen = true; Main.Select<BrowsePage>(); break;
-            case "import": Main.IsOpen = true; Main.Select<ImportPage>(); break;
+            case "import": Main.IsOpen = true; Main.Select<BrowsePage>(); Main.Page<BrowsePage>()?.OpenImport(); break;
             case "settings": OpenSettings(); break;
             case "character": Main.IsOpen = true; Main.Select<CharacterPage>(); break;
             default: Main.Toggle(); break;

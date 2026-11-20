@@ -350,7 +350,7 @@ internal static partial class Ui
     }
 
     /// <summary>A soft shadow around a floating panel, drawn outside its edges only.</summary>
-    private static void PanelShadow(ImDrawListPtr dl, Vector2 min, Vector2 max, float rounding)
+    internal static void PanelShadow(ImDrawListPtr dl, Vector2 min, Vector2 max, float rounding)
     {
         var s = S;
         var vp = ImGui.GetMainViewport();

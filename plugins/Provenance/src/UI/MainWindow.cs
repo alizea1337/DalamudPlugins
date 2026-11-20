@@ -75,6 +75,9 @@ internal sealed class MainWindow : Window
         applySize = true;
     }
 
+    /// <summary>The page of this type (pages are created once with the window).</summary>
+    public T? Page<T>() where T : Page => pages.OfType<T>().FirstOrDefault();
+
     public void Select<T>() where T : Page
     {
         var i = pages.FindIndex(p => p is T);

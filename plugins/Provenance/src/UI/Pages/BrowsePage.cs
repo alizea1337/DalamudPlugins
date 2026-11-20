@@ -28,13 +28,17 @@ internal sealed class BrowsePage : Page
     private (string Query, int Jobs, int Places, int Lo, int Hi, int Count) filterKey;
     private readonly Dictionary<string, int> quantities = new();
     private readonly Dictionary<string, bool> hqChoice = new();
+    private readonly ImportDialog import;
 
-    public BrowsePage(Plugin plugin) : base(plugin) { }
+    public BrowsePage(Plugin plugin) : base(plugin) => import = new ImportDialog(plugin);
+
+    /// <summary>Opens the Teamcraft import over this page.</summary>
+    public void OpenImport() => import.Open();
 
     public override string Title => "Browse";
 
     public override (string Text, Vector4 Color)? Status
-        => (ImportPage.OrderSummary(Config.Order), Config.Order.IsEmpty ? Palette.TextFaint : Palette.Accent);
+        => (ImportDialog.OrderSummary(Config.Order), Config.Order.IsEmpty ? Palette.TextFaint : Palette.Accent);
 
     public override IEnumerable<FooterAction> Actions
     {
@@ -101,6 +105,25 @@ internal sealed class BrowsePage : Page
             }
             ImGui.SetCursorScreenPos(after);
         }
+
+        // Bringing in a whole Teamcraft list instead: a quieter button at the right end of the search row,
+        // centred on the field. It opens the import over the page.
+        {
+            var after = ImGui.GetCursorScreenPos();
+            const string label = "Import list";
+            var bw = Ui.ButtonWidth(label, FontAwesomeIcon.FileImport);
+            var rowRight = searchMin.X + w;
+            if (rowRight - bw >= searchMin.X + searchW + 12 * s)
+            {
+                ImGui.SetCursorScreenPos(new Vector2(rowRight - bw, searchMin.Y + (searchH - 34 * s) / 2));
+                if (Ui.Button(label, Ui.Kind.Secondary, FontAwesomeIcon.FileImport, tooltip: "Bring in a Teamcraft list: a link, an import string or copied text.", id: "##openimport"))
+                    import.Open();
+                ImGui.SetCursorScreenPos(after);
+            }
+            else if (Ui.Button(label, Ui.Kind.Secondary, FontAwesomeIcon.FileImport, tooltip: "Bring in a Teamcraft list: a link, an import string or copied text.", id: "##openimport"))
+                import.Open();
+        }
+        import.Draw();
 
         // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow.
         var b = Config.Browse;
