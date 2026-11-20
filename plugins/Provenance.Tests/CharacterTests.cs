@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
 using Provenance.Core.Orders;
@@ -126,6 +127,46 @@ public class CharacterTests
         var nowhere = Build(null, out var nowherePlan);
         Assert.False(nowhere.WillBuy);
         Assert.False(nowherePlan.CanStart);
+    }
+
+    [Fact]
+    public void A_book_on_the_order_is_learned_not_made()
+    {
+        const uint Book = 9001, Tome = 9002, Learned = 9003;
+        var order = new Order();
+        order.Add(Book, 1);
+        order.Add(Tome, 2);       // more than one copy still means read it once
+        order.Add(Learned, 1);    // already learned: nothing to do
+        order.Add(Bow, 1);
+        var plan = Planner.Build(order, new FakeCatalog(), new Dictionary<uint, int> { [Tome] = 1 }, new PlannerOptions
+        {
+            BookLearned = id => id switch { Book or Tome => false, Learned => true, _ => null },
+            BuyBook = id => id == Book ? new BookPurchase(true, "300 Purple Crafters' Scrips") : null,
+        });
+
+        Assert.Equal(new[] { Book, Tome }, plan.Learn.Select(l => l.ItemId).OrderBy(i => i));
+        var book = plan[Book]!;
+        Assert.True(book.IsTarget);
+        Assert.Empty(book.NeededFor);
+        Assert.Equal(1, book.Needed);
+        Assert.True(book.WillBuy);
+        var tome = plan[Tome]!;
+        Assert.Equal(0, tome.Remaining); // in the bags: just read it
+        Assert.Null(plan[Learned]);
+        // The book is never a craft or gather line, and the rest of the order plans as usual.
+        Assert.Equal(Supply.Craft, plan[Bow]!.Supply);
+        Assert.Contains(plan.Tree, n => n.ItemId == Book && n.Supply == Supply.Learn);
+        Assert.DoesNotContain(plan.Tree, n => n.ItemId == Learned);
+        Assert.True(plan.CanStart);
+    }
+
+    [Fact]
+    public void An_order_of_learned_books_only_plans_nothing()
+    {
+        var order = new Order();
+        order.Add(9003, 1);
+        var plan = Planner.Build(order, new FakeCatalog(), Nothing, new PlannerOptions { BookLearned = _ => true });
+        Assert.Empty(plan.Lines);
     }
 
     [Fact]

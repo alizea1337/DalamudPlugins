@@ -72,6 +72,16 @@ internal sealed class FakeCatalog : IGameCatalog
     public RecipeInfo? Recipe(uint recipeId) => recipes.Values.SelectMany(l => l).FirstOrDefault(r => r.RecipeId == recipeId);
     public ItemSources Sources(uint itemId) => sources.GetValueOrDefault(itemId);
 
+    private readonly Dictionary<uint, List<uint>> reducedFrom = new();
+    /// <summary>Makes <paramref name="result"/> come from reducing these gatherable collectables.</summary>
+    public void SetReducedFrom(uint result, params uint[] from)
+    {
+        reducedFrom[result] = from.ToList();
+        var existing = sources.GetValueOrDefault(result);
+        sources[result] = existing with { Flags = existing.Flags | Obtain.Reduce, Places = existing.Places | Place.OpenWorld };
+    }
+    public IReadOnlyList<uint> ReducedFrom(uint itemId) => reducedFrom.TryGetValue(itemId, out var l) ? l : new List<uint>();
+
     public bool TryFindItem(string name, out uint itemId)
     {
         var hit = names.FirstOrDefault(kv => string.Equals(kv.Value, name.Trim(), System.StringComparison.OrdinalIgnoreCase));

@@ -144,6 +144,37 @@ public class PlannerTests
     }
 
     [Fact]
+    public void Items_only_from_reduction_plan_as_reduce()
+    {
+        const uint Sand = 12936, Moraine = 5214;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Moraine, new ItemSources(Obtain.Gather, 0, Places: Place.OpenWorld));
+        catalog.SetReducedFrom(Sand, Moraine);
+        var plan = Planner.Build(OrderOf((Sand, 5)), catalog, new Dictionary<uint, int>(), new PlannerOptions());
+        Assert.Equal(Supply.Reduce, plan[Sand]!.Supply);
+        Assert.Equal(5, plan[Sand]!.Remaining);
+        Assert.True(plan.CanStart);
+        // Another source the run can use comes first.
+        catalog.SetSources(Sand, new ItemSources(Obtain.Gather | Obtain.Reduce, 0, Places: Place.OpenWorld));
+        Assert.Equal(Supply.Gather, Planner.Build(OrderOf((Sand, 5)), catalog, new Dictionary<uint, int>(), new PlannerOptions())[Sand]!.Supply);
+    }
+
+    [Theory]
+    [InlineData(Place.None, "fish collectables")]
+    [InlineData(Place.Diadem, "the Diadem")]
+    public void Reduction_a_run_cant_do_says_why(Place where, string named)
+    {
+        const uint Sand = 12940;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Sand, new ItemSources(Obtain.ReduceElsewhere, 0, Places: where));
+        var plan = Planner.Build(OrderOf((Sand, 2)), catalog, new Dictionary<uint, int>(), new PlannerOptions());
+        Assert.Equal(Supply.Manual, plan[Sand]!.Supply);
+        Assert.Contains("aetherial reduction", plan[Sand]!.ManualReason);
+        Assert.Contains(named, plan[Sand]!.ManualReason);
+        Assert.False(plan.CanStart);
+    }
+
+    [Fact]
     public void Vendor_over_the_cap_becomes_manual_and_blocks_start()
     {
         var order = OrderOf((FancyDye, 2));
