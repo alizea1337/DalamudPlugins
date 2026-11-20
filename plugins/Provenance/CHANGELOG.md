@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0
+
+Favourite orders.
+
+- Browse has a "Favourites" chip after the content chips. With it on, the saved orders show instead
+  of the items, each with a cover of its first items' icons, its name, what's on it and when it was
+  saved; hovering lists every item.
+- "Save current order" keeps the order as it is now and puts the cursor in the new favourite's name.
+  Names rename in place (click and type), like the order's name on the Plan page.
+- Load makes a favourite the order (asking once before it replaces a different one); Add puts its
+  items on the order as it is. Overwrite takes the current order over a favourite, Delete removes it
+  (both ask once).
+- Copy puts the favourite on the clipboard as Teamcraft text, one "10x Item" per line: paste it into
+  Teamcraft, or back into Provenance with Import list.
+- The search finds favourites by name or by the items on them.
+
 ## 0.12.0
 
 Buying materials with scrips.

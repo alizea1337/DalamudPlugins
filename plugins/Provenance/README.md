@@ -24,6 +24,10 @@ keeps the window from sliding things around and *Tooltip size* sets how big the 
   takes the full amounts.
 - **Browse** every recipe and gatherable (mining, botany, fishing) with a name search, job filter and job-level range, and add
   recipes to the order.
+- **Favourite orders** (Browse, the *Favourites* chip): save the order as it is to make it again
+  later. Each favourite loads with one click (replacing the order, or added to it), renames in
+  place, takes the current order over it, and copies out as Teamcraft text (one "10x Item" per
+  line, which Teamcraft and Provenance's own import read back).
 - **Plan** lists what you're making, then every material once with its total for the whole
   order, grouped by how it is obtained: to gather (timed nodes marked), to fish, to buy (with the bait the fish need), monster
   drops, and intermediates to craft first, plus the crystals. Each row shows how many are still

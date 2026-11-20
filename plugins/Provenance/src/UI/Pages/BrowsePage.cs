@@ -13,9 +13,10 @@ namespace Provenance.UI.Pages;
 
 /// <summary>
 /// Search recipes and gatherables by name, job (crafters and gatherers) and job level, and add them
-/// to the order. A gathered item in the order is simply gathered; a recipe is crafted.
+/// to the order. A gathered item in the order is simply gathered; a recipe is crafted. The Favourites
+/// chip shows saved orders instead (BrowsePage.Favourites.cs).
 /// </summary>
-internal sealed class BrowsePage : Page
+internal sealed partial class BrowsePage : Page
 {
     private const float RowHeight = 54f;
 
@@ -72,7 +73,7 @@ internal sealed class BrowsePage : Page
         }
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(38, 10) * s);
         ImGui.SetNextItemWidth(searchW);
-        ImGui.InputTextWithHint("##search", "Search recipes and gatherables by name", ref query, 128);
+        ImGui.InputTextWithHint("##search", Config.Browse.ShowFavourites ? "Search favourite orders by name or item" : "Search recipes and gatherables by name", ref query, 128);
         // Escape while typing empties the search (the field itself would only undo the last edit).
         if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape)) query = "";
         // The clear button sits on top of the field's right end.
@@ -128,9 +129,11 @@ internal sealed class BrowsePage : Page
                 import.Open();
         }
 
-        // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow.
+        // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow. With the
+        // favourites showing they don't apply: faded, and left as they are for the items.
         var b = Config.Browse;
         var jobsRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+        ImGui.BeginDisabled(b.ShowFavourites);
         if (Ui.ToggleChip("##job_all", "All jobs", Palette.Accent, b.JobMask == 0)) { b.JobMask = 0; Config.Save(); }
         foreach (var job in ClassJobs.Crafters.Concat(ClassJobs.Gatherers))
         {
@@ -138,19 +141,39 @@ internal sealed class BrowsePage : Page
             if (ImGui.GetItemRectMax().X + gap + Ui.ToggleChipWidth(ClassJobs.Abbreviation(job), job) <= jobsRight) ImGui.SameLine(0, gap);
             JobChip(job, b);
         }
+        ImGui.EndDisabled();
 
-        // Content chips: all, the open world a run goes to, then the special content it can't.
-        // They wrap when the window is narrow.
+        // Content chips: all, the open world a run goes to, then the special content it can't, and last the
+        // favourite orders. They wrap when the window is narrow. Picking content leaves the favourites.
         var right = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
-        if (Ui.ToggleChip("##place_all", "All content", Palette.Accent, b.PlaceMask == 0)) { b.PlaceMask = 0; Config.Save(); }
+        if (Ui.ToggleChip("##place_all", "All content", Palette.Accent, b.PlaceMask == 0 && !b.ShowFavourites)) { b.PlaceMask = 0; b.ShowFavourites = false; Config.Save(); }
         foreach (var place in PlaceOrder)
         {
             var label = PlaceLabel(place);
             var gap = (place == Place.Diadem ? 18 : 6) * s;
             if (ImGui.GetItemRectMax().X + gap + Ui.ToggleChipWidth(label) <= right) ImGui.SameLine(0, gap);
             var bit = (int)place;
-            if (Ui.ToggleChip("##place_" + bit, label, PlaceColor(place), (b.PlaceMask & bit) != 0)) { b.PlaceMask ^= bit; Config.Save(); }
+            if (Ui.ToggleChip("##place_" + bit, label, PlaceColor(place), (b.PlaceMask & bit) != 0 && !b.ShowFavourites))
+            {
+                if (b.ShowFavourites) { b.ShowFavourites = false; b.PlaceMask |= bit; }
+                else b.PlaceMask ^= bit;
+                Config.Save();
+            }
             Ui.Tooltip(PlaceHint(place));
+        }
+        {
+            var label = Config.Favourites.Count > 0 ? $"Favourites  {Config.Favourites.Count}" : "Favourites";
+            var gap = 18 * s;
+            if (ImGui.GetItemRectMax().X + gap + Ui.ToggleChipWidth(label) <= right) ImGui.SameLine(0, gap);
+            if (Ui.ToggleChip("##favourites", label, Palette.Accent, b.ShowFavourites)) { b.ShowFavourites = !b.ShowFavourites; armed = null; Config.Save(); }
+            Ui.Tooltip("Orders you saved, to load again with one click, rename, or copy out as Teamcraft text.");
+        }
+
+        if (b.ShowFavourites)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            DrawFavourites(catalog, w);
+            return;
         }
 
         // Level range

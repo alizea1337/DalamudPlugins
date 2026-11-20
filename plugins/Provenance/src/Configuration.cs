@@ -13,6 +13,8 @@ public sealed class Configuration : IPluginConfiguration
     public int Version { get; set; } = 1;
 
     public Order Order { get; set; } = new();
+    /// <summary>Orders saved to use again (Browse, Favourites), newest first.</summary>
+    public List<Core.Orders.FavouriteOrder> Favourites { get; set; } = new();
     public StockSettings Stock { get; set; } = new();
     public BuyingSettings Buying { get; set; } = new();
     public ImportSettings Import { get; set; } = new();
@@ -58,6 +60,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Combat ??= new();
         c.AfterOrder ??= new();
         c.CraftingSpot ??= new();
+        c.Favourites ??= new();
         c.Security ??= new();
         c.Retainers ??= new();
         c.Timings ??= new();
@@ -106,6 +109,8 @@ public sealed class BrowseSettings
     public int PlaceMask { get; set; } = 0;
     public int MinLevel { get; set; } = 1;
     public int MaxLevel { get; set; } = 100;
+    /// <summary>The Favourites chip is on: the saved orders show instead of the items.</summary>
+    public bool ShowFavourites { get; set; }
 }
 
 [Serializable]
