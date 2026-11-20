@@ -114,13 +114,15 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 
 ### To do
 
+Tracked in [Issues](https://github.com/alizea1337/DalamudPlugins/issues), where bugs and suggestions go too.
+
 - Custom deliveries: a weekly mode that makes or gathers each client's items for crafters and
-  gatherers and hands them in.
-- Allied society (tribal) quests: a weekly mode for the crafter and gatherer societies.
-- Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone).
-- The Diadem: gathering there, including clouded and umbral nodes.
-- Several orders in a queue.
-- Own navigation instead of vnavmesh.
+  gatherers and hands them in ([#6](https://github.com/alizea1337/DalamudPlugins/issues/6)).
+- Allied society (tribal) quests: a weekly mode for the crafter and gatherer societies ([#7](https://github.com/alizea1337/DalamudPlugins/issues/7)).
+- Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone) ([#8](https://github.com/alizea1337/DalamudPlugins/issues/8)).
+- The Diadem: gathering there, including clouded and umbral nodes ([#9](https://github.com/alizea1337/DalamudPlugins/issues/9)).
+- Several orders in a queue ([#10](https://github.com/alizea1337/DalamudPlugins/issues/10)).
+- Own navigation instead of vnavmesh ([#11](https://github.com/alizea1337/DalamudPlugins/issues/11)).
 
 ## Requirements for a run
 
