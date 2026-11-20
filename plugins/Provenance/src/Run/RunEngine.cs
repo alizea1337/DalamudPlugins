@@ -95,6 +95,73 @@ internal sealed class RunEngine : IDisposable
     private bool craftQueueBuilt;
     /// <summary>The crafting spot was already gone to (or tried) for this stretch of crafting.</summary>
     private bool spotTried;
+    /// <summary>On the way to the crafting spot to craft while the timed nodes are closed.</summary>
+    private bool spotBetween;
+    /// <summary>Where the trip before crafting goes ("the crafting spot", "the Leynode Mnemo aetheryte").</summary>
+    private string toSpotWhat = "the crafting spot";
+    /// <summary>The spot the trip before crafting goes to (the crafting spot, or an aetheryte), to start over after a knock-out.</summary>
+    private CraftingSpotSettings? toSpot;
+    /// <summary>"Too soon to go to the crafting spot" was said for this wait.</summary>
+    private bool spotWaitSaid;
+    /// <summary>Long enough until the next window to go to the crafting spot, craft, and be back in time.</summary>
+    private static readonly TimeSpan SpotTripWait = TimeSpan.FromMinutes(10);
+
+    /// <summary>The crafting spot, when one is saved and switched on: crafting happens there.</summary>
+    private CraftingSpotSettings? CraftSpot => plugin.Config.CraftingSpot is { Enabled: true, IsSet: true } s ? s : null;
+
+    /// <summary>With a crafting spot, crafting while the nodes are closed happens there, when the wait is long enough to go.</summary>
+    private bool CraftAtSpotMeanwhile(TimeSpan? next)
+        => CraftSpot is { } spot && !CraftingSpots.IsAt(spot) && Settings.CraftWhileWaiting && next is { } n && n >= SpotTripWait && Crafter.HasReadyWork();
+
+    /// <summary>Long enough until the next window to fly to an aetheryte nearby, craft a little, and be back in time.</summary>
+    private static readonly TimeSpan SafeTripWait = TimeSpan.FromMinutes(4);
+    /// <summary>Within this of an aetheryte counts as safe to craft (settlements and camps keep monsters away).</summary>
+    private const float AetheryteSafe = 25f;
+
+    /// <summary>The label the trip to craft meanwhile goes by ("the crafting spot", "the Leynode Mnemo aetheryte").</summary>
+    private string spotBetweenWhat = "";
+
+    /// <summary>
+    /// Crafting here can't be interrupted by monsters: at the crafting spot, in a city, a housing district, an inn room
+    /// or a house, or next to an aetheryte (out in the field, monsters attack while the character crafts).
+    /// </summary>
+    private bool SafeHere()
+    {
+        if (CraftSpot is { } spot && CraftingSpots.IsAt(spot)) return true;
+        var territory = Services.ClientState.TerritoryType;
+        if (Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(territory)?.TerritoryIntendedUse.RowId != 1) return true;
+        if (Services.Objects.LocalPlayer is not { } me) return false;
+        return Teleporter.Unlocked().Where(d => d.TerritoryId == territory && d.Estate == null)
+            .Any(d => Teleporter.Position(d.AetheryteId) is { } p && System.Numerics.Vector2.Distance(new(p.X, p.Z), new(me.Position.X, me.Position.Z)) <= AetheryteSafe);
+    }
+
+    /// <summary>
+    /// Somewhere safe to craft while waiting: the aetheryte in the zone of the next timed node that's nearest to where
+    /// it spawns (else the one nearest here), as a spot to walk to. Null when the zone has no aetheryte to go to.
+    /// </summary>
+    private CraftingSpotSettings? SafePlace()
+    {
+        var next = NextTimedSpot();
+        var territory = next?.Spot.TerritoryId ?? Services.ClientState.TerritoryType;
+        var near = next is { } n ? n.Spot.Position
+            : Services.Objects.LocalPlayer is { } me ? new System.Numerics.Vector2(me.Position.X, me.Position.Z) : System.Numerics.Vector2.Zero;
+        var best = Teleporter.Unlocked().Where(d => d.TerritoryId == territory && d.Estate == null)
+            .Select(d => (Dest: d, At: Teleporter.Position(d.AetheryteId)))
+            .Where(x => x.At != null)
+            .OrderBy(x => System.Numerics.Vector2.Distance(new(x.At!.Value.X, x.At.Value.Z), near))
+            .FirstOrDefault();
+        if (best.Dest is not { } dest || best.At is not { } at) return null;
+        return new CraftingSpotSettings
+        {
+            Enabled = true, Kind = CraftingSpotKind.OpenWorld, Territory = territory, X = at.X, Y = at.Y, Z = at.Z,
+            Label = $"the {dest.Name} aetheryte",
+        };
+    }
+
+    /// <summary>Crafting meanwhile will happen: at the crafting spot, here (safe already), or at an aetheryte with time to go.</summary>
+    private bool WillCraftMeanwhile(TimeSpan next)
+        => Settings.CraftWhileWaiting && Crafter.HasReadyWork()
+           && (CraftAtSpotMeanwhile(next) || SafeHere() || (next >= SafeTripWait && SafePlace() != null));
 
     /// <summary>Trip to the next timed node's spawn area while it's still closed.</summary>
     private readonly Travel nodeTrip = new();
@@ -432,6 +499,8 @@ internal sealed class RunEngine : IDisposable
         pendingEnd = null;
         startedAt = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
         spotTried = false;
+        spotBetween = false;
+        spotWaitSaid = false;
         startGil = Integrations.GameState.BagCount(1);
         Integrations.Travel.AdvancedUnstuck = plugin.Config.Security.AdvancedUnstuck;
         Integrations.Travel.StuckAfter = TimeSpan.FromSeconds(Math.Clamp(plugin.Config.Security.StuckSeconds, 3, 30));
@@ -765,15 +834,30 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Everything gathered: craft whatever is left (or all of it when nothing was gathered).</summary>
     private void StartCrafting()
     {
-        // To the crafting spot first, when one is saved and there's something to craft.
-        if (!spotTried && plugin.Config.CraftingSpot is { Enabled: true, IsSet: true } spot && CraftingLeft())
+        // To the crafting spot first, when one is saved and there's something to craft. Without one, never out in the
+        // field where monsters attack: to the nearest aetheryte of the zone first.
+        if (!spotTried && CraftingLeft())
         {
             spotTried = true;
-            if (Home.BeginSpot(spot))
+            if (CraftSpot is { } spot)
+            {
+                if (Home.BeginSpot(spot))
+                {
+                    Stage = RunStage.ToSpot;
+                    toSpot = spot;
+                    toSpotWhat = "the crafting spot";
+                    Headline = "Going to the crafting spot";
+                    Add($"Going to the crafting spot ({spot.Label}).", false);
+                    return;
+                }
+            }
+            else if (!SafeHere() && SafePlace() is { } safe && Home.BeginSpot(safe, 8f))
             {
                 Stage = RunStage.ToSpot;
-                Headline = "Going to the crafting spot";
-                Add($"Going to the crafting spot ({spot.Label}).", false);
+                toSpot = safe;
+                toSpotWhat = safe.Label;
+                Headline = "Going to craft at " + safe.Label;
+                Add($"Going to {safe.Label} to craft, away from monsters.", false);
                 return;
             }
         }
@@ -810,7 +894,7 @@ internal sealed class RunEngine : IDisposable
         Detail = Home.Status;
         if (Phase == RunPhase.Stopping) { Stop(pendingStop ?? "Stopped.", pendingStopProblem, now: true); return; }
         if (!Home.Finished) return;
-        if (Home.Failure is { } why) Add($"Couldn't get to the crafting spot: {why} Crafting here instead.", true);
+        if (Home.Failure is { } why) Add($"Couldn't get to {toSpotWhat}: {why} Crafting here instead.", true);
         StartCrafting();
     }
 
@@ -829,7 +913,7 @@ internal sealed class RunEngine : IDisposable
         else if (Stage == RunStage.Vendors) { Shopper.RequestPause(); Headline = "Pausing after this vendor"; }
         else if (Stage == RunStage.Retainers) { Retainers.RequestPause(); Headline = "Pausing after this retainer"; }
         else if (Stage == RunStage.Hunt) { Hunt.RequestPause(); Headline = "Pausing after this fight"; }
-        else if (Stage == RunStage.ToSpot) Headline = "Pausing at the crafting spot";
+        else if (Stage == RunStage.ToSpot) Headline = "Pausing at " + toSpotWhat;
         else if (FishingNow)
         {
             // The rod stays out between casts: the fisher lands the catch under way, then reels in.
@@ -864,7 +948,7 @@ internal sealed class RunEngine : IDisposable
             RunStage.Vendors => "Buying from vendors",
             RunStage.Hunt => "Farming monster drops",
             RunStage.Return => "Heading back",
-            RunStage.ToSpot => "Going to the crafting spot",
+            RunStage.ToSpot => "Going to " + toSpotWhat,
             RunStage.TurnIn => "Turning in collectables",
             RunStage.Gather when worker == Worker.Fish => "Fishing",
             _ => "Gathering",
@@ -1059,7 +1143,7 @@ internal sealed class RunEngine : IDisposable
         // closed it (and then pauses, as Pause() asked). Never twice in one frame.
         if (Stage == RunStage.Gather && !pausedForDuty && !knockedOut && !(workerTicked && worker == Worker.Fish)
             && (Fish.Busy || Services.Condition[ConditionFlag.Fishing])) TickWorker(Worker.Fish);
-        if (Stage is RunStage.Return or RunStage.ToSpot && !pausedForDuty && !knockedOut) Home.Tick();
+        if ((Stage is RunStage.Return or RunStage.ToSpot || spotBetween) && !pausedForDuty && !knockedOut) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;
@@ -1148,7 +1232,7 @@ internal sealed class RunEngine : IDisposable
         revivedAt = default;
         Add("Back up; carrying on.", false);
         if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) HandBackToGathering(log: false);
-        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(plugin.Config.CraftingSpot)) StartCrafting(); // up again: the trip starts over from here
+        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(toSpot ?? plugin.Config.CraftingSpot, toSpot?.Kind == CraftingSpotKind.OpenWorld && toSpot.Aetheryte == 0 && toSpot != plugin.Config.CraftingSpot ? 8f : 1.5f)) StartCrafting(); // up again: the trip starts over from here
         return false;
     }
 
@@ -1171,7 +1255,7 @@ internal sealed class RunEngine : IDisposable
         pausedForDuty = false;
         Add("Duty over; carrying on.", false);
         if (Phase == RunPhase.Running && Stage == RunStage.Gather && !craftingBetween) HandBackToGathering(log: false);
-        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(plugin.Config.CraftingSpot)) StartCrafting(); // back from the duty: the trip starts over from here
+        else if (Stage == RunStage.ToSpot && !Home.BeginSpot(toSpot ?? plugin.Config.CraftingSpot, toSpot?.Kind == CraftingSpotKind.OpenWorld && toSpot.Aetheryte == 0 && toSpot != plugin.Config.CraftingSpot ? 8f : 1.5f)) StartCrafting(); // back from the duty: the trip starts over from here
         return false;
     }
 
@@ -1328,6 +1412,12 @@ internal sealed class RunEngine : IDisposable
             TickCraftingBetween();
             return;
         }
+        if (spotBetween)
+        {
+            // Paused or stopped on the way: drop the trip, the handling below takes over.
+            if (Phase != RunPhase.Running) { Home.Cancel(); spotBetween = false; }
+            else { TickSpotBetween(); return; }
+        }
 
         var busy = Services.Condition[ConditionFlag.Gathering] || Services.Condition[ConditionFlag.ExecutingGatheringAction]
                    || Services.Condition[ConditionFlag.Fishing] || (worker == Worker.Fish ? Fish.Busy : UpkeepOpen);
@@ -1364,17 +1454,29 @@ internal sealed class RunEngine : IDisposable
         if (TickNodeTrip(decision, busy)) return;
         if (decision.Mode == GatherMode.CraftMeanwhile && !work && !busy && !Fish.Busy)
         {
-            // Only closed windows left, none opening for a while: craft what can be crafted until shortly
-            // before. The rod is in (busy covers it), so the crafter can change jobs.
-            Gather.Pause();
-            Fish.Pause();
-            craftingBetween = true;
-            yielding = false;
-            Crafter.DeferMissing = true;
-            Crafter.Resume();
-            Headline = CraftingWhile();
-            Add(CraftMeanwhileReason(decision.NextWindow ?? TimeSpan.Zero) + "; crafting in the meantime.", false);
-            return;
+            // Crafting meanwhile never happens out in the field, where monsters attack: at the crafting spot when there's
+            // time to go there and back, here when it's safe already, else by an aetheryte in the next node's zone.
+            var next = decision.NextWindow ?? TimeSpan.Zero;
+            if (CraftSpot is { } spot && CraftAtSpotMeanwhile(next) && Home.BeginSpot(spot))
+            {
+                GoCraftAt(spot.Label, next);
+                return;
+            }
+            if (SafeHere())
+            {
+                StartCraftingBetween(next);
+                return;
+            }
+            if (next >= SafeTripWait && SafePlace() is { } safe && Home.BeginSpot(safe, 8f))
+            {
+                GoCraftAt(safe.Label, next);
+                return;
+            }
+            if (!spotWaitSaid)
+            {
+                spotWaitSaid = true;
+                Add($"The next window opens in {Short(next)}: too soon to go somewhere safe from monsters to craft, so waiting here.", false);
+            }
         }
 
         if (worker == Worker.Fish)
@@ -1388,6 +1490,66 @@ internal sealed class RunEngine : IDisposable
     }
 
     /// <summary>Crafting between timed windows: hand back in time, or when nothing more can be crafted.</summary>
+    /// <summary>Sets off to craft somewhere safe while the nodes are closed (the trip is ticked by <see cref="TickSpotBetween"/>).</summary>
+    private void GoCraftAt(string label, TimeSpan next)
+    {
+        CancelNodeTrip();
+        Gather.Pause();
+        Fish.Pause();
+        spotBetween = true;
+        spotBetweenWhat = label;
+        Headline = "Going to craft at " + label;
+        Add(CraftMeanwhileReason(next) + $"; crafting at {label} in the meantime, away from monsters.", false);
+    }
+
+    /// <summary>
+    /// Only closed windows left, none opening for a while: craft what can be crafted until shortly before. The rod
+    /// is in, so the crafter can change jobs (and it gets off the mount by itself).
+    /// </summary>
+    private void StartCraftingBetween(TimeSpan next)
+    {
+        Gather.Pause();
+        Fish.Pause();
+        craftingBetween = true;
+        yielding = false;
+        spotWaitSaid = false;
+        Crafter.DeferMissing = true;
+        Crafter.Resume();
+        Headline = CraftingWhile();
+        Add(CraftMeanwhileReason(next) + "; crafting in the meantime.", false);
+    }
+
+    /// <summary>
+    /// On the way to the crafting spot to craft while the nodes are closed: once there, craft; when the next window
+    /// comes too close on the way, or the trip fails, back to gathering (waiting by the node).
+    /// </summary>
+    private void TickSpotBetween()
+    {
+        var decision = Decide();
+        NextWindow = decision.NextWindow;
+        Detail = Home.Status;
+        if (!Home.Finished)
+        {
+            Headline = "Going to craft at " + spotBetweenWhat;
+            if (decision.Mode != GatherMode.CraftMeanwhile)
+            {
+                Add($"A window opens soon; back to the nodes instead of crafting at {spotBetweenWhat}.", false);
+                HandBackToGathering(log: false);
+            }
+            return;
+        }
+        spotBetween = false;
+        if (Home.Failure is { } why)
+        {
+            Add($"Couldn't get to {spotBetweenWhat}: {why} Waiting for the window instead.", true);
+            spotWaitSaid = true;
+            HandBackToGathering(log: false);
+            return;
+        }
+        if (decision.Mode != GatherMode.CraftMeanwhile) { HandBackToGathering(log: false); return; }
+        StartCraftingBetween(decision.NextWindow ?? TimeSpan.Zero);
+    }
+
     private void TickCraftingBetween()
     {
         var decision = Decide();
@@ -1454,6 +1616,9 @@ internal sealed class RunEngine : IDisposable
         }
 
         if (busy || worker != Worker.Land || Fish.Busy || Fish.HasWorkNow || !Settings.TravelAhead || DateTime.UtcNow < nextTripCheck) return false;
+        // Crafting meanwhile somewhere safe instead (the crafting spot, or an aetheryte in the node's zone): no flight
+        // out to the node first.
+        if (decision.Mode == GatherMode.CraftMeanwhile && WillCraftMeanwhile(decision.NextWindow ?? TimeSpan.Zero)) return false;
         // Only while nothing but closed windows is left.
         if (decision.NextWindow is not { } soonest || soonest <= TripCutoff * 3) return false;
         nextTripCheck = DateTime.UtcNow.AddSeconds(10);
@@ -1514,6 +1679,7 @@ internal sealed class RunEngine : IDisposable
     /// <summary>Back from crafting between windows (or a pause, a duty, a knock-out): whoever has work carries on.</summary>
     private void HandBackToGathering(bool log)
     {
+        if (spotBetween) { Home.Cancel(); spotBetween = false; }
         craftingBetween = false;
         yielding = false;
         var (want, _) = WantedWorker();
@@ -2098,7 +2264,7 @@ internal sealed class RunEngine : IDisposable
         yield return $"phase {Phase}, stage {Stage}, worker {worker}{(switchingTo is { } to ? $" (switching to {to})" : "")}, crafting meanwhile {craftingBetween}";
         yield return $"headline \"{Headline}\", detail \"{Detail}\"";
         if (StartedAt is { } began) yield return $"started {began:HH:mm:ss}{(EndedAt is { } ended ? $", ended {ended:HH:mm:ss}" : "")}";
-        yield return $"scrip phase {scripPhase}, book stop {bookStop}, scrip rounds {scripRounds}, crafting spot tried {spotTried}";
+        yield return $"scrip phase {scripPhase}, book stop {bookStop}, scrip rounds {scripRounds}, crafting spot tried {spotTried}, going to craft at the spot {spotBetween}";
         foreach (var t in Targets) yield return $"target: {ItemName(t.ItemId)} ({t.ItemId}), {t.Supply}, {Left(t)} of {t.Remaining} left, bags up to {t.Target}";
         foreach (var t in workTargets.Where(w => reduceFor.ContainsKey(w.ItemId)))
             yield return $"reduce from: {ItemName(t.ItemId)} ({t.ItemId}), {t.Supply}, {WorkLeft(t)} left, {GameState.Collectables(t.ItemId).Count} waiting, for {ItemName(reduceFor[t.ItemId].ItemId)}";

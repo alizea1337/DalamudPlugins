@@ -36,6 +36,8 @@ internal sealed unsafe class Homecoming
     private CraftingSpotSettings? spot;
     private bool teleported;
     private int legs;
+    /// <summary>How close the last walk gets to the spot: right onto a saved spot, near enough to an aetheryte.</summary>
+    private float spotWithin = 1.5f;
     private uint arriveIn;
     private bool sawLoading;
     private DateTime deadline;
@@ -120,11 +122,13 @@ internal sealed unsafe class Homecoming
     /// Starts the trip to the crafting spot. False when already there. A failure shows in <see cref="Failure"/>
     /// once <see cref="Finished"/>.
     /// </summary>
-    public bool BeginSpot(CraftingSpotSettings s)
+    /// <param name="within">How close to get (a saved spot exactly; somewhere safe by an aetheryte, within a few yalms).</param>
+    public bool BeginSpot(CraftingSpotSettings s, float within = 1.5f)
     {
         Reset();
         if (!s.IsSet || CraftingSpots.IsAt(s)) return false;
         spot = s;
+        spotWithin = within;
         NextLeg();
         return true;
     }
@@ -141,7 +145,7 @@ internal sealed unsafe class Homecoming
         if (CraftingSpots.InPlace(s) || (s.Kind == CraftingSpotKind.OpenWorld && !outInWard))
         {
             if (!CraftingSpots.InPlace(s) && !Teleporter.CanReach(s.Territory)) { Fail("No unlocked aetheryte leads there any more."); return; }
-            Walk("the crafting spot", s.Territory, new Vector2(s.X, s.Z), 1.5f, Then.Done);
+            Walk(s.Label.Length > 0 ? s.Label : "the crafting spot", s.Territory, new Vector2(s.X, s.Z), spotWithin, Then.Done);
             return;
         }
         switch (s.Kind)
@@ -222,7 +226,7 @@ internal sealed unsafe class Homecoming
                         deadline = DateTime.UtcNow.AddSeconds(20);
                         return;
                     default:
-                        Done(spot != null ? $"At the crafting spot ({spot.Label})." : "Back where the run started.");
+                        Done(spot != null ? $"At {spot.Label}." : "Back where the run started.");
                         return;
                 }
 

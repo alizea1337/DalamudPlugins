@@ -143,9 +143,47 @@ internal sealed unsafe class Crafter
         Resume();
     }
 
+    /// <summary>Getting off the mount before crafting: since when, and how often the button was pressed.</summary>
+    private DateTime dismountSince;
+    private int dismountPresses;
+
+    /// <summary>
+    /// Nothing about crafting works on a mount (the job change, the log, the synthesis), and the run can arrive
+    /// mounted or in the air (after travelling ahead to a timed node). Gets off first, landing when flying; when a
+    /// landing doesn't take, flies down to the ground below and tries again. True while still on the mount.
+    /// </summary>
+    private bool GetOffMount()
+    {
+        var c = Services.Condition;
+        if (!c[ConditionFlag.Mounted] && !c[ConditionFlag.InFlight])
+        {
+            dismountSince = default;
+            dismountPresses = 0;
+            return false;
+        }
+        var now = DateTime.UtcNow;
+        if (dismountSince == default) dismountSince = now;
+        if (now - dismountSince > TimeSpan.FromSeconds(40)) { Fail("Couldn't get off the mount to craft."); return true; }
+        if (Integrations.Vnav.Busy) { Status = "Flying down to the ground to craft"; return true; }
+        if (c[ConditionFlag.InFlight] && dismountPresses > 0 && dismountPresses % 3 == 0
+            && Services.Objects.LocalPlayer is { } me && Integrations.Vnav.NearestPoint(me.Position, 5f, 60f) is { } ground)
+        {
+            Integrations.Vnav.MoveTo(ground, true);
+            dismountPresses++;
+            Wait(1);
+            return true;
+        }
+        dismountPresses++;
+        Status = c[ConditionFlag.InFlight] ? "Landing to craft" : "Getting off the mount to craft";
+        ActionManager.Instance()->UseAction(ActionType.GeneralAction, 23);
+        Wait(1.5);
+        return true;
+    }
+
     public void Tick()
     {
         if (Finished || step is Step.Idle or Step.Paused || DateTime.UtcNow < waitUntil) return;
+        if (step is Step.SwitchJob or Step.Repair or Step.Consumables or Step.OpenRecipe or Step.Ingredients or Step.Synthesize && GetOffMount()) return;
         if (step == Step.WaitingForMaterials)
         {
             // Something gathered or bought in the meantime may have made a recipe craftable.

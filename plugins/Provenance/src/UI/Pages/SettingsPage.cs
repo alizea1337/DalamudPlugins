@@ -152,7 +152,8 @@ internal sealed class SettingsPage : Page
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Crafting spot");
         Ui.Wrapped("Where the run goes before it crafts: a corner of your house or apartment, an inn room, or anywhere a teleport and a walk reach. "
-                   + "Stand there and save it. Crafting while waiting for timed nodes stays out by the nodes.");
+                   + "Stand there and save it. Crafting while waiting for timed nodes goes there too when there's time to come back; "
+                   + "otherwise it happens by an aetheryte in the node's zone, away from monsters.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         if (spot.IsSet)
         {
@@ -517,7 +518,8 @@ internal sealed class SettingsPage : Page
         var v = rs.CraftWhileWaiting;
         if (Ui.Checkbox("Craft while waiting for timed nodes and fish windows", ref v)) { rs.CraftWhileWaiting = v; Config.Save(); }
         v = rs.TravelAhead;
-        if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits or crafts there.")) { rs.TravelAhead = v; Config.Save(); }
+        if (Ui.Checkbox("Go to the next timed node while waiting", ref v, "Teleports to its zone and rides to where it spawns, then waits there on the mount. "
+                + "When there's crafting to do meanwhile, it's done somewhere safe from monsters instead: the crafting spot, or an aetheryte in the node's zone.")) { rs.TravelAhead = v; Config.Save(); }
         Ui.Text("Back to gathering");
         ImGui.SameLine(0, 10 * s);
         var lead = rs.TimedLeadMinutes;

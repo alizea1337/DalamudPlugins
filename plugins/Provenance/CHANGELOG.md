@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.1
+
+Crafting somewhere safe.
+
+- Fixed: crafting while waiting for a timed node could start on the mount, in the air (after
+  travelling ahead to the node), and the run stopped with "The synthesis didn't start". The crafter
+  now gets off the mount first, landing when flying (and flying down to the ground when a landing
+  doesn't take).
+- Crafting while timed nodes are closed no longer happens out in the field, where monsters attack:
+  - with a crafting spot saved and 10 minutes or more until the window: at the crafting spot,
+    leaving in time to be back when the node opens;
+  - otherwise where the run is, when that's safe (a city, a housing district, an inn room, a house,
+    the crafting spot, or next to an aetheryte);
+  - otherwise by the aetheryte of the next node's zone nearest to where it spawns, with 4 minutes
+    or more to go;
+  - with less time than that it waits, on the mount, and says so.
+  The run doesn't fly out to the node first when it's going to craft somewhere else meanwhile.
+- The crafting after gathering does the same without a crafting spot: to the nearest aetheryte of
+  the zone first, unless the run is somewhere safe already.
+
 ## 0.13.0
 
 Favourite orders, a bug report, and nodes next to each other.
