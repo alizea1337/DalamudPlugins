@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "An Interface page, and a text size of its own.\n\n- Settings has a new Interface page, after General, for how the window looks: Interface scale, Text\n  size, Tooltip size and Reduce motion. They used to sit in General's Window card.\n- Interface scale and Text size are separate settings now, each 75% to 150%. Interface scale sizes\n  the spacing, buttons, icons and the window itself, on top of Dalamud's own scale. Text size sizes\n  all the text in the window: item names, page names in the sidebar, headings, buttons, chips and\n  the drop-down lists. If you'd picked an interface size before, the text starts at that size.\n- Both change at once. Until the sharp fonts for a new text size are built, the text in use is\n  stretched to it (\"sharpening the text…\" next to Size), so it never stays at the old size.\n- Tooltips keep their own size (Small to Largest), whatever the other two are.\n- The bug report gives the interface scale and the text size.\r\n",
+    "Changelog": "- Fixed: HQ items came out HQ only sometimes. A hard recipe like Caramel Popcorn reached about two\n  thirds of its quality (22% HQ) because everything went in NQ. Now:\n  - The crafted materials that go into an HQ item are made HQ too (a quality rotation instead of the\n    fastest one), all the way down. The plan marks them \"HQ\", and only the HQ ones you own count for\n    them; NQ ones in your bags would pull the quality down.\n  - An HQ craft puts the HQ ingredients in first, swapping out NQ ones the game filled in.\n  - Raphael is told which ingredients go in HQ. They start the craft with quality, so the rotation\n    reaches 100% HQ where it couldn't before, and is often shorter.\n  - When even the best rotation can't reach full quality, the run log says how far it gets and\n    what would help (HQ ingredients, food and medicine, better gear).\n- The bug report shows which plan lines are made HQ and the last rotation: stats, HQ ingredients,\n  steps and the quality it reaches.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.15.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.0/latest.zip",
+    "AssemblyVersion": "0.15.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795203434
+    "LastUpdate": 1795207478
   }
 ]
