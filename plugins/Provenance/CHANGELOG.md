@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1
+
+- Fixed: when a timed node's time ran out before the order had enough, the run kept flying round its
+  spawn spots until it came back (up to a whole Eorzean day), while other things on the order could
+  have been gathered meanwhile. The run now leaves a timed node as soon as its time is over, on the way
+  there or between its spots, and gathers what's up instead (or waits for the next window when nothing
+  is). The run log says when it moves on.
+
 ## 0.16.0
 
 Filters in the Browse search, and a reset for the Interface page.

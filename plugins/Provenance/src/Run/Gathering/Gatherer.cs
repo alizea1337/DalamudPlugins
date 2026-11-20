@@ -355,8 +355,24 @@ internal sealed unsafe class Gatherer
     }
 
     /// <summary>Travels to the nearest unvisited spawn spot of the node; once the node is in view, to the node itself.</summary>
+    /// <summary>The chosen node is timed and its window has closed: it won't be at any of its spots until the next one.</summary>
+    private bool WindowClosed => node is { Timed: true } n && !Eorzea.IsUp(n.Mask, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// Leaves a timed node whose window closed on the way or between its spots, and chooses again: what's up now
+    /// (regular nodes, another timed one), or waiting for the next window when nothing is.
+    /// </summary>
+    private void LeaveClosedWindow()
+    {
+        travel.Cancel();
+        Vnav.Stop();
+        log($"The {Catalog.ItemName(current!.Value.ItemId)} node's time is over; on to what can be gathered now.", false);
+        Go(Step.Choose);
+    }
+
     private void NextSpot()
     {
+        if (WindowClosed) { LeaveClosedWindow(); return; }
         var me = Services.Objects.LocalPlayer!.Position;
         // A node of this group already in view (the one next to the node just gathered): straight there.
         if (Services.ClientState.TerritoryType == node!.TerritoryId && LiveNode() is { } seen && Vector3.Distance(seen.Position, me) < InView)
@@ -402,6 +418,8 @@ internal sealed unsafe class Gatherer
 
     private void TravelTick(IGameObject me)
     {
+        // A timed node's window can close while flying to it, or while going round its spots.
+        if (WindowClosed) { LeaveClosedWindow(); return; }
         travel.Tick();
         Status = travel.Status;
         if (travel.Current == Travel.State.Failed)
