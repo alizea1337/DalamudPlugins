@@ -62,12 +62,22 @@ public class EstimatorTests
     }
 
     [Fact]
-    public void Intermediates_never_ask_for_hq()
+    public void Intermediates_ask_for_hq_only_below_an_hq_item()
     {
+        // An HQ bow: its lumber is made HQ too (the plan says so).
         var plan = PlanOf((Bow, 1));
         var asked = new List<(uint, bool)>();
         Estimator.Estimate(plan, Flat, (r, hq) => { asked.Add((r.ItemId, hq)); return 5; }, _ => true);
         Assert.Contains((Bow, true), asked);
+        Assert.Contains((Lumber, true), asked);
+
+        // An NQ bow: everything gets the fastest rotation.
+        var nq = new Order();
+        nq.Add(Bow, 1, hq: false);
+        asked.Clear();
+        Estimator.Estimate(Planner.Build(nq, new FakeCatalog(), new Dictionary<uint, int>(), new PlannerOptions { PreferVendor = false }),
+            Flat, (r, hq) => { asked.Add((r.ItemId, hq)); return 5; }, _ => false);
+        Assert.Contains((Bow, false), asked);
         Assert.Contains((Lumber, false), asked);
     }
 

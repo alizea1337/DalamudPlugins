@@ -43,6 +43,43 @@ public class PlannerTests
     }
 
     [Fact]
+    public void Materials_below_an_hq_item_are_made_hq()
+    {
+        // HQ bow: the lumber, rivets and the ingot below them are made HQ; logs and ore aren't crafted.
+        var hq = Build(OrderOf((Bow, 1)));
+        Assert.True(hq[Bow]!.Hq);
+        Assert.True(hq[Lumber]!.Hq);
+        Assert.True(hq[Rivets]!.Hq);
+        Assert.True(hq[Ingot]!.Hq);
+        Assert.False(hq[Log]!.Hq);
+        Assert.False(hq[Ore]!.Hq);
+
+        // NQ bow: nothing is made HQ.
+        var nq = new Order();
+        nq.Add(Bow, 1, hq: false);
+        Assert.All(Build(nq).Lines, l => Assert.False(l.Hq));
+    }
+
+    [Fact]
+    public void Hq_materials_count_only_hq_stock()
+    {
+        // 2 lumber owned, 1 of them HQ; a bow takes 2.
+        var owned = new Dictionary<uint, int> { [Lumber] = 2 };
+        var hqOwned = new Dictionary<uint, int> { [Lumber] = 1 };
+        var options = new PlannerOptions { HqOwned = id => hqOwned.GetValueOrDefault(id) };
+
+        var hq = Build(OrderOf((Bow, 1)), owned, options);
+        Assert.Equal(1, hq[Lumber]!.FromStock);
+        Assert.Equal(1, hq[Lumber]!.Crafts);
+
+        // An NQ bow, or no HQ counts given: every one owned counts.
+        var nq = new Order();
+        nq.Add(Bow, 1, hq: false);
+        Assert.Equal(2, Build(nq, owned, options)[Lumber]!.FromStock);
+        Assert.Equal(2, Build(OrderOf((Bow, 1)), owned)[Lumber]!.FromStock);
+    }
+
+    [Fact]
     public void Shared_intermediates_are_summed_before_rounding_up()
     {
         // bow needs 1 rivet, shield needs 2: 3 rivets is exactly one craft, not two.

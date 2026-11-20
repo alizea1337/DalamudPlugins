@@ -31,6 +31,12 @@ public sealed class PlannerOptions
     /// </summary>
     public bool CountOwnedTargets { get; init; }
 
+    /// <summary>
+    /// How many of an item are owned in high quality. Lines made in high quality (<see cref="PlanLine.Hq"/>)
+    /// count only these; null counts every one owned, whatever its quality.
+    /// </summary>
+    public System.Func<uint, int>? HqOwned { get; init; }
+
     /// <summary>Buy from a gil vendor even when the item can be gathered or fished.</summary>
     public bool PreferVendor { get; init; } = true;
 
@@ -110,6 +116,13 @@ public sealed class PlanLine
     public Supply Supply { get; internal set; }
     public RecipeInfo? Recipe { get; internal set; }
     public bool IsTarget { get; internal set; }
+
+    /// <summary>
+    /// Made in high quality: an order item marked HQ, or a crafted material below one (HQ ingredients start a
+    /// craft with quality, which a hard recipe often needs to reach HQ at all). Counts only HQ stock when the
+    /// planner is told it (<see cref="PlannerOptions.HqOwned"/>).
+    /// </summary>
+    public bool Hq { get; internal set; }
 
     /// <summary>Total amount the order consumes or delivers.</summary>
     public int Needed { get; internal set; }

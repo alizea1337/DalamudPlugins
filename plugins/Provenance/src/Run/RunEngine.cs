@@ -389,16 +389,18 @@ internal sealed class RunEngine : IDisposable
     /// <summary>The plan the stages work on: the collectables for scrips first, then the order.</summary>
     private Plan ActivePlan => scripPhase ? plugin.Plans.ScripPlan : plugin.Plans.Plan;
 
-    /// <summary>Recipes to craft; ordered items marked HQ get a quality rotation, everything else the fastest.</summary>
+    /// <summary>
+    /// Recipes to craft; what the plan makes in high quality (ordered items marked HQ and the crafted materials
+    /// below them) gets a quality rotation, everything else the fastest.
+    /// </summary>
     private List<CraftJob> CraftJobs()
     {
-        var hqItems = plugin.Config.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
         var catalog = plugin.Plans.Catalog!;
         return ActivePlan.CraftSteps.Where(l => l.Recipe != null && l.Crafts > 0)
             .Select(l => scripPhase && l.IsTarget && catalog.Collectable(l.ItemId) is { } c
                 // Collectables: quality for the top collectability (collectability is quality / 10).
                 ? new CraftJob(l.Recipe!, l.Crafts, false, c.HighCollectability * 10)
-                : new CraftJob(l.Recipe!, l.Crafts, !scripPhase && l.IsTarget && l.Recipe!.CanHq && hqItems.Contains(l.ItemId))).ToList();
+                : new CraftJob(l.Recipe!, l.Crafts, !scripPhase && l.Hq)).ToList();
     }
 
     /// <summary>Why a run can't start now, or null when it can.</summary>
@@ -2272,6 +2274,7 @@ internal sealed class RunEngine : IDisposable
         if (NextWindow is { } next) yield return $"next window in {Short(next)}";
         foreach (var (id, wait) in fishWaits) yield return $"fish wait: {ItemName(id)} ({id}) {(wait is { } w ? w == TimeSpan.MaxValue ? "not within the forecast" : Short(w) : "any time")}";
         if (Crafter.Status.Length > 0) yield return $"crafter: {Crafter.Status}, {Crafter.CraftsDone} of {Crafter.CraftsTotal} crafts";
+        if (Crafter.LastSolve.Length > 0) yield return "last rotation: " + Crafter.LastSolve;
         if (Stage is RunStage.Return or RunStage.ToSpot || TestingSpot) yield return $"trip: {Home.Status}{(Home.Failure is { } f ? ", failed: " + f : "")}";
     }
 

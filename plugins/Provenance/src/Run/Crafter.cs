@@ -52,8 +52,15 @@ internal sealed unsafe class Crafter
     private DateTime waitUntil;
     private DateTime deadline;
     private int attempts;
-    private Task<List<uint>>? solving;
+    /// <summary>Clicks on HQ for a slot the game had already filled with NQ ones (each should swap one).</summary>
+    private int swaps;
+    /// <summary>Swap clicks before giving up on them (when they don't take, the craft goes ahead with what's in).</summary>
+    private const int MaxSwaps = 20;
+    private Task<RaphaelSolution>? solving;
+    private RaphaelRequest? solvingFor;
     private List<uint> macro = new();
+    /// <summary>The HQ ingredients the rotation in use was worked out for (null: not an HQ craft).</summary>
+    private IReadOnlyList<int>? macroHq;
     private int actionIndex;
     private int stepIndexBefore = -1;
     private bool actionPending;
@@ -87,6 +94,8 @@ internal sealed unsafe class Crafter
     public int ActionNumber => Math.Min(actionIndex, macro.Count);
     public int ActionCount => macro.Count;
     public IReadOnlyList<CraftJob> Upcoming => pending.ToList();
+    /// <summary>The last rotation worked out: recipe, stats, HQ ingredients, steps and the quality it reaches (bug report).</summary>
+    public string LastSolve { get; private set; } = "";
     public List<(CraftJob Job, int Done, string? Skipped)> History { get; } = new();
 
     public bool Finished => step is Step.Finished or Step.Failed;
@@ -396,11 +405,14 @@ internal sealed unsafe class Crafter
             Services.Log.Information("Solving {Recipe} at Craftsmanship {C}, Control {Co}, CP {Cp}, level {L}", r.RecipeId, stats[0], stats[1], stats[2], GameState.JobLevel(r.Job.ClassJobId()));
             var c = plugin.Config.Crafting;
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
+            var hqIn = HqIngredients(Current);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped(),
-                Current.Quality ?? (Current.Hq ? null : 0));
+                Current.Quality ?? (Current.Hq ? null : 0), hqIn);
             Status = "Working out the rotation";
             raphael.ForgetFailure(request);
+            macroHq = hqIn;
+            solvingFor = request;
             solving = raphael.Solve(request);
             Wait(0.1);
             return;
@@ -422,9 +434,32 @@ internal sealed unsafe class Crafter
             Fail("Raphael couldn't plan this craft: " + why);
             return;
         }
-        macro = task.Result;
+        var solution = task.Result;
+        macro = solution.Actions.ToList();
+        var name = plugin.Plans.Catalog!.ItemName(r.ItemId);
+        if (solvingFor is { } asked)
+            LastSolve = $"{name} (recipe {r.RecipeId}{(Current.Hq ? ", HQ" : "")}): Craftsmanship {asked.Craftsmanship}, Control {asked.Control}, CP {asked.Cp}, level {asked.Level}, "
+                        + $"HQ ingredients {(asked.AnyHqIngredients ? string.Join("/", asked.HqIngredients!) : "none")}, {solution.Actions.Count} steps, quality {solution.FinalQuality} of {solution.MaxQuality}";
+        // Aiming for HQ but even the best rotation falls short: say so once, with what would help.
+        if (Current.Hq && Current.Quality == null && solution is { ReachesMax: false, MaxQuality: > 0, FinalQuality: >= 0 }
+            && warnedOnce.Add($"quality {r.RecipeId} {solution.FinalQuality}"))
+        {
+            var allHq = macroHq != null && Current.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId)).Select(i => i.Amount).SequenceEqual(macroHq);
+            log($"{name}: the best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality, so it comes out HQ only sometimes. "
+                + (allHq ? "Food and medicine (Character page) or better gear raise it." : "More HQ ingredients, food and medicine (Character page) or better gear raise it."), true);
+        }
         Go(Step.OpenRecipe);
     }
+
+    /// <summary>
+    /// The HQ ingredients a craft of this job gets, per ingredient of the recipe in its order (crystals left out, as
+    /// Raphael takes them): the HQ ones in the bags go in first (see <see cref="Ingredients"/>). Null when the craft
+    /// doesn't aim for HQ.
+    /// </summary>
+    private static int[]? HqIngredients(CraftJob job)
+        => job.Hq && job.Quality == null
+            ? job.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId)).Select(i => Math.Min(i.Amount, GameState.BagCount(i.ItemId, true))).ToArray()
+            : null;
 
     private void OpenRecipe()
     {
@@ -437,7 +472,10 @@ internal sealed unsafe class Crafter
         Wait(1);
     }
 
-    /// <summary>Assigns ingredients one click at a time: NQ first, HQ for the rest.</summary>
+    /// <summary>
+    /// Assigns ingredients one click at a time. Aiming for HQ: the HQ ones first (they start the craft with
+    /// quality); otherwise NQ first and HQ for the rest.
+    /// </summary>
     private void Ingredients()
     {
         if (pauseRequested) { Pause(); return; }
@@ -463,22 +501,44 @@ internal sealed unsafe class Crafter
             return;
         }
 
+        // Fewer HQ ingredients at hand than the rotation was worked out for (the last ones went into the previous
+        // craft): work it out again for what goes in now.
+        if (HqIngredients(Current) is { } hqNow && (macroHq == null || !hqNow.SequenceEqual(macroHq)))
+        {
+            macro.Clear();
+            Go(Step.Solve);
+            return;
+        }
+
         var entry = SelectedEntry();
         if (entry == null) { Wait(0.3); return; }
         var ingredients = entry->Ingredients;
+        var hqFirst = Current.Hq && Current.Quality == null;
+        // Swaps that didn't take once won't for the rest of the run either.
+        var swapsWork = !warnedOnce.Contains("hq swap");
         for (var i = 0; i < ingredients.Length; i++)
         {
             ref var ing = ref ingredients[i];
             if (ing.ItemId == 0 || ing.Amount == 0) continue;
-            if (ing.NQCount + ing.HQCount >= ing.Amount) continue;
+            // Aiming for HQ, every HQ one in the bags goes in. The game may have filled the slot with NQ ones
+            // already: a click on HQ then swaps one of them for an HQ one.
+            var hqWanted = hqFirst ? Math.Min(ing.Amount, GameState.BagCount(ing.ItemId, true)) : 0;
+            var full = ing.NQCount + ing.HQCount >= ing.Amount;
+            if (full && (ing.HQCount >= hqWanted || swaps >= MaxSwaps || !swapsWork)) continue;
             if (++attempts > 60) { Fail("Couldn't fill in the ingredients."); return; }
-            var hq = GameState.BagCount(ing.ItemId, false) <= ing.NQCount;
+            if (full) swaps++;
+            var hq = hqFirst
+                ? ing.HQCount < hqWanted
+                : GameState.BagCount(ing.ItemId, false) <= ing.NQCount;
             if (Addon("RecipeNote") is var note && note != null)
                 new AddonMaster.RecipeNote((nint)note).Material((uint)i, hq);
             Wait(0.15);
             return;
         }
+        if (swaps >= MaxSwaps && warnedOnce.Add("hq swap"))
+            log("The NQ ingredients the game put in didn't swap for HQ ones, so this craft starts with less quality.", true);
         attempts = 0;
+        swaps = 0;
         Go(Step.Synthesize);
     }
 
@@ -627,7 +687,7 @@ internal sealed unsafe class Crafter
         if (next == Step.Finished) Status = "All crafts done";
         step = next;
         deadline = default;
-        if (next is not Step.Ingredients) attempts = 0;
+        if (next is not Step.Ingredients) { attempts = 0; swaps = 0; }
         if (!keepWait) waitUntil = DateTime.UtcNow;
     }
 

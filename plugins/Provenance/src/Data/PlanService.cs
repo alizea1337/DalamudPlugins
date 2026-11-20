@@ -65,6 +65,8 @@ internal sealed class PlanService : IDisposable
     private DateTime nextEstimate = DateTime.MinValue;
     private readonly Task<GameCatalog> loading;
     private Dictionary<uint, int> owned = new();
+    /// <summary>The high-quality part of <see cref="owned"/> (bags and saddlebag).</summary>
+    private Dictionary<uint, int> ownedHq = new();
     private DateTime nextStockCheck = DateTime.MinValue;
     private DateTime nextRebuild = DateTime.MinValue;
     private bool dirty = true;
@@ -158,10 +160,12 @@ internal sealed class PlanService : IDisposable
         {
             nextStockCheck = DateTime.UtcNow.AddSeconds(1);
             RetainerCache.Tick(config());
-            var snapshot = Stock.Snapshot(config());
-            if (!SameCounts(snapshot, owned))
+            var hq = new Dictionary<uint, int>();
+            var snapshot = Stock.Snapshot(config(), hq);
+            if (!SameCounts(snapshot, owned) || !SameCounts(hq, ownedHq))
             {
                 owned = snapshot;
+                ownedHq = hq;
                 dirty = true;
             }
         }
@@ -289,6 +293,7 @@ internal sealed class PlanService : IDisposable
         return Planner.Build(order, catalog, owned, new PlannerOptions
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
+            HqOwned = id => ownedHq.GetValueOrDefault(id),
             PreferVendor = c.Buying.PreferVendor,
             VendorMaxPrice = c.Buying.VendorMaxPrice,
             ChooseRecipe = ChooseRecipe,
@@ -653,7 +658,7 @@ internal sealed class PlanService : IDisposable
     /// Rotation length for a recipe at the stats from the last character check. Asks Raphael in the
     /// background the first time; null until it has answered (or when the character isn't checked).
     /// </summary>
-    private int? Steps(RecipeInfo recipe, bool hq) => Request(recipe, hq) is { } r ? raphael.Solve(r) is { IsCompletedSuccessfully: true } t ? t.Result.Count : null : null;
+    private int? Steps(RecipeInfo recipe, bool hq) => Request(recipe, hq) is { } r ? raphael.Solve(r) is { IsCompletedSuccessfully: true } t ? t.Result.Actions.Count : null : null;
 
     /// <summary>Raphael's "no rotation" answer for a recipe at the checked stats; null when fine or not answered yet.</summary>
     private string? RotationProblem(RecipeInfo recipe, bool hq)

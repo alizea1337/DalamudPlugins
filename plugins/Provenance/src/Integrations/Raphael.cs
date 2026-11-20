@@ -20,7 +20,7 @@ internal sealed class Raphael
     private const string ExeName = "raphael-cli.exe";
     private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
 
-    private readonly ConcurrentDictionary<string, Task<List<uint>>> cache = new();
+    private readonly ConcurrentDictionary<string, Task<RaphaelSolution>> cache = new();
     /// <summary>Estimates ask for many recipes at once; two solver processes at a time is plenty.</summary>
     private static readonly SemaphoreSlim Gate = new(2);
 
@@ -54,11 +54,11 @@ internal sealed class Raphael
     }
 
     /// <summary>Cached per request for the session; failures stay cached too, so a broken recipe isn't retried every second.</summary>
-    public Task<List<uint>> Solve(RaphaelRequest request)
+    public Task<RaphaelSolution> Solve(RaphaelRequest request)
         => cache.GetOrAdd(request.CacheKey, _ => Task.Run(() => Run(request)));
 
     /// <summary>The finished answer for a request, without starting one.</summary>
-    public List<uint>? Known(RaphaelRequest request)
+    public RaphaelSolution? Known(RaphaelRequest request)
         => cache.TryGetValue(request.CacheKey, out var t) && t.IsCompletedSuccessfully ? t.Result : null;
 
     /// <summary>Drops a cached failure so the next solve tries again (the crafter does this before a real craft).</summary>
@@ -67,7 +67,7 @@ internal sealed class Raphael
         if (cache.TryGetValue(request.CacheKey, out var t) && (t.IsFaulted || t.IsCanceled)) cache.TryRemove(request.CacheKey, out _);
     }
 
-    private static async Task<List<uint>> Run(RaphaelRequest request)
+    private static async Task<RaphaelSolution> Run(RaphaelRequest request)
     {
         await Gate.WaitAsync().ConfigureAwait(false);
         try
@@ -91,7 +91,7 @@ internal sealed class Raphael
     /// <summary>raphael-cli failed for a reason other than "no solution" (it crashed or rejected the options).</summary>
     public sealed class RaphaelInternalError(string message) : Exception(message);
 
-    private static async Task<List<uint>> RunOne(RaphaelRequest request)
+    private static async Task<RaphaelSolution> RunOne(RaphaelRequest request)
     {
         var exe = ExecutablePath() ?? throw new FileNotFoundException("raphael-cli.exe wasn't found next to Provenance.");
         var args = RaphaelCli.Arguments(request);
@@ -122,8 +122,8 @@ internal sealed class Raphael
             throw new TimeoutException("Raphael took longer than two minutes for this recipe.");
         }
         var output = await stdout.ConfigureAwait(false);
-        var ids = RaphaelCli.ParseActionIds(output);
-        if (ids.Count == 0)
+        var solution = RaphaelCli.ParseSolution(output);
+        if (solution == null)
         {
             var error = (await stderr.ConfigureAwait(false)).Trim();
             // The useful line is "Failed to solve: <reason>"; the last line is only Rust's backtrace hint.
@@ -136,7 +136,7 @@ internal sealed class Raphael
                 throw new InvalidOperationException("Raphael found no rotation.");
             throw new RaphaelInternalError("Raphael couldn't plan this craft" + (reason.Length > 0 ? " (" + reason + ")" : "") + ".");
         }
-        Services.Log.Information("Raphael solved recipe {Recipe} in {Steps} steps", request.RecipeId, ids.Count);
-        return ids;
+        Services.Log.Information("Raphael solved recipe {Recipe} in {Steps} steps, quality {Quality} of {Max}", request.RecipeId, solution.Actions.Count, solution.FinalQuality, solution.MaxQuality);
+        return solution;
     }
 }

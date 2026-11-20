@@ -97,6 +97,7 @@ internal static class BugReport
         foreach (var l in plan.Lines.OrderBy(l => l.Supply).ThenBy(l => Name(l.ItemId)))
         {
             var extra = new List<string>();
+            if (l.Hq) extra.Add("HQ");
             if (l.Crafts > 0) extra.Add($"{l.Crafts} crafts");
             if (l.Supply == Supply.Vendor) extra.Add($"{l.VendorUnitPrice} gil each");
             if (l.Purchase is { } p) extra.Add((p.CanBuy ? "buys: " : "can't buy: ") + p.Text);

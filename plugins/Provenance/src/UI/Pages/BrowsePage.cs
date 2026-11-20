@@ -342,7 +342,7 @@ internal sealed partial class BrowsePage : Page
         {
             ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s - hqW, y + 2 * s));
             if (Ui.ToggleChip("##hq" + e.Key, "HQ", Palette.Accent, hq)) hqChoice[e.Key] = !hq;
-            Ui.Tooltip(hq ? "Crafted aiming for high quality." : "Crafted with the fastest rotation, normal quality.");
+            Ui.Tooltip(hq ? "Crafted aiming for high quality, with HQ ingredients (the crafted ones are made HQ too)." : "Crafted with the fastest rotation, normal quality.");
         }
         ImGui.SetCursorScreenPos(new Vector2(right - addW - qtyW - 8 * s, y + 1 * s));
         var qty = quantities.GetValueOrDefault(e.Key, 1);

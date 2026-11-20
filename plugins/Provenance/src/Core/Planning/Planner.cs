@@ -52,6 +52,10 @@ public static class Planner
         }
         foreach (var t in targets) Visit(t.ItemId);
 
+        // 1b. High quality: an order item marked HQ and every crafted material below it (HQ ingredients start a
+        // craft with quality; without them a hard recipe often can't reach HQ at all).
+        foreach (var t in targets.Where(t => t.Hq)) MarkHq(t.ItemId);
+
         // 2. Push demand from products down to ingredients and from fish to their bait (reverse post-order is
         // a topological order). The stand-in bait goes last, once every bait it may stand in for is settled.
         var demand = new Dictionary<uint, int>();
@@ -163,8 +167,11 @@ public static class Planner
             // user asks to count them. Materials always use what's owned first. Bait only counts what the
             // run can cast with.
             var ignoreStock = line.IsTarget && !options.CountOwnedTargets;
+            // Made in high quality: only the HQ ones owned count (NQ ones would pull the quality down).
             var stock = ignoreStock ? 0
-                : Math.Max(0, isBait && options.BaitOnHand != null ? options.BaitOnHand(id) : owned.GetValueOrDefault(id));
+                : Math.Max(0, isBait && options.BaitOnHand != null ? options.BaitOnHand(id)
+                    : line.Hq && options.HqOwned != null ? options.HqOwned(id)
+                    : owned.GetValueOrDefault(id));
             var needed = other;
             if (isBait)
             {
@@ -220,6 +227,13 @@ public static class Planner
         }
 
         bool StillFished(uint fish) => lines.TryGetValue(fish, out var l) && l.Supply == Supply.Fish && l.Remaining > 0;
+
+        void MarkHq(uint itemId)
+        {
+            if (!lines.TryGetValue(itemId, out var line) || line.Hq || line.Supply != Supply.Craft || line.Recipe is not { CanHq: true }) return;
+            line.Hq = true;
+            foreach (var ing in line.Recipe.Ingredients) MarkHq(ing.ItemId);
+        }
 
         PlanLine GetOrAddLine(uint itemId, bool isTarget, uint recipeId)
         {

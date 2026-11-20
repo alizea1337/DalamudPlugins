@@ -532,7 +532,7 @@ internal sealed class PlanPage : Page
             {
                 ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s - 70 * s, start.Y + (h - 30 * s) / 2));
                 if (Ui.ToggleChip("##hq" + orderLine.ItemId + "_" + orderLine.RecipeId, "HQ", Palette.Accent, orderLine.Hq)) { orderLine.Hq = !orderLine.Hq; Changed(); }
-                Ui.Tooltip(orderLine.Hq ? "Crafted aiming for high quality." : "Crafted with the fastest rotation, normal quality.");
+                Ui.Tooltip(orderLine.Hq ? "Crafted aiming for high quality, with HQ ingredients (the crafted ones are made HQ too)." : "Crafted with the fastest rotation, normal quality.");
             }
             ImGui.SetCursorScreenPos(new Vector2(start.X + inner - qtyW - 40 * s, start.Y + (h - 30 * s) / 2));
             var qty = orderLine.Quantity;
@@ -696,6 +696,7 @@ internal sealed class PlanPage : Page
             case Supply.Craft when line.Recipe != null && line.Crafts > 0:
                 var crafts = $"{line.Recipe.Job.Abbreviation()}, {line.Crafts} {(line.Crafts == 1 ? "craft" : "crafts")}";
                 chips.Add(new ChipText(new[] { crafts + CraftTime(line.Recipe), crafts }, Palette.JobColor(line.Recipe.Job)));
+                if (line.Hq && !line.IsTarget) chips.Add(new ChipText(new[] { "HQ" }, Palette.Accent));
                 break;
         }
         return chips;
@@ -793,7 +794,10 @@ internal sealed class PlanPage : Page
     /// <summary>The row's tooltip: have and need, then what's worth knowing about how it's got.</summary>
     private string RowTooltip(PlanLine line, GameCatalog catalog)
     {
-        var tip = $"The whole order needs {line.Needed:N0}; you have {line.FromStock:N0}.";
+        var hqMaterial = line.Hq && !line.IsTarget;
+        var tip = hqMaterial
+            ? $"The whole order needs {line.Needed:N0} in high quality; you have {line.FromStock:N0} HQ. It goes into an HQ item, and HQ ingredients start that craft with quality, so the run makes these HQ too."
+            : $"The whole order needs {line.Needed:N0}; you have {line.FromStock:N0}.";
         if (line.Supply == Supply.Craft && line.Recipe != null && line.Crafts > 0)
             tip += $" {line.Crafts} {(line.Crafts == 1 ? "craft makes" : "crafts make")} {line.Produced}.";
         if (line.Supply == Supply.GatherTimed) tip += " Only on timed nodes; the run crafts while it waits for them.";

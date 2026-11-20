@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.1
+
+- Fixed: HQ items came out HQ only sometimes. A hard recipe like Caramel Popcorn reached about two
+  thirds of its quality (22% HQ) because everything went in NQ. Now:
+  - The crafted materials that go into an HQ item are made HQ too (a quality rotation instead of the
+    fastest one), all the way down. The plan marks them "HQ", and only the HQ ones you own count for
+    them; NQ ones in your bags would pull the quality down.
+  - An HQ craft puts the HQ ingredients in first, swapping out NQ ones the game filled in.
+  - Raphael is told which ingredients go in HQ. They start the craft with quality, so the rotation
+    reaches 100% HQ where it couldn't before, and is often shorter.
+  - When even the best rotation can't reach full quality, the run log says how far it gets and
+    what would help (HQ ingredients, food and medicine, better gear).
+- The bug report shows which plan lines are made HQ and the last rotation: stats, HQ ingredients,
+  steps and the quality it reaches.
+
 ## 0.15.0
 
 An Interface page, and a text size of its own.

@@ -159,7 +159,8 @@ public static class Estimator
         foreach (var line in plan.CraftSteps)
         {
             if (line.Recipe is not { } recipe || line.Crafts <= 0) continue;
-            var hq = line.IsTarget && recipe.CanHq && hqWanted(line.ItemId);
+            // Order items as asked; materials as the plan makes them (HQ below an HQ item).
+            var hq = line.IsTarget ? recipe.CanHq && hqWanted(line.ItemId) : line.Hq;
             var known = steps(recipe, hq);
             if (known == null) approximate = true;
             var perCraft = (known ?? (hq ? TypicalStepsHq : TypicalStepsFast)) * t.SecondsPerAction + t.SecondsBetweenCrafts;

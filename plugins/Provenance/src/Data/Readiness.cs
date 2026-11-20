@@ -56,7 +56,7 @@ internal static class Readiness
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"Needs {needs.Control:N0} Control to start; your {abbr} gearset has {stats[1]:N0}{unsure}.", sure));
             if (needs.Specialist && !job.Specialist)
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"Only a {abbr} specialist can craft this; equip a Soul of the {recipe.Job} in the gearset.", true));
-            if (rotationProblem(recipe, line.IsTarget && recipe.CanHq && hqItems.Contains(line.ItemId)) is { } why)
+            if (rotationProblem(recipe, line.IsTarget ? recipe.CanHq && hqItems.Contains(line.ItemId) : line.Hq) is { } why)
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"{why} With your {abbr} stats no rotation finishes this craft{unsure}.", sure));
         }
 

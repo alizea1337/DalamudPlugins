@@ -3,7 +3,7 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace Provenance.Data;
 
-/// <summary>Counts owned items (NQ and HQ together) in the bags the user allows. Main thread only.</summary>
+/// <summary>Counts owned items (NQ and HQ together, and the HQ ones apart) in the bags the user allows. Main thread only.</summary>
 internal static unsafe class Stock
 {
     private static readonly InventoryType[] Bags =
@@ -18,14 +18,15 @@ internal static unsafe class Stock
         InventoryType.PremiumSaddleBag1, InventoryType.PremiumSaddleBag2,
     };
 
-    public static Dictionary<uint, int> Snapshot(Configuration config)
+    /// <param name="hq">When given, filled with the high-quality ones in the bags and saddlebag (retainers aren't told apart).</param>
+    public static Dictionary<uint, int> Snapshot(Configuration config, Dictionary<uint, int>? hq = null)
     {
         var settings = config.Stock;
         var counts = new Dictionary<uint, int>();
         var manager = InventoryManager.Instance();
         if (manager == null) return counts;
-        if (settings.Inventory) Add(manager, Bags, counts);
-        if (settings.Saddlebag) Add(manager, Saddlebags, counts);
+        if (settings.Inventory) Add(manager, Bags, counts, hq);
+        if (settings.Saddlebag) Add(manager, Saddlebags, counts, hq);
         if (settings.Retainers)
             foreach (var (id, n) in RetainerCache.Totals(config))
                 counts[id] = counts.GetValueOrDefault(id) + n;
@@ -50,7 +51,7 @@ internal static unsafe class Stock
         return manager == null ? 0 : (int)manager->GetEmptySlotsInBag();
     }
 
-    private static void Add(InventoryManager* manager, InventoryType[] types, Dictionary<uint, int> counts)
+    private static void Add(InventoryManager* manager, InventoryType[] types, Dictionary<uint, int> counts, Dictionary<uint, int>? hq = null)
     {
         foreach (var type in types)
         {
@@ -63,6 +64,8 @@ internal static unsafe class Stock
                 var id = slot->GetBaseItemId();
                 if (id == 0) continue;
                 counts[id] = counts.GetValueOrDefault(id) + (int)slot->GetQuantity();
+                if (hq != null && slot->GetFlags().HasFlag(InventoryItem.ItemFlags.HighQuality))
+                    hq[id] = hq.GetValueOrDefault(id) + (int)slot->GetQuantity();
             }
         }
     }

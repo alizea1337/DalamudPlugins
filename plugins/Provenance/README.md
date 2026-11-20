@@ -71,7 +71,8 @@ the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, ic
   remembered on your PC (never uploaded).
 - **Run (crafting)**: after gathering, every recipe is crafted, intermediates first, on the job's
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
-  (best quality for ordered items, fastest for intermediates). Pause and Stop wait for the item
+  (best quality for HQ items, with HQ ingredients first; the crafted materials under an HQ item are
+  made HQ too, everything else gets the fastest rotation). Pause and Stop wait for the item
   being crafted. Recipes whose materials aren't in your bags are skipped and listed.
 - **Scrips**: master books and folklore tomes the order needs are bought at a scrip or token
   exchange and read before anything else. Materials only sold for scrips (white, purple or orange,
