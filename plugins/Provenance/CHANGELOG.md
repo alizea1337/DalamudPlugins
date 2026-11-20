@@ -9,7 +9,7 @@
 - Scrip exchanges are picked by the trip: the one in the area or city you're in first, then the one
   the teleport costs the least to from where you stand. Before, it was always the same one (Ul'dah,
   for most things), whatever it cost. The collectable appraiser is picked the same way, so turning
-  in and buying happen in one city. (Kugane has neither, so from there it's a teleport either way.)
+  in and buying happen in one city. In Radz-at-Han, for one, the run now stays in Radz-at-Han.
 - At a city's aetheryte the run picks "Aethernet" by the game's own text for it, in every client
   language, and no longer risks "Residential District Aethernet".
 - An aethernet window that doesn't list the stop (or lists it as not attuned) is closed and the run
