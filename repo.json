@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: HQ items came out HQ only sometimes. A hard recipe like Caramel Popcorn reached about two\n  thirds of its quality (22% HQ) because everything went in NQ. Now:\n  - The crafted materials that go into an HQ item are made HQ too (a quality rotation instead of the\n    fastest one), all the way down. The plan marks them \"HQ\", and only the HQ ones you own count for\n    them; NQ ones in your bags would pull the quality down.\n  - An HQ craft puts the HQ ingredients in first, swapping out NQ ones the game filled in.\n  - Raphael is told which ingredients go in HQ. They start the craft with quality, so the rotation\n    reaches 100% HQ where it couldn't before, and is often shorter.\n  - When even the best rotation can't reach full quality, the run log says how far it gets and\n    what would help (HQ ingredients, food and medicine, better gear).\n- The bug report shows which plan lines are made HQ and the last rotation: stats, HQ ingredients,\n  steps and the quality it reaches.\r\n",
+    "Changelog": "- Fixed: \"The aethernet didn't open\" when a trip started at an aethernet shard (anywhere in Ul'dah -\n  Steps of Thal, Limsa's Upper Decks, Old Gridania, and at any shard nearer than the city's\n  aetheryte). Shards weren't recognised as something to talk to, only the big aetherytes were. The\n  run also walks right up to a shard now.\n- Scrip exchanges are picked by the trip: the one in the area or city you're in first, then the one\n  the teleport costs the least to from where you stand. Before, it was always the same one (Ul'dah,\n  for most things), whatever it cost. The collectable appraiser is picked the same way, so turning\n  in and buying happen in one city. In Radz-at-Han, for one, the run now stays in Radz-at-Han.\n- At a city's aetheryte the run picks \"Aethernet\" by the game's own text for it, in every client\n  language, and no longer risks \"Residential District Aethernet\".\n- An aethernet window that doesn't list the stop (or lists it as not attuned) is closed and the run\n  says so, instead of waiting in it.\n- When the aethernet still doesn't open, the run log says what happened at the crystal: none found,\n  how far away it was, or which menu came up.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.15.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.1/latest.zip",
+    "AssemblyVersion": "0.15.2.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.15.2/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795207478
+    "LastUpdate": 1795209113
   }
 ]
