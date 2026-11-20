@@ -499,9 +499,17 @@ internal sealed class SettingsPage : Page
         DrawBugReport(w);
     }
 
-    private (DateTime At, int Lines)? reportCopied;
+    /// <summary>The last copy of the bug report: when, how long, and whether the GitHub form was opened with it.</summary>
+    private (DateTime At, int Lines, bool Opened)? reportCopied;
 
     /// <summary>Copies what Provenance knows right now, to paste into a bug report.</summary>
+    private void CopyBugReport(bool opened)
+    {
+        var text = Data.BugReport.Build(Plugin);
+        ImGui.SetClipboardText(text);
+        reportCopied = (DateTime.UtcNow, text.Split('\n').Length, opened);
+    }
+
     private void DrawBugReport(float w)
     {
         var s = Ui.S;
@@ -509,21 +517,33 @@ internal sealed class SettingsPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Bug report");
         Ui.Wrapped("Copies what Provenance knows right now: the settings, the order and its plan, what the run is doing and its log, "
                    + "the gathering nodes around you and where you stand. Your character's name, world and retainers aren't in it. "
-                   + "Paste it into your report; in Discord a long one becomes a text file.");
+                   + "Open on GitHub also opens a new bug report with the plugin and version filled in, to paste it into. "
+                   + "For Discord, copying is enough: a long one becomes a text file.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        var lineStart = ImGui.GetCursorScreenPos().X;
         if (Ui.Button("Copy bug report", Ui.Kind.Secondary, FontAwesomeIcon.Bug, id: "##bugreport"))
+            CopyBugReport(opened: false);
+        ImGui.SameLine(0, 8 * s);
+        if (Ui.Button("Open on GitHub", Ui.Kind.Secondary, FontAwesomeIcon.ExternalLinkAlt, id: "##bugreportgithub",
+                tooltip: "Copies the report and opens a new bug report on GitHub in your browser. Paste it into the \"Provenance bug report\" box there."))
         {
-            var text = Data.BugReport.Build(Plugin);
-            ImGui.SetClipboardText(text);
-            reportCopied = (DateTime.UtcNow, text.Split('\n').Length);
+            CopyBugReport(opened: true);
+            Dalamud.Utility.Util.OpenLink(Data.BugReport.IssueFormUrl());
         }
-        if (reportCopied is { } copied && DateTime.UtcNow - copied.At < TimeSpan.FromSeconds(6))
+        if (reportCopied is { } copied && DateTime.UtcNow - copied.At < TimeSpan.FromSeconds(copied.Opened ? 12 : 6))
         {
-            ImGui.SameLine(0, 12 * s);
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
+            var note = copied.Opened ? $"Copied, {copied.Lines} lines. Paste it into the page that just opened." : $"Copied, {copied.Lines} lines";
+            // Beside the buttons when it fits; on the line below when the card is narrow or the text large.
+            var width = 18 * s + ImGui.CalcTextSize(note).X;
+            if (ImGui.GetItemRectMax().X - lineStart + 12 * s + width <= Ui.CardInnerWidth)
+            {
+                ImGui.SameLine(0, 12 * s);
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
+            }
+            else ImGui.Dummy(new Vector2(0, 2 * s));
             Ui.Icon(FontAwesomeIcon.Check, Palette.Accent, small: true);
             ImGui.SameLine(0, 6 * s);
-            Ui.Text($"Copied, {copied.Lines} lines", Palette.Accent);
+            Ui.Text(note, Palette.Accent);
         }
         using (Ui.F.Small.Push())
             Ui.Wrapped("Copy it right when something goes wrong, while the run still shows it. In the middle of a run, /prov bugreport does the same without opening this page.", Palette.TextMuted);

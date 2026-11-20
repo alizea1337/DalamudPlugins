@@ -93,7 +93,8 @@ the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, ic
 
 Something going wrong? *Copy bug report* (Settings, General) or `/prov bugreport` copies what Provenance knows
 right now (settings, order, plan, what the run is doing and its log, nearby nodes, your zone and position, but
-no character name) to paste into a report.
+no character name) to paste into a report. *Open on GitHub* next to it copies it too and opens a new
+[bug report](https://github.com/alizea1337/DalamudPlugins/issues/new/choose) with the plugin and version filled in.
 
 Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`, `/prov bugreport`, `/prov tp <name>`,
 `/prov flag`, `/prov plan | browse | character | settings` to open a page (settings opens General), and

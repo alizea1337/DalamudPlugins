@@ -19,8 +19,8 @@ body:
     id: version
     attributes:
       label: Plugin version
-      description: Shown in /xlplugins, and on the second line of Provenance's bug report.
-      placeholder: "0.15.2"
+      description: Shown in /xlplugins, and on the second line of Provenance's bug report. Provenance's "Open on GitHub" fills it in.
+      placeholder: "for example 0.15.2"
   - type: textarea
     id: what
     attributes:
@@ -33,8 +33,9 @@ body:
     attributes:
       label: Provenance bug report
       description: >-
-        For Provenance: press "Copy bug report" in Settings → General (or type /provenance bugreport)
-        right after it happens, then paste it here. It has no character name, world or retainer names.
+        For Provenance: press "Copy bug report" or "Open on GitHub" in Settings → General (or type
+        /provenance bugreport) right after it happens, then paste it here. It has no character name,
+        world or retainer names.
       render: text
   - type: textarea
     id: extra

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.3
+
+- "Open on GitHub" next to "Copy bug report" (Settings, General): copies the report and opens a new
+  bug report on GitHub in your browser, with the plugin and version filled in. Paste the report into
+  its "Provenance bug report" box. Bugs and suggestions can be filed there from now on.
+
 ## 0.15.2
 
 - Fixed: "The aethernet didn't open" when a trip started at an aethernet shard (anywhere in Ul'dah -

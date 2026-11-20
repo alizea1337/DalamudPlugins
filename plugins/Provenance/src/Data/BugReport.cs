@@ -21,6 +21,16 @@ namespace Provenance.Data;
 /// </summary>
 internal static class BugReport
 {
+    /// <summary>The repository's bug report form.</summary>
+    private const string IssueForm = "https://github.com/alizea1337/DalamudPlugins/issues/new?template=bug_report.yml";
+
+    /// <summary>
+    /// The bug report form on GitHub with the plugin and this version filled in. The report itself is too long
+    /// for a link: it's pasted into the form.
+    /// </summary>
+    public static string IssueFormUrl()
+        => $"{IssueForm}&plugin=Provenance&version={Uri.EscapeDataString(Plugin.Version)}";
+
     /// <summary>Gathering nodes this close are listed.</summary>
     private const float NodesWithin = 120f;
 
