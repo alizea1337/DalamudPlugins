@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "Filters in the Browse search, and a reset for the Interface page.\n\n- The Browse search takes filters as well as words, such as\n  `job:fsh or job:fisher aetherial.reduction level:50-70`: `job:`, `level:` (also `level:mine`), `ilvl:`,\n  `stars:`, `cat:` (the item's category), `in:` (world, diadem, cosmic, ocean) and `is:` (recipe,\n  gather, fish, timed, reduction, expert, hq, book, unlearned, specialist, ready). A space means and,\n  `or` goes before and, a comma means one of, `-` leaves out, and brackets group. Job names work in\n  English and in your game's language. The chips and the level range still apply on top.\n- Anything the search doesn't understand is left out, not fatal: an amber line under the search says\n  what, with the likely meaning to click (\"Did you mean job:fisher?\").\n- The *?* next to the search shows what it understands, with examples to click, and links to the full\n  guide on GitHub (docs/search.md).\n- *Reset filters* next to the number of items clears the search, the chips and the level range at once.\n  The search is now kept when you close the window, like the chips.\n- Hovering an item's name in Browse shows its category and item level.\n- A star on every Browse row saves that item as a favourite order of its own, with the amount and\n  HQ choice set on the row. The star shows amber while it's a favourite; clicking it again removes it.\n- Settings, Interface: *Reset to defaults* puts the interface scale, text size, tooltip size and the\n  window's size back to how they started. It shows while any of them is changed. Reduce motion stays.\r\n",
+    "Changelog": "- Fixed: when a timed node's time ran out before the order had enough, the run kept flying round its\n  spawn spots until it came back (up to a whole Eorzean day), while other things on the order could\n  have been gathered meanwhile. The run now leaves a timed node as soon as its time is over, on the way\n  there or between its spots, and gathers what's up instead (or waits for the next window when nothing\n  is). The run log says when it moves on.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.16.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.0/latest.zip",
+    "AssemblyVersion": "0.16.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795213733
+    "LastUpdate": 1795218721
   }
 ]
