@@ -6,6 +6,10 @@
   Steps of Thal, Limsa's Upper Decks, Old Gridania, and at any shard nearer than the city's
   aetheryte). Shards weren't recognised as something to talk to, only the big aetherytes were. The
   run also walks right up to a shard now.
+- Scrip exchanges are picked by the trip: the one in the area or city you're in first, then the one
+  the teleport costs the least to from where you stand. Before, it was always the same one (Ul'dah,
+  for most things), whatever it cost. The collectable appraiser is picked the same way, so turning
+  in and buying happen in one city. (Kugane has neither, so from there it's a teleport either way.)
 - At a city's aetheryte the run picks "Aethernet" by the game's own text for it, in every client
   language, and no longer risks "Residential District Aethernet".
 - An aethernet window that doesn't list the stop (or lists it as not attuned) is closed and the run

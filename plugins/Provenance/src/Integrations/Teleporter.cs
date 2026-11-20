@@ -132,6 +132,26 @@ internal static unsafe class Teleporter
         return best;
     }
 
+    /// <summary>Counted on top of the teleport for an area only the city's aethernet reaches (the hop takes a while).</summary>
+    private const long AethernetExtra = 30;
+
+    /// <summary>
+    /// What getting to an area costs right now, in gil: nothing when already there or elsewhere in the same city
+    /// (the aethernet is free), else the cheapest aetheryte in it, or the city's aetheryte for an area only its
+    /// aethernet reaches. Null when the run can't get there. Used to pick the cheapest of several places.
+    /// </summary>
+    /// <param name="unlocked">The teleport list, when the caller has it already (see <see cref="Unlocked"/>).</param>
+    public static long? TripCost(uint territoryId, List<Destination>? unlocked = null)
+    {
+        var here = Services.ClientState.TerritoryType;
+        if (here == territoryId) return 0;
+        unlocked ??= Unlocked();
+        var direct = unlocked.Where(d => d.TerritoryId == territoryId && d.Estate == null).Select(d => (long?)d.GilCost).Min();
+        if (direct != null) return direct;
+        if (AethernetRoute(territoryId) is not { } route) return null;
+        return route.Main.TerritoryId == here ? 0 : route.Main.GilCost + AethernetExtra;
+    }
+
     /// <summary>Whether the run can get to an area: already there, an aetheryte in it, or an aethernet shard.</summary>
     public static bool CanReach(uint territoryId)
         => Services.ClientState.TerritoryType == territoryId

@@ -521,9 +521,34 @@ internal sealed class PlanService : IDisposable
     private bool CanReach(uint territory)
         => reachable.TryGetValue(territory, out var ok) ? ok : reachable[territory] = Teleporter.CanReach(territory);
 
+    private readonly Dictionary<uint, long> tripCosts = new();
+    /// <summary>The teleport list the costs in <see cref="tripCosts"/> are read from.</summary>
+    private List<Teleporter.Destination> tripList = new();
+    private uint tripCostsFrom;
+    private DateTime tripCostsUntil;
+
     /// <summary>
-    /// The exchange to buy a book, tome or material at: one the character can reach, cheapest first, then the
-    /// one closest to an aetheryte (cities before outlying zones). Null when no reachable exchange sells it.
+    /// What getting to an area costs from where the character stands (see <see cref="Teleporter.TripCost"/>), kept
+    /// for a few seconds and until the character changes areas: it reads the teleport list, and the plan page asks
+    /// every frame.
+    /// </summary>
+    private long TripCost(uint territory)
+    {
+        var here = (uint)Services.ClientState.TerritoryType;
+        if (here != tripCostsFrom || DateTime.UtcNow > tripCostsUntil)
+        {
+            tripCosts.Clear();
+            tripList = Teleporter.Unlocked();
+            tripCostsFrom = here;
+            tripCostsUntil = DateTime.UtcNow.AddSeconds(5);
+        }
+        return tripCosts.TryGetValue(territory, out var cost) ? cost : tripCosts[territory] = Teleporter.TripCost(territory, tripList) ?? long.MaxValue;
+    }
+
+    /// <summary>
+    /// The exchange to buy a book, tome or material at: one the character can reach, cheapest first, then the one
+    /// the trip costs the least to from here (this area or city first, then the cheapest teleport), then cities
+    /// before outlying zones. Null when no reachable exchange sells it.
     /// </summary>
     public ExchangeOffer? BookOffer(uint itemId)
     {
@@ -537,6 +562,9 @@ internal sealed class PlanService : IDisposable
             .ThenByDescending(o => earnable.Contains(o.CurrencyItemId))
             .ThenByDescending(o => Math.Min(1.0, GameState.CurrencyCount(o.CurrencyItemId) / (double)Math.Max(1, o.Cost)))
             .ThenBy(o => o.Cost)
+            // A dedicated exchange (one or two things on offer) opens straight away; among those the trip decides.
+            .ThenBy(o => o.NpcEntries <= 2 ? 0 : 1)
+            .ThenBy(o => TripCost(o.TerritoryId))
             .ThenBy(o => o.NpcEntries)
             .ThenBy(o => Services.Data.GetExcelSheet<TerritoryType>().GetRowOrDefault(o.TerritoryId)?.TerritoryIntendedUse.RowId == 0 ? 0 : 1)
             .FirstOrDefault();

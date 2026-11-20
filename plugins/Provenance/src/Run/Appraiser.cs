@@ -77,11 +77,9 @@ internal sealed unsafe class Appraiser
         if (items.Count == 0) { step = Step.Done; return; }
         var reachable = catalog.Appraisers.Where(a => Teleporter.CanReach(a.TerritoryId)).ToList();
         if (reachable.Count == 0) { Fail("No collectable appraiser you can teleport to is known."); return; }
-        // Here first, then a city whose aetheryte costs the least.
+        // Here (or elsewhere in this city) first, then the city the teleport costs the least to.
         var unlocked = Teleporter.Unlocked();
-        npc = reachable.OrderBy(a => a.TerritoryId == Services.ClientState.TerritoryType ? 0 : 1)
-            .ThenBy(a => unlocked.Where(d => d.TerritoryId == a.TerritoryId).Select(d => (long)d.GilCost).DefaultIfEmpty(100_000).Min())
-            .First();
+        npc = reachable.OrderBy(a => Teleporter.TripCost(a.TerritoryId, unlocked) ?? long.MaxValue).First();
         var place = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(npc.TerritoryId)?.PlaceName.ValueNullable?.Name.ExtractText() ?? "";
         travel.GoTo($"the collectable appraiser in {place}", npc.TerritoryId, npc.Position, 3.5f,
             () => Interact.Nearest(ObjectKind.EventNpc, id => id == npc.NpcId)?.Position);
