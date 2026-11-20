@@ -21,11 +21,14 @@ internal static partial class Ui
     public const float IconRadius = 8f;
 
     public static Fonts F { get; private set; } = null!;
+    /// <summary>The interface size picked in the settings (1 = 100%), set by the window each frame.</summary>
+    public static float Scale { get; set; } = 1f;
+
     /// <summary>
-    /// Pixels per design unit: Dalamud's global scale times the interface size (Settings, General). It follows the
-    /// fonts in use, so a new size switches text and layout in the same frame.
+    /// Pixels per design unit: Dalamud's global scale times the interface size (Settings, General). The text follows
+    /// at once too: until the fonts built for the size are ready, the window stretches the ones in use (see MainWindow).
     /// </summary>
-    public static float S => ImGuiHelpers.GlobalScale * (F?.Scale ?? 1f);
+    public static float S => ImGuiHelpers.GlobalScale * Scale;
 
     private static readonly Dictionary<uint, float> Eased = new();
     private static readonly Stack<(Vector2 Start, float Width, Vector4 Bg, float Pad)> Cards = new();
@@ -167,17 +170,23 @@ internal static partial class Ui
         _ => (int)Fonts.BodySize,
     };
 
+    /// <summary>
+    /// A tooltip in its own size (Settings, General: Small to Largest), not the interface size: that one is for the
+    /// window's own text.
+    /// </summary>
     public static void ShowTooltip(string text)
     {
         var px = TooltipPixels(TooltipSize);
         var font = F.Regular(px);
         // A size picked a moment ago may still be building: the normal size until it's there.
-        if (!font.Available) { font = F.Body; px = (int)Fonts.BodySize; }
+        if (!font.Available) { font = F.Body; px = (int)(Fonts.BodySize * F.Scale); }
         using (font.Push())
         {
             ImGui.BeginTooltip();
+            // Not stretched with the window's text while its fonts are built.
+            ImGui.SetWindowFontScale(1f);
             // The line grows with the text, so a line holds about as many words at every size.
-            ImGui.PushTextWrapPos(320 * S * px / Fonts.BodySize);
+            ImGui.PushTextWrapPos(320 * ImGuiHelpers.GlobalScale * px / Fonts.BodySize);
             ImGui.TextUnformatted(text);
             ImGui.PopTextWrapPos();
             ImGui.EndTooltip();

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.2
+
+- The interface size changes all the text in the window at once (item names, page names in the
+  sidebar, headings, buttons, chips, the drop-down lists), with the spacing and the window. Until
+  the sharp fonts for the new size are built, the text in use is stretched to it ("Sharpening the
+  text…" in the settings), so it never stays at the old size.
+- Tooltips keep their own size (Small to Largest) whatever the interface size.
+
 ## 0.14.1
 
 - Fixed: the text didn't change with the interface size (nor with the tooltip size). Fonts made after

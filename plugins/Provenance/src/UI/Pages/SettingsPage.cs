@@ -222,12 +222,12 @@ internal sealed class SettingsPage : Page
         var w = Config.Window;
         var current = Array.IndexOf(InterfaceSizes, w.Scale);
         Ui.DropdownField("##uiscale", current >= 0 ? $"{InterfaceSizes[current]}%" : $"{w.Scale}%", "Pick a size", 220 * s, FontAwesomeIcon.ExpandArrowsAlt);
-        // While a new size is being built, say so (the fonts take a moment).
+        // While the sharp fonts for the size are built, the text is stretched to it; say why it's soft for a moment.
         if (MathF.Abs(Ui.F.Scale - w.ScaleFactor) > 0.001f)
         {
             ImGui.SameLine(0, 14 * s);
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (34 * s - ImGui.GetTextLineHeight()) / 2);
-            Ui.Muted("Resizing…");
+            Ui.Muted("Sharpening the text…");
         }
         var pick = Ui.DropdownList("##uiscale", InterfaceSizeItems, current, "");
         if (pick >= 0) { w.Scale = InterfaceSizes[pick]; Config.Save(); }
@@ -471,7 +471,7 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Text("Interface size");
         InterfaceSizePicker();
-        using (Ui.F.Small.Push()) Ui.Wrapped("Text, spacing, icons and the window together, on top of Dalamud's own scale.", Palette.TextMuted);
+        using (Ui.F.Small.Push()) Ui.Wrapped("All the text in the window (item names, page names, headings, buttons) with its spacing, icons and the window itself, on top of Dalamud's own scale. Tooltips keep the size below.", Palette.TextMuted);
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Text("Tooltip size");
         TooltipSizePicker();

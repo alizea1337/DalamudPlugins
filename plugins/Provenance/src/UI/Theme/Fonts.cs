@@ -121,17 +121,20 @@ internal sealed class Fonts : IDisposable
            + $"tooltip sizes {string.Join(",", current.Regular.Select(kv => $"{kv.Key}:{(kv.Value.Available ? "ready" : "waiting")}"))}";
 
     /// <summary>
-    /// Regular text at this pixel size, before the interface size (for tooltips). Sizes other than Small and Body
-    /// are built the first time they're asked for, and only then: until the atlas has built one,
-    /// <see cref="IFontHandle.Available"/> is false.
+    /// Regular text at exactly this pixel size, whatever the interface size (tooltips have a size of their own). At
+    /// 100% the Small and Body fonts are that already; other sizes are built the first time they're asked for, and
+    /// only then: until the atlas has built one, <see cref="IFontHandle.Available"/> is false.
     /// </summary>
     public IFontHandle Regular(int size)
     {
-        if (size == (int)SmallSize) return Small;
-        if (size == (int)BodySize) return Body;
+        if (MathF.Abs(current.Scale - 1f) < 0.001f)
+        {
+            if (size == (int)SmallSize) return Small;
+            if (size == (int)BodySize) return Body;
+        }
         if (!current.Regular.TryGetValue(size, out var handle))
         {
-            current.Regular[size] = handle = Text(atlas, dir, 400, size * current.Scale);
+            current.Regular[size] = handle = Text(atlas, dir, 400, size);
             AskForBuild();
         }
         return handle;

@@ -37,6 +37,7 @@ public sealed class Plugin : IDalamudPlugin
         Config = Configuration.Load();
         fonts = new Fonts(Config.Window.ScaleFactor);
         Ui.Init(fonts);
+        Ui.Scale = Config.Window.ScaleFactor;
 
         Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);

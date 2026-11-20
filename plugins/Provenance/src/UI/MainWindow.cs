@@ -57,7 +57,7 @@ internal sealed class MainWindow : Window
         this.groups = groups.ToList();
         pages = this.groups.SelectMany(g => g.Pages).ToList();
         selected = Math.Max(0, pages.FindIndex(p => p.Title == plugin.Config.Window.LastPage));
-        appliedScale = Ui.F.Scale;
+        appliedScale = Ui.Scale;
         Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
         RespectCloseHotkey = true;
         ApplyMode();
@@ -66,8 +66,8 @@ internal sealed class MainWindow : Window
     // In design units: the window's own size follows the interface size (Settings, General).
     private static readonly Vector2 CompactDesign = new(460, 176);
     private static readonly Vector2 FullMinimumDesign = new(960, 620);
-    private static Vector2 CompactSize => CompactDesign * Ui.F.Scale;
-    private static Vector2 FullMinimum => FullMinimumDesign * Ui.F.Scale;
+    private static Vector2 CompactSize => CompactDesign * Ui.Scale;
+    private static Vector2 FullMinimum => FullMinimumDesign * Ui.Scale;
     private bool applySize;
     /// <summary>The full window's size as Dalamud takes it (before its global scale), measured while drawing.</summary>
     private Vector2 lastFullSize;
@@ -126,13 +126,15 @@ internal sealed class MainWindow : Window
 
     public override void PreDraw()
     {
-        // The interface size: new fonts are built first; once they're in use, the window grows or shrinks with them.
-        Ui.F.SetScale(plugin.Config.Window.ScaleFactor);
+        // The interface size: layout and window change at once, the fonts for the size are built meanwhile (the
+        // text is stretched to the size until they're ready, see Draw).
+        Ui.Scale = plugin.Config.Window.ScaleFactor;
+        Ui.F.SetScale(Ui.Scale);
         Ui.F.Update();
-        if (MathF.Abs(Ui.F.Scale - appliedScale) > 0.001f)
+        if (MathF.Abs(Ui.Scale - appliedScale) > 0.001f)
         {
-            var ratio = Ui.F.Scale / appliedScale;
-            appliedScale = Ui.F.Scale;
+            var ratio = Ui.Scale / appliedScale;
+            appliedScale = Ui.Scale;
             if (!Compact && lastFullSize.X > 0)
             {
                 plugin.Config.Window.FullWidth = lastFullSize.X * ratio;
@@ -164,6 +166,9 @@ internal sealed class MainWindow : Window
 
     public override void Draw()
     {
+        // Text at the interface size even before its fonts are built: the fonts in use, stretched (children and the
+        // lists that open from here take it over). 1 once the fonts for the size are ready, so sharp from then on.
+        ImGui.SetWindowFontScale(Ui.Scale / Ui.F.Scale);
         using var style = Ui.PushStyle();
         using var body = Ui.F.Body.Push();
         Ui.ReduceMotion = plugin.Config.Window.ReduceMotion;
