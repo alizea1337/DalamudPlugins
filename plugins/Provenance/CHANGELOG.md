@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.16.0
+
+Filters in the Browse search, and a reset for the Interface page.
+
+- The Browse search takes filters as well as words, such as
+  `job:fsh or job:fisher aetherial.reduction level:50-70`: `job:`, `level:` (also `level:mine`), `ilvl:`,
+  `stars:`, `cat:` (the item's category), `in:` (world, diadem, cosmic, ocean) and `is:` (recipe,
+  gather, fish, timed, reduction, expert, hq, book, unlearned, specialist, ready). A space means and,
+  `or` goes before and, a comma means one of, `-` leaves out, and brackets group. Job names work in
+  English and in your game's language. The chips and the level range still apply on top.
+- Anything the search doesn't understand is left out, not fatal: an amber line under the search says
+  what, with the likely meaning to click ("Did you mean job:fisher?").
+- The *?* next to the search shows what it understands, with examples to click, and links to the full
+  guide on GitHub (docs/search.md).
+- *Reset filters* next to the number of items clears the search, the chips and the level range at once.
+  The search is now kept when you close the window, like the chips.
+- Hovering an item's name in Browse shows its category and item level.
+- Settings, Interface: *Reset to defaults* puts the interface scale, text size, tooltip size and the
+  window's size back to how they started. It shows while any of them is changed. Reduce motion stays.
+
 ## 0.15.3
 
 - "Open on GitHub" next to "Copy bug report" (Settings, General): copies the report and opens a new

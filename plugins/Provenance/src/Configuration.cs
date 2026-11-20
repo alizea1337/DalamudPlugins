@@ -112,6 +112,8 @@ public sealed class BrowseSettings
     public int MaxLevel { get; set; } = 100;
     /// <summary>The Favourites chip is on: the saved orders show instead of the items.</summary>
     public bool ShowFavourites { get; set; }
+    /// <summary>The search as last typed (words and filters), kept between sessions like the chips.</summary>
+    public string Query { get; set; } = "";
 }
 
 [Serializable]

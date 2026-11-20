@@ -238,13 +238,36 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
 
         Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Size");
+        // Header: "Size" on the left; on the right, while anything here isn't at its default, a way back to it.
+        const string resetLabel = "Reset to defaults";
+        var resetSize = Ui.LinkButtonSize(resetLabel, FontAwesomeIcon.Undo);
+        var head = ImGui.GetCursorScreenPos();
+        using (Ui.F.Strong.Push())
+        {
+            ImGui.SetCursorScreenPos(head + new Vector2(0, MathF.Max(0, (resetSize.Y - ImGui.GetTextLineHeight()) / 2)));
+            Ui.Text("Size");
+        }
         if (Ui.F.Building)
         {
             // The sharp fonts for a new size are being built; the text is stretched to it meanwhile.
             ImGui.SameLine(0, 10 * s);
             using (Ui.F.Small.Push()) Ui.Muted("sharpening the text…");
         }
+        var below = ImGui.GetCursorScreenPos();
+        if (win.Scale != 100 || win.TextScale != 100 || win.TooltipSize != TooltipSize.Normal || !Plugin.Main.AtDefaultSize)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(head.X + Ui.CardInnerWidth - resetSize.X, head.Y));
+            if (Ui.LinkButton(resetLabel, Palette.TextMuted, FontAwesomeIcon.Undo,
+                    "Interface scale and text size back to 100%, tooltips to Normal, and the window to its first size. Reduce motion stays as it is.", "##resetinterface"))
+            {
+                win.Scale = 100;
+                win.TextScale = 100;
+                win.TooltipSize = TooltipSize.Normal;
+                Plugin.Main.ResetSize();
+                Config.Save();
+            }
+        }
+        ImGui.SetCursorScreenPos(new Vector2(head.X, MathF.Max(below.Y, head.Y + resetSize.Y)));
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Text("Interface scale");
         PercentPicker("##uiscale", win.Scale, v => win.Scale = v, FontAwesomeIcon.ExpandArrowsAlt);

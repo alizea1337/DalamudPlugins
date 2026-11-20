@@ -93,6 +93,42 @@ internal sealed class MainWindow : Window
         if (!compact) shown = -1; // back in the full window: the page comes in again
     }
 
+    /// <summary>The full window's first size at the interface scale in the settings.</summary>
+    private Vector2 DefaultFullSize
+    {
+        get
+        {
+            var d = new WindowSettings();
+            return new Vector2(d.FullWidth, d.FullHeight) * plugin.Config.Window.ScaleFactor;
+        }
+    }
+
+    /// <summary>The full window is at its first size (Settings, Interface: nothing to reset there).</summary>
+    public bool AtDefaultSize
+    {
+        get
+        {
+            var w = plugin.Config.Window;
+            var size = Compact || lastFullSize.X <= 0 ? new Vector2(w.FullWidth, w.FullHeight) : lastFullSize;
+            return Vector2.Distance(size, DefaultFullSize) < 2f;
+        }
+    }
+
+    /// <summary>
+    /// Back to the first size, at the interface scale in the settings (set that first). The scale counts as applied,
+    /// so the next frame doesn't stretch the old size to it.
+    /// </summary>
+    public void ResetSize()
+    {
+        var w = plugin.Config.Window;
+        var size = DefaultFullSize;
+        w.FullWidth = size.X;
+        w.FullHeight = size.Y;
+        appliedScale = w.ScaleFactor;
+        if (!Compact) lastFullSize = size;
+        ApplyMode();
+    }
+
     private void ApplyMode()
     {
         var w = plugin.Config.Window;

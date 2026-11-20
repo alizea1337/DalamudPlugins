@@ -762,6 +762,22 @@ internal sealed class PlanService : IDisposable
         return ps == null || ps->IsSecretRecipeBookUnlocked(secretRecipeBook);
     }
 
+    /// <summary>
+    /// What the Browse search asks about the character, live: job levels (kept for this one search), learned master
+    /// books and folklore tomes, and specialists from the last character check.
+    /// </summary>
+    public BrowseCharacter BrowseCharacter()
+    {
+        var levels = new Dictionary<uint, int>();
+        var tomes = new Dictionary<uint, bool>();
+        var profile = Profile;
+        return new BrowseCharacter(
+            job => levels.TryGetValue(job, out var l) ? l : levels[job] = JobLevel(job),
+            IsBookLearned,
+            tome => tomes.TryGetValue(tome, out var t) ? t : tomes[tome] = HasTome(tome),
+            job => profile?.Job(job)?.Specialist == true);
+    }
+
     private static bool HasTome(uint tomeItem)
         => !Services.PlayerState.IsLoaded || ItemUnlocks.IsLearned(tomeItem);
 

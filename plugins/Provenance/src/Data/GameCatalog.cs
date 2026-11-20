@@ -30,27 +30,6 @@ internal sealed record GatherPoint(uint PointId, uint BaseId, uint TerritoryId, 
 
 internal sealed record TimedSpot(uint TerritoryId, System.Numerics.Vector2 Position, float Radius, uint Mask);
 
-/// <summary>One row of the recipe browser.</summary>
-internal enum BrowseKind { Recipe, Gather, Fish }
-
-/// <summary>One row of the item browser: a recipe, or something a gatherer or fisher collects.</summary>
-/// <param name="ClassJobId">Crafter (8–15) or gatherer (16–18).</param>
-/// <param name="Level">Recipe level, or the lowest node / fishing hole level.</param>
-/// <param name="TimedOnly">Gatherables found only on timed nodes.</param>
-/// <param name="Places">
-/// <see cref="Place.OpenWorld"/> when a run can get it there, else the special content it comes from
-/// (the Diadem, Cosmic Exploration and so on).
-/// </param>
-/// <param name="Reduced">Comes from aetherial reduction of a collectable this job gathers or fishes.</param>
-/// <param name="ReducedByRun">With <paramref name="Reduced"/>: a run gathers and reduces it (miners' and botanists' collectables).</param>
-internal sealed record BrowseEntry(BrowseKind Kind, uint RecipeId, uint ItemId, string Name, uint ClassJobId, int Level, int Stars, uint Icon,
-    int Yield, bool Expert, uint MasterBook, bool TimedOnly, bool CanHq = false, Place Places = Place.OpenWorld,
-    bool Reduced = false, bool ReducedByRun = false)
-{
-    public readonly string NameLower = Name.ToLowerInvariant();
-    public string Key => Kind == BrowseKind.Recipe ? "r" + RecipeId : $"g{ClassJobId}_{ItemId}";
-}
-
 /// <summary>
 /// Game data indexed once from the Excel sheets (on a worker thread at load): recipes by result,
 /// non-craft sources per item, a name lookup for copied Teamcraft text and the browser rows.
@@ -67,6 +46,9 @@ internal sealed class GameCatalog : IGameCatalog
     private readonly ConcurrentDictionary<uint, (string Name, uint Icon)> itemCache = new();
 
     public IReadOnlyList<BrowseEntry> Browse { get; private set; } = Array.Empty<BrowseEntry>();
+
+    /// <summary>The job names and item categories the Browse search understands (client language and English).</summary>
+    public BrowseVocabulary Vocabulary { get; private set; } = new();
     private List<BrowseEntry> recipeBrowse = new();
 
     /// <summary>
@@ -107,8 +89,9 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
-        c.BuildBrowse();
+        // Tomes first: the browser rows carry the tome their nodes need.
         c.ApplyTomes();
+        c.BuildBrowse();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
             c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
         return c;
@@ -191,7 +174,12 @@ internal sealed class GameCatalog : IGameCatalog
             {
                 var name = item.Name.ExtractText();
                 if (name.Length > 0)
-                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert, r.SecretRecipeBook.RowId, false, r.CanHq, place));
+                {
+                    var (category, english) = CategoryOf(item);
+                    browse.Add(new BrowseEntry(BrowseKind.Recipe, r.RowId, result, name, info.Job.ClassJobId(), info.Level, info.Stars, item.Icon, info.Yield, info.Expert,
+                        r.SecretRecipeBook.RowId, false, r.CanHq, place, ItemLevel: (int)item.LevelItem.RowId, Category: category, CategoryEnglish: english,
+                        Specialist: r.IsSpecializationRequired));
+                }
             }
         }
         browse.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
@@ -765,10 +753,42 @@ internal sealed class GameCatalog : IGameCatalog
             var name = item.Name.ExtractText();
             if (name.Length == 0) continue;
             var reduced = reducedBrowse.TryGetValue((itemId, job), out var byRun);
-            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places, Reduced: reduced, ReducedByRun: reduced && byRun));
+            var (category, english) = CategoryOf(item);
+            all.Add(new BrowseEntry(kind, 0, itemId, name, job, level, 0, item.Icon, 1, false, 0, !normal, Places: places, Reduced: reduced, ReducedByRun: reduced && byRun,
+                ItemLevel: (int)item.LevelItem.RowId, Category: category, CategoryEnglish: english,
+                Tome: sources.TryGetValue(itemId, out var src) ? src.Tome : 0));
         }
         all.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         Browse = all;
+        Vocabulary = BuildVocabulary(all);
+    }
+
+    private Dictionary<uint, string>? englishCategories;
+
+    /// <summary>The item's category as its tooltip names it, in the client's language and in English.</summary>
+    private (string Category, string English) CategoryOf(Item item)
+    {
+        var id = item.ItemUICategory.RowId;
+        if (id == 0) return ("", "");
+        englishCategories ??= Services.Data.GetExcelSheet<ItemUICategory>(Dalamud.Game.ClientLanguage.English)
+            .ToDictionary(c => c.RowId, c => c.Name.ExtractText());
+        return (item.ItemUICategory.ValueNullable?.Name.ExtractText() ?? "", englishCategories.GetValueOrDefault(id, ""));
+    }
+
+    /// <summary>Job names and abbreviations in the client's language, and every category the rows have.</summary>
+    private static BrowseVocabulary BuildVocabulary(List<BrowseEntry> rows)
+    {
+        var words = new List<(string, uint)>();
+        var jobs = Services.Data.GetExcelSheet<ClassJob>();
+        foreach (var id in Core.Character.ClassJobs.Crafters.Concat(Core.Character.ClassJobs.Gatherers))
+            if (jobs.GetRowOrDefault(id) is { } cj)
+            {
+                words.Add((cj.Name.ExtractText(), id));
+                words.Add((cj.Abbreviation.ExtractText(), id));
+                words.Add((cj.NameEnglish.ExtractText(), id));
+            }
+        var categories = rows.SelectMany(r => new[] { r.Category, r.CategoryEnglish }).Where(c => c.Length > 0).Distinct();
+        return new BrowseVocabulary(words, categories);
     }
 
     public IReadOnlyList<uint> ReducedFrom(uint itemId) => reducedFrom.TryGetValue(itemId, out var l) ? l : Array.Empty<uint>();

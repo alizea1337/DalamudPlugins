@@ -36,16 +36,17 @@ internal sealed partial class BrowsePage
     {
         var s = Ui.S;
         var favourites = Config.Favourites;
-        var q = query.Trim();
-        var shown = q.Length == 0 ? favourites
-            : favourites.Where(f => f.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
-                                    || f.Lines.Any(l => catalog.ItemName(l.ItemId).Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+        // Plain words only (filters narrow the items): every word in the name or in one of the items.
+        var words = parsed.Words;
+        var shown = words.Count == 0 ? favourites
+            : favourites.Where(f => words.All(word => f.Name.Contains(word, StringComparison.OrdinalIgnoreCase)
+                                                      || f.Lines.Any(l => catalog.ItemName(l.ItemId).Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList();
 
         // How many on the left; saving the order as it is now on the right.
         var start = ImGui.GetCursorScreenPos();
         var bh = 34 * s;
         var count = favourites.Count == 1 ? "1 favourite order" : $"{favourites.Count} favourite orders";
-        if (q.Length > 0 && favourites.Count > 0) count = $"{shown.Count} of {count}";
+        if (words.Count > 0 && favourites.Count > 0) count = $"{shown.Count} of {count}";
         if (favourites.Count > 0)
             ImGui.GetWindowDrawList().AddText(start + new Vector2(0, (bh - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.TextMuted), count);
         const string save = "Save current order";

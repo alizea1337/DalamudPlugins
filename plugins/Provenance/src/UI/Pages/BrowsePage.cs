@@ -12,26 +12,46 @@ using Provenance.UI.Theme;
 namespace Provenance.UI.Pages;
 
 /// <summary>
-/// Search recipes and gatherables by name, job (crafters and gatherers) and job level, and add them
-/// to the order. A gathered item in the order is simply gathered; a recipe is crafted. The Favourites
-/// chip shows saved orders instead (BrowsePage.Favourites.cs).
+/// Search recipes and gatherables by name and filters (<see cref="BrowseQuery"/>: <c>job:fsh level:50-70</c>),
+/// job chips, content chips and job level, and add them to the order. A gathered item in the order is simply
+/// gathered; a recipe is crafted. The Favourites chip shows saved orders instead (BrowsePage.Favourites.cs).
 /// </summary>
 internal sealed partial class BrowsePage : Page
 {
     private const float RowHeight = 54f;
 
     private string query = "";
+    /// <summary>The search read into words and filters, and the text it was read from.</summary>
+    private BrowseQuery parsed = BrowseQuery.Empty;
+    private string parsedFrom = "";
+    /// <summary>A changed search is saved a moment after the typing stops.</summary>
+    private DateTime saveQueryAt;
+    private const string HelpPopup = "##searchhelp_popup";
+    private const string GuideUrl = "https://github.com/alizea1337/DalamudPlugins/blob/main/plugins/Provenance/docs/search.md";
     /// <summary>The clear button was used: the search field takes the keyboard again next frame.</summary>
     private bool refocusSearch;
     private List<BrowseEntry> results = new();
     /// <summary>Jobs left out by the job filter that would have items with the other filters (bit per job, like JobMask).</summary>
     private int otherJobs;
-    private (string Query, int Jobs, int Places, int Lo, int Hi, int Count) filterKey;
+    private (string Query, int Jobs, int Places, int Lo, int Hi, int Count, long Character) filterKey;
     private readonly Dictionary<string, int> quantities = new();
     private readonly Dictionary<string, bool> hqChoice = new();
     private readonly ImportDialog import;
 
-    public BrowsePage(Plugin plugin) : base(plugin) => import = new ImportDialog(plugin);
+    public BrowsePage(Plugin plugin) : base(plugin)
+    {
+        import = new ImportDialog(plugin);
+        query = plugin.Config.Browse.Query ?? "";
+    }
+
+    /// <summary>Puts text in the search (an example, a fix, a reset) and saves it now.</summary>
+    private void SetQuery(string text)
+    {
+        query = text;
+        Config.Browse.Query = text;
+        saveQueryAt = default;
+        Config.Save();
+    }
 
     /// <summary>Opens the Teamcraft import over this page.</summary>
     public void OpenImport() => import.Open();
@@ -62,6 +82,7 @@ internal sealed partial class BrowsePage : Page
 
         Ui.Heading("Find items");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        if (saveQueryAt != default && DateTime.UtcNow >= saveQueryAt) { saveQueryAt = default; Config.Save(); }
 
         // Search. The padding keeps room on both sides: the magnifier left, the clear button right.
         var w = ImGui.GetContentRegionAvail().X;
@@ -73,9 +94,10 @@ internal sealed partial class BrowsePage : Page
         }
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(38, 10) * s);
         ImGui.SetNextItemWidth(searchW);
-        ImGui.InputTextWithHint("##search", Config.Browse.ShowFavourites ? "Search favourite orders by name or item" : "Search recipes and gatherables by name", ref query, 128);
+        ImGui.InputTextWithHint("##search", Config.Browse.ShowFavourites ? "Search favourite orders by name or item" : "Search by name, or filter: job:fsh level:50-70 is:timed", ref query, 256);
         // Escape while typing empties the search (the field itself would only undo the last edit).
         if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape)) query = "";
+        if (query != Config.Browse.Query) { Config.Browse.Query = query; saveQueryAt = DateTime.UtcNow.AddSeconds(1); }
         // The clear button sits on top of the field's right end.
         ImGui.SetItemAllowOverlap();
         var searchMin = ImGui.GetItemRectMin();
@@ -96,7 +118,7 @@ internal sealed partial class BrowsePage : Page
             ImGui.SetCursorScreenPos(at);
             if (ImGui.InvisibleButton("##clearsearch", new Vector2(d)))
             {
-                query = "";
+                SetQuery("");
                 refocusSearch = true;
             }
             var hovered = ImGui.IsItemHovered();
@@ -111,6 +133,16 @@ internal sealed partial class BrowsePage : Page
             ImGui.SetCursorScreenPos(after);
         }
 
+        // How to search: a quiet "?" just right of the field, centred on it.
+        var helpRight = searchMin.X + searchW + 8 * s + 30 * s;
+        {
+            var after = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(new Vector2(searchMin.X + searchW + 8 * s, searchMin.Y + (searchH - 30 * s) / 2));
+            if (Ui.IconButton("##searchhelp", FontAwesomeIcon.QuestionCircle, "How to search and filter")) ImGui.OpenPopup(HelpPopup);
+            DrawSearchHelp();
+            ImGui.SetCursorScreenPos(after);
+        }
+
         // Bringing in a whole Teamcraft list instead: a quieter button at the right end of the search row,
         // centred on the field. It opens the import over the page.
         {
@@ -118,7 +150,7 @@ internal sealed partial class BrowsePage : Page
             const string label = "Import list";
             var bw = Ui.ButtonWidth(label, FontAwesomeIcon.FileImport);
             var rowRight = searchMin.X + w;
-            if (rowRight - bw >= searchMin.X + searchW + 12 * s)
+            if (rowRight - bw >= helpRight + 12 * s)
             {
                 ImGui.SetCursorScreenPos(new Vector2(rowRight - bw, searchMin.Y + (searchH - 34 * s) / 2));
                 if (Ui.Button(label, Ui.Kind.Secondary, FontAwesomeIcon.FileImport, tooltip: "Bring in a Teamcraft list: a link, an import string or copied text.", id: "##openimport"))
@@ -128,6 +160,10 @@ internal sealed partial class BrowsePage : Page
             else if (Ui.Button(label, Ui.Kind.Secondary, FontAwesomeIcon.FileImport, tooltip: "Bring in a Teamcraft list: a link, an import string or copied text.", id: "##openimport"))
                 import.Open();
         }
+
+        // The search, read: what it didn't understand, with the likely meaning to click.
+        ReadQuery(catalog);
+        DrawProblems();
 
         // Job chips: all, the eight crafters, then the three gatherers. They wrap when the window is narrow. With the
         // favourites showing they don't apply: faded, and left as they are for the items.
@@ -172,6 +208,8 @@ internal sealed partial class BrowsePage : Page
         if (b.ShowFavourites)
         {
             ImGui.Dummy(new Vector2(0, 4 * s));
+            if (parsed.HasFilters)
+                using (Ui.F.Small.Push()) Ui.Wrapped("Filters like job:fsh only narrow the items; favourites are searched by their plain words.", Palette.TextMuted);
             DrawFavourites(catalog, w);
             return;
         }
@@ -187,6 +225,21 @@ internal sealed partial class BrowsePage : Page
         Refilter(catalog);
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Muted(results.Count == 1 ? "1 item" : $"{results.Count:N0} items");
+        if (b.JobMask != 0 || b.PlaceMask != 0 || b.MinLevel > 1 || b.MaxLevel < 100 || query.Trim().Length > 0)
+        {
+            // Back to everything: the search, the chips and the level range in one go.
+            ImGui.SameLine(0, 10 * s);
+            var lineH = ImGui.GetTextLineHeight();
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (lineH - Ui.LinkButtonSize("Reset filters", FontAwesomeIcon.Undo).Y) / 2);
+            if (Ui.LinkButton("Reset filters", Palette.TextMuted, FontAwesomeIcon.Undo, "Clear the search and show every job, all content and every level.", "##resetfilters"))
+            {
+                b.JobMask = 0;
+                b.PlaceMask = 0;
+                b.MinLevel = 1;
+                b.MaxLevel = 100;
+                SetQuery("");
+            }
+        }
 
         if (results.Count == 0)
         {
@@ -198,7 +251,9 @@ internal sealed partial class BrowsePage : Page
                 ImGui.Dummy(new Vector2(0, 4 * s));
                 if (Ui.Button("Show all jobs", Ui.Kind.Secondary, id: "##show_all_jobs")) { b.JobMask = 0; Config.Save(); }
             }
-            else Ui.Wrapped("Nothing matches. Widen the level range, try another name, or pick other content.", Palette.TextMuted);
+            else Ui.Wrapped(parsed.IsEmpty
+                ? "Nothing matches. Widen the level range, try another name, or pick other content."
+                : "Nothing matches the search and the filters together. Loosen the search, or use Reset filters above.", Palette.TextMuted);
             return;
         }
 
@@ -253,8 +308,20 @@ internal sealed partial class BrowsePage : Page
 
         Ui.DrawItemIcon(dl, e.Icon, pos + new Vector2(8 * s, (h - 4 * s - 36 * s) / 2), 36 * s);
         var tx = pos.X + 56 * s;
+        var title = e.Yield > 1 ? $"{e.Name}  ×{e.Yield}" : e.Name;
+        Vector2 titleSize;
         using (Ui.F.Strong.Push())
-            dl.AddText(new Vector2(tx, pos.Y + 7 * s), Palette.U32(Palette.Text), e.Yield > 1 ? $"{e.Name}  ×{e.Yield}" : e.Name);
+        {
+            dl.AddText(new Vector2(tx, pos.Y + 7 * s), Palette.U32(Palette.Text), title);
+            titleSize = ImGui.CalcTextSize(title);
+        }
+        // What the item is, on hovering its name: the category from its tooltip and its item level.
+        var titleMin = new Vector2(tx, pos.Y + 7 * s);
+        if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(titleMin, titleMin + titleSize))
+        {
+            var about = string.Join(", ", new[] { e.Category, e.ItemLevel > 0 ? $"item level {e.ItemLevel}" : "" }.Where(p => p.Length > 0));
+            if (about.Length > 0) Ui.ShowTooltip(about);
+        }
 
         ImGui.SetCursorScreenPos(new Vector2(tx, pos.Y + 28 * s));
         Ui.Chip(ClassJobs.Abbreviation(e.ClassJobId), Palette.ClassJobColor(e.ClassJobId), job: e.ClassJobId);
@@ -359,24 +426,140 @@ internal sealed partial class BrowsePage : Page
         ImGui.Dummy(new Vector2(width, h));
     }
 
+    /// <summary>Reads the search again when its text changed.</summary>
+    private void ReadQuery(GameCatalog catalog)
+    {
+        if (query == parsedFrom) return;
+        parsedFrom = query;
+        parsed = BrowseQuery.Parse(query, catalog.Vocabulary);
+    }
+
     private void Refilter(GameCatalog catalog)
     {
         var b = Config.Browse;
-        var key = (query.Trim().ToLowerInvariant(), b.JobMask, b.PlaceMask, b.MinLevel, b.MaxLevel, catalog.Browse.Count);
+        // A search about the character (level:mine, is:ready) is looked at again every few seconds: levels and books change.
+        var character = parsed.UsesCharacter ? Environment.TickCount64 / 3000 : 0;
+        var key = (query, b.JobMask, b.PlaceMask, b.MinLevel, b.MaxLevel, catalog.Browse.Count, character);
         if (key == filterKey) return;
         filterKey = key;
-        var q = key.Item1;
+        var who = parsed.UsesCharacter ? Plans.BrowseCharacter() : null;
         results = new List<BrowseEntry>();
         otherJobs = 0;
         foreach (var e in catalog.Browse)
         {
             if (e.Level < b.MinLevel || e.Level > b.MaxLevel) continue;
             if (b.PlaceMask != 0 && (b.PlaceMask & (int)e.Places) == 0) continue;
-            if (q.Length > 0 && !e.NameLower.Contains(q, StringComparison.Ordinal)) continue;
+            if (!parsed.Matches(e, who)) continue;
             var job = 1 << (int)(e.ClassJobId - 8);
             if (b.JobMask == 0 || (b.JobMask & job) != 0) results.Add(e);
             else otherJobs |= job;
         }
+    }
+
+    /// <summary>
+    /// One amber line when part of the search wasn't understood: what was left out, and the likely meaning to click
+    /// (it replaces that part of the search). Nothing while everything is understood.
+    /// </summary>
+    private void DrawProblems()
+    {
+        if (parsed.Problems.Count == 0) return;
+        var s = Ui.S;
+        var p = parsed.Problems[0];
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        using (Ui.F.Small.Push())
+        {
+            var lineH = ImGui.GetTextLineHeight();
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 6 * s);
+            Ui.Text(p.Message + (p.Fix != null ? ". Did you mean" : "."), Palette.Warn);
+            if (p.Fix != null)
+            {
+                ImGui.SameLine(0, 2 * s);
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (lineH - Ui.LinkButtonSize(p.Fix).Y) / 2);
+                if (Ui.LinkButton(p.Fix, Palette.Accent, tooltip: "Use this instead", id: "##queryfix"))
+                    SetQuery(query[..p.Start] + p.Fix + query[(p.Start + p.Length)..]);
+            }
+            if (parsed.Problems.Count > 1)
+            {
+                ImGui.SameLine(0, 8 * s);
+                Ui.Text($"and {parsed.Problems.Count - 1} more", Palette.TextMuted);
+                Ui.Tooltip(string.Join("\n", parsed.Problems.Skip(1).Select(x => x.Message + (x.Fix != null ? $" (did you mean {x.Fix}?)" : ""))));
+            }
+        }
+    }
+
+    /// <summary>The "?" sheet: what the search understands, with examples that fill it in, and the full guide.</summary>
+    private void DrawSearchHelp()
+    {
+        var s = Ui.S;
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(18, 16) * s);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 12 * s);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupBorderSize, 1f);
+        ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(4, 3) * s);
+        ImGui.PushStyleColor(ImGuiCol.PopupBg, Palette.Raised);
+        ImGui.PushStyleColor(ImGuiCol.Border, Palette.WithAlpha(Palette.Text, 0.08f));
+        // A fixed width (the height follows the content): the wrapped text needs a width to wrap at.
+        var width = 500 * s;
+        ImGui.SetNextWindowSize(new Vector2(width + 36 * s, 0));
+        if (ImGui.BeginPopup(HelpPopup))
+        {
+            // The window's text size, also while its fonts are built (see MainWindow.Draw).
+            ImGui.SetWindowFontScale(Ui.TextScale / Ui.F.Scale);
+            using (Ui.F.Strong.Push()) Ui.Text("Search and filter");
+            using (Ui.F.Small.Push())
+                Ui.Wrapped("Words search item names. Filters are field:value. Everything you type has to match, together with the chips and the level range.", Palette.TextMuted, width);
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            HelpTable("##help_filters", width, new[]
+            {
+                ("job:fsh", "A job: abbreviation or name, in English or your game's language. Also crafter or gatherer."),
+                ("level:50-70", "Job level: 70, 50-70, >=50, <70, 90+, or mine (up to your own level)."),
+                ("ilvl:600+", "Item level, in the same ways. stars:1+ works like it."),
+                ("cat:metal", "Item category, as the item's tooltip names it."),
+                ("in:diadem", "Where it comes from: world, diadem, cosmic or ocean."),
+                ("is:timed", "recipe, gather, fish, timed, reduction, expert, hq, book, unlearned, specialist, or ready (you can make it now)."),
+            });
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            using (Ui.F.Strong.Push()) Ui.Text("Combining");
+            HelpTable("##help_combine", width, new[]
+            {
+                ("job:min or job:btn is:timed", "or goes first: MIN or BTN, and timed."),
+                ("job:fsh,min", "A comma means one of these."),
+                ("-is:expert", "A minus (or not) leaves out."),
+                ("\"iron ore\"", "Quotes keep words together."),
+                ("(job:fsh is:timed) or is:reduction", "Brackets group."),
+            });
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            using (Ui.F.Small.Push()) Ui.Wrapped("Click an example to try it. In Favourites, only plain words search.", Palette.TextMuted, width);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+            if (Ui.LinkButton("Full guide on GitHub", Palette.Accent, FontAwesomeIcon.ExternalLinkAlt, "Every filter and word the search understands, with examples.", "##searchguide"))
+                Dalamud.Utility.Util.OpenLink(GuideUrl);
+            ImGui.EndPopup();
+        }
+        ImGui.PopStyleColor(2);
+        ImGui.PopStyleVar(4);
+    }
+
+    /// <summary>Examples on the left (clicking one puts it in the search), what they do on the right.</summary>
+    private void HelpTable(string id, float width, (string Example, string What)[] rows)
+    {
+        var s = Ui.S;
+        if (!ImGui.BeginTable(id, 2, ImGuiTableFlags.SizingFixedFit, new Vector2(width, 0))) return;
+        ImGui.TableSetupColumn("example", ImGuiTableColumnFlags.WidthFixed, 200 * s);
+        ImGui.TableSetupColumn("what", ImGuiTableColumnFlags.WidthStretch);
+        foreach (var (example, what) in rows)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            if (Ui.LinkButton(example, Palette.Accent, id: "##ex" + example))
+            {
+                SetQuery(example);
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.TableNextColumn();
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 4 * s);
+            using (Ui.F.Small.Push()) Ui.Wrapped(what, Palette.TextMuted);
+        }
+        ImGui.EndTable();
     }
 
     /// <summary>"MIN", "MIN and BTN", "CRP, BSM and ARM".</summary>
