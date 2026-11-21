@@ -52,6 +52,10 @@ internal static class BugReport
         Line($"Version {Plugin.Version}, game language {Services.ClientState.ClientLanguage}, made {DateTime.Now:yyyy-MM-dd HH:mm} local ({now:HH:mm} UTC), Eorzea {EorzeaTime(now)}");
         Line("No character name, world or retainer names are in this report.");
         Line($"Interface scale {plugin.Config.Window.Scale}%, text size {plugin.Config.Window.TextScale}%, Dalamud scale {Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale:0.00}; fonts: {UI.Ui.F.Describe()}");
+        var colors = plugin.Config.Window.Colors;
+        if (!colors.IsDefault)
+            Line($"Colours: accent {Core.Appearance.ThemeColors.ToHex(colors.Accent)}, background {Core.Appearance.ThemeColors.ToHex(colors.Background)}, "
+                 + $"cards {Core.Appearance.ThemeColors.ToHex(colors.Cards)}, text {Core.Appearance.ThemeColors.ToHex(colors.Text)}");
 
         // ---------------------------------------------------------------- where and what
         Section("Character");

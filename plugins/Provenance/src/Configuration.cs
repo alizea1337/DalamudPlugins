@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
+using Provenance.Core.Appearance;
 using Provenance.Core.Character;
 using Provenance.Core.Orders;
 
@@ -51,6 +52,7 @@ public sealed class Configuration : IPluginConfiguration
         c.Browse.PlaceMask &= (int)(Core.Catalog.Place.OpenWorld | Core.Catalog.Place.Diadem | Core.Catalog.Place.CosmicExploration | Core.Catalog.Place.OceanFishing);
         c.Window ??= new();
         if (c.Window.TextScale <= 0) c.Window.TextScale = c.Window.Scale;
+        c.Window.Colors ??= new();
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
@@ -300,9 +302,35 @@ public sealed class WindowSettings
     /// before it existed, where the interface size set the text too; it starts at that size then (see Load).
     /// </summary>
     public int TextScale { get; set; } = -1;
+    /// <summary>The window's colours (accent, background, cards, text).</summary>
+    public ColorSettings Colors { get; set; } = new();
 
     /// <summary>The interface scale as a factor (1 = 100%), kept within what the settings offer.</summary>
     public float ScaleFactor => Math.Clamp(Scale, 50, 200) / 100f;
     /// <summary>The text size as a factor (1 = 100%), kept within what the settings offer.</summary>
     public float TextScaleFactor => Math.Clamp(TextScale, 50, 200) / 100f;
+}
+
+/// <summary>The four colours picked on the Interface page, as 0xRRGGBB; the other shades are worked out from them.</summary>
+public sealed class ColorSettings
+{
+    /// <summary>Primary buttons, switches, the open page, progress.</summary>
+    public uint Accent { get; set; } = ThemeColors.DefaultAccent;
+    /// <summary>The window behind the cards.</summary>
+    public uint Background { get; set; } = ThemeColors.DefaultBackground;
+    /// <summary>Cards, the sidebar and the bottom bar; fields and buttons are a shade of it.</summary>
+    public uint Cards { get; set; } = ThemeColors.DefaultCards;
+    /// <summary>The text; muted and faint text are shades of it.</summary>
+    public uint Text { get; set; } = ThemeColors.DefaultText;
+
+    public bool IsDefault => Accent == ThemeColors.DefaultAccent && Background == ThemeColors.DefaultBackground
+                             && Cards == ThemeColors.DefaultCards && Text == ThemeColors.DefaultText;
+
+    public void Reset()
+    {
+        Accent = ThemeColors.DefaultAccent;
+        Background = ThemeColors.DefaultBackground;
+        Cards = ThemeColors.DefaultCards;
+        Text = ThemeColors.DefaultText;
+    }
 }

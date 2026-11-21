@@ -10,8 +10,9 @@ Gathering, Fishing, Monster drops, After the order and Security. A *crafting spo
 stand there and save it) is where the run goes before it crafts: a corner of your house or apartment
 (through the door), an inn room, or anywhere a teleport and a walk reach. The Interface page sets how
 the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, icons and the window,
-*Text size* (75% to 150%) sizes all its text, *Tooltip size* sets how big the hover texts are, and
-*Reduce motion* keeps it from sliding things around.
+*Text size* (75% to 150%) sizes all its text, *Tooltip size* sets how big the hover texts are,
+*Colours* picks the accent, background, cards and text (colour wheel or hex code), and *Reduce motion*
+keeps it from sliding things around.
 
 ## What it does
 

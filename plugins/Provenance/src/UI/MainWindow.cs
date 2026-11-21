@@ -164,6 +164,8 @@ internal sealed class MainWindow : Window
     {
         // The interface size: layout and window change at once, the fonts for the size are built meanwhile (the
         // text is stretched to the size until they're ready, see Draw).
+        // The colours picked in the settings, for everything drawn from here on.
+        Palette.Apply(plugin.Config.Window.Colors);
         Ui.Scale = plugin.Config.Window.ScaleFactor;
         Ui.TextScale = plugin.Config.Window.TextScaleFactor;
         Ui.F.SetScale(Ui.TextScale, Ui.Scale);

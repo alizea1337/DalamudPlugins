@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.0
+
+- Colours (Settings, Interface): pick the accent, the background, the cards and the text. Each opens a
+  colour wheel with a field for the hex code (#86D0C2, or the short #8DC) and a few swatches to pick at
+  once; the window changes while you pick, Escape puts the colour back. Fields, buttons, lines and the
+  muted text follow as shades of what you pick. When the text gets hard to read on the cards or the
+  background, or the accent hard to see, the card says so with the contrast. *Reset to defaults* brings
+  back the first colours.
+
 ## 0.16.2
 
 - Bait sold only for scrips is bought at a scrip exchange before fishing, like other scrip items: with

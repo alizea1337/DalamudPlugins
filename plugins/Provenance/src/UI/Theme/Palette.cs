@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Provenance.Core.Appearance;
 using Provenance.Core.Catalog;
 using Provenance.Core.Planning;
 
@@ -9,25 +10,53 @@ namespace Provenance.UI.Theme;
 /// <summary>
 /// Colour tokens. One cool slate grey family, one accent (sea glass) spent on primary actions, the active
 /// tab and progress. Crafters take the colour of their material; sources have their own pastel set.
+/// Accent, background, cards and text can be picked (Settings, Interface); the other greys follow them
+/// (<see cref="ThemeColors"/>).
 /// </summary>
 internal static class Palette
 {
-    public static readonly Vector4 Window = Hex(0x171A21);
-    public static readonly Vector4 Surface = Hex(0x1F232C);
-    public static readonly Vector4 Raised = Hex(0x282D38);
-    public static readonly Vector4 RaisedHover = Hex(0x313744);
-    public static readonly Vector4 Line = Hex(0x313744);
+    public static Vector4 Window { get; private set; }
+    public static Vector4 Surface { get; private set; }
+    public static Vector4 Raised { get; private set; }
+    public static Vector4 RaisedHover { get; private set; }
+    public static Vector4 Line => RaisedHover;
     /// <summary>Darkens the window behind a dialog.</summary>
-    public static readonly Vector4 Scrim = Hex(0x0A0C10);
+    public static Vector4 Scrim { get; private set; }
 
-    public static readonly Vector4 Text = Hex(0xE7EAF0);
-    public static readonly Vector4 TextMuted = Hex(0x9AA2B1);
-    public static readonly Vector4 TextFaint = Hex(0x6B7383);
+    public static Vector4 Text { get; private set; }
+    public static Vector4 TextMuted { get; private set; }
+    public static Vector4 TextFaint { get; private set; }
 
-    public static readonly Vector4 Accent = Hex(0x86D0C2);
-    public static readonly Vector4 AccentHover = Hex(0x9CDCD0);
+    public static Vector4 Accent { get; private set; }
+    public static Vector4 AccentHover { get; private set; }
     /// <summary>Text drawn on top of the accent.</summary>
-    public static readonly Vector4 OnAccent = Hex(0x10241F);
+    public static Vector4 OnAccent { get; private set; }
+
+    private static (uint, uint, uint, uint)? applied;
+
+    static Palette() => Apply(ThemeColors.DefaultAccent, ThemeColors.DefaultBackground, ThemeColors.DefaultCards, ThemeColors.DefaultText);
+
+    /// <summary>The colours picked in the settings; set by the window each frame, worked out again only when they change.</summary>
+    public static void Apply(ColorSettings colors) => Apply(colors.Accent, colors.Background, colors.Cards, colors.Text);
+
+    private static void Apply(uint accent, uint background, uint cards, uint text)
+    {
+        var key = (accent, background, cards, text);
+        if (applied == key) return;
+        applied = key;
+        var t = ThemeColors.From(accent, background, cards, text);
+        Window = Hex(t.Window);
+        Surface = Hex(t.Surface);
+        Raised = Hex(t.Raised);
+        RaisedHover = Hex(t.RaisedHover);
+        Scrim = Hex(t.Scrim);
+        Text = Hex(t.Text);
+        TextMuted = Hex(t.TextMuted);
+        TextFaint = Hex(t.TextFaint);
+        Accent = Hex(t.Accent);
+        AccentHover = Hex(t.AccentHover);
+        OnAccent = Hex(t.OnAccent);
+    }
 
     public static readonly Vector4 Danger = Hex(0xEF8F8F);
     public static readonly Vector4 Warn = Hex(0xE8C77D);
@@ -92,10 +121,14 @@ internal static class Palette
 
     public static Vector4 WithAlpha(Vector4 c, float a) => new(c.X, c.Y, c.Z, a);
 
+    /// <summary>0xRRGGBB of a colour.</summary>
+    public static uint Rgb(Vector4 c)
+        => ((uint)MathF.Round(Math.Clamp(c.X, 0f, 1f) * 255) << 16) | ((uint)MathF.Round(Math.Clamp(c.Y, 0f, 1f) * 255) << 8) | (uint)MathF.Round(Math.Clamp(c.Z, 0f, 1f) * 255);
+
     public static Vector4 Mix(Vector4 a, Vector4 b, float t) => Vector4.Lerp(a, b, Math.Clamp(t, 0f, 1f));
 
     /// <summary>Packed colour, faded with the style's alpha (a list fading in, a disabled block).</summary>
     public static uint U32(Vector4 c) => ImGui.GetColorU32(c);
 
-    private static Vector4 Hex(uint rgb) => new(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f, 1f);
+    public static Vector4 Hex(uint rgb) => new(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f, 1f);
 }

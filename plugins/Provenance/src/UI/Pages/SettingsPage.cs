@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Provenance.Core.Appearance;
 using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
@@ -12,7 +13,7 @@ namespace Provenance.UI.Pages;
 internal enum SettingsSection
 {
     General,
-    /// <summary>Interface scale, text size, tooltip size, motion.</summary>
+    /// <summary>Interface scale, text size, tooltip size, colours, motion.</summary>
     Interface,
     Crafting,
     Gathering,
@@ -229,45 +230,26 @@ internal sealed class SettingsPage : Page
         if (pick >= 0) { set(Percentages[pick]); Config.Save(); }
     }
 
-    /// <summary>How big the window and its text are, the tooltips, and motion.</summary>
+    /// <summary>How big the window and its text are, the tooltips, the colours, and motion.</summary>
     private void DrawInterface(float w)
     {
         var s = Ui.S;
         var win = Config.Window;
-        Ui.Heading("Interface", "How big the window and its text are, the tooltips, and how much moves.");
+        Ui.Heading("Interface", "How big the window and its text are, its colours, the tooltips, and how much moves.");
         ImGui.Dummy(new Vector2(0, 2 * s));
 
         Ui.BeginCard(width: w);
-        // Header: "Size" on the left; on the right, while anything here isn't at its default, a way back to it.
-        const string resetLabel = "Reset to defaults";
-        var resetSize = Ui.LinkButtonSize(resetLabel, FontAwesomeIcon.Undo);
-        var head = ImGui.GetCursorScreenPos();
-        using (Ui.F.Strong.Push())
+        // The sharp fonts for a new size are being built meanwhile; the text is stretched to it until then.
+        if (CardHeader("Size", win.Scale != 100 || win.TextScale != 100 || win.TooltipSize != TooltipSize.Normal || !Plugin.Main.AtDefaultSize,
+                "Interface scale and text size back to 100%, tooltips to Normal, and the window to its first size. Colours and Reduce motion stay as they are.",
+                "##resetinterface", Ui.F.Building ? "sharpening the text…" : null))
         {
-            ImGui.SetCursorScreenPos(head + new Vector2(0, MathF.Max(0, (resetSize.Y - ImGui.GetTextLineHeight()) / 2)));
-            Ui.Text("Size");
+            win.Scale = 100;
+            win.TextScale = 100;
+            win.TooltipSize = TooltipSize.Normal;
+            Plugin.Main.ResetSize();
+            Config.Save();
         }
-        if (Ui.F.Building)
-        {
-            // The sharp fonts for a new size are being built; the text is stretched to it meanwhile.
-            ImGui.SameLine(0, 10 * s);
-            using (Ui.F.Small.Push()) Ui.Muted("sharpening the text…");
-        }
-        var below = ImGui.GetCursorScreenPos();
-        if (win.Scale != 100 || win.TextScale != 100 || win.TooltipSize != TooltipSize.Normal || !Plugin.Main.AtDefaultSize)
-        {
-            ImGui.SetCursorScreenPos(new Vector2(head.X + Ui.CardInnerWidth - resetSize.X, head.Y));
-            if (Ui.LinkButton(resetLabel, Palette.TextMuted, FontAwesomeIcon.Undo,
-                    "Interface scale and text size back to 100%, tooltips to Normal, and the window to its first size. Reduce motion stays as it is.", "##resetinterface"))
-            {
-                win.Scale = 100;
-                win.TextScale = 100;
-                win.TooltipSize = TooltipSize.Normal;
-                Plugin.Main.ResetSize();
-                Config.Save();
-            }
-        }
-        ImGui.SetCursorScreenPos(new Vector2(head.X, MathF.Max(below.Y, head.Y + resetSize.Y)));
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Text("Interface scale");
         PercentPicker("##uiscale", win.Scale, v => win.Scale = v, FontAwesomeIcon.ExpandArrowsAlt);
@@ -281,11 +263,144 @@ internal sealed class SettingsPage : Page
         TooltipSizePicker();
         Ui.EndCard();
 
+        DrawColors(w);
+
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Motion");
         var v = win.ReduceMotion;
         if (Ui.Checkbox("Reduce motion", ref v, "Pages, the sidebar and switches change in place instead of sliding. Fades stay, shorter.")) { win.ReduceMotion = v; Config.Save(); }
         Ui.EndCard();
+    }
+
+    /// <summary>A card's title, with "Reset to defaults" on its right while there's something to reset.</summary>
+    /// <param name="note">Small muted text after the title.</param>
+    /// <returns>True when the reset is clicked.</returns>
+    private static bool CardHeader(string title, bool canReset, string resetTooltip, string resetId, string? note = null)
+    {
+        var s = Ui.S;
+        const string resetLabel = "Reset to defaults";
+        var resetSize = Ui.LinkButtonSize(resetLabel, FontAwesomeIcon.Undo);
+        var head = ImGui.GetCursorScreenPos();
+        using (Ui.F.Strong.Push())
+        {
+            ImGui.SetCursorScreenPos(head + new Vector2(0, MathF.Max(0, (resetSize.Y - ImGui.GetTextLineHeight()) / 2)));
+            Ui.Text(title);
+        }
+        if (note != null)
+        {
+            ImGui.SameLine(0, 10 * s);
+            using (Ui.F.Small.Push()) Ui.Muted(note);
+        }
+        var below = ImGui.GetCursorScreenPos();
+        var reset = false;
+        if (canReset)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(head.X + Ui.CardInnerWidth - resetSize.X, head.Y));
+            reset = Ui.LinkButton(resetLabel, Palette.TextMuted, FontAwesomeIcon.Undo, resetTooltip, resetId);
+        }
+        ImGui.SetCursorScreenPos(new Vector2(head.X, MathF.Max(below.Y, head.Y + resetSize.Y)));
+        return reset;
+    }
+
+    // Swatches under each colour wheel. The accents are the plugin's own pastels (not the amber and coral that
+    // mean warnings and problems); the greys come in matching sets, so a background and cards of one name fit.
+    private static readonly ColorSwatch[] AccentSwatches =
+    {
+        new(ThemeColors.DefaultAccent, "Sea glass, the first colour"), new(0x93C5F0, "Sky"), new(0xB7A6F0, "Lavender"),
+        new(0xE3A9C8, "Orchid"), new(0xE9A3B8, "Rose"), new(0xF2B880, "Peach"), new(0x9FD39A, "Leaf"),
+    };
+    private static readonly ColorSwatch[] BackgroundSwatches =
+    {
+        new(ThemeColors.DefaultBackground, "Slate, the first colour"), new(0x18181B, "Graphite"), new(0x11141B, "Ink"),
+        new(0x1B1722, "Plum"), new(0x141B1A, "Pine"), new(0x1C1916, "Mocha"),
+    };
+    private static readonly ColorSwatch[] CardSwatches =
+    {
+        new(ThemeColors.DefaultCards, "Slate, the first colour"), new(0x232327, "Graphite"), new(0x191D27, "Ink"),
+        new(0x25202D, "Plum"), new(0x1C2523, "Pine"), new(0x27221E, "Mocha"),
+    };
+    private static readonly ColorSwatch[] TextSwatches =
+    {
+        new(ThemeColors.DefaultText, "Cool white, the first colour"), new(0xF4F5F7, "Bright white"), new(0xEFE8DC, "Warm white"),
+        new(0xD5DCE6, "Soft grey"),
+    };
+
+    /// <summary>The four colours to pick, two by two, and a word when the text or the accent gets hard to see.</summary>
+    private void DrawColors(float w)
+    {
+        var s = Ui.S;
+        var colors = Config.Window.Colors;
+        Ui.BeginCard(width: w);
+        if (CardHeader("Colours", !colors.IsDefault, "Accent, background, cards and text back to the first colours. Sizes and Reduce motion stay as they are.", "##resetcolors"))
+        {
+            colors.Reset();
+            Config.Save();
+        }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+
+        var inner = Ui.CardInnerWidth;
+        var columns = inner >= 460 * s ? 2 : 1;
+        var gap = 24 * s;
+        var colW = (inner - gap * (columns - 1)) / columns;
+        var fieldW = MathF.Min(220 * s, colW);
+        var origin = ImGui.GetCursorScreenPos();
+        var y = origin.Y;
+        var rowBottom = y;
+        for (var i = 0; i < 4; i++)
+        {
+            var col = i % columns;
+            if (col == 0 && i > 0) y = rowBottom + 12 * s;
+            ImGui.SetCursorScreenPos(new Vector2(origin.X + col * (colW + gap), y));
+            ImGui.BeginGroup();
+            var save = i switch
+            {
+                0 => ColorCell("Accent", "Primary buttons, switches, the open page and progress.", "##accent", colors.Accent, v => colors.Accent = v,
+                    ThemeColors.DefaultAccent, AccentSwatches, fieldW, colW),
+                1 => ColorCell("Background", "The window behind the cards.", "##background", colors.Background, v => colors.Background = v,
+                    ThemeColors.DefaultBackground, BackgroundSwatches, fieldW, colW),
+                2 => ColorCell("Cards", "Cards, the sidebar and the bottom bar. Fields and buttons are a shade of it.", "##cards", colors.Cards, v => colors.Cards = v,
+                    ThemeColors.DefaultCards, CardSwatches, fieldW, colW),
+                _ => ColorCell("Text", "Muted text and hints are shades of it.", "##text", colors.Text, v => colors.Text = v,
+                    ThemeColors.DefaultText, TextSwatches, fieldW, colW),
+            };
+            ImGui.EndGroup();
+            rowBottom = MathF.Max(rowBottom, ImGui.GetItemRectMax().Y);
+            if (save) Config.Save();
+        }
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, rowBottom));
+        ImGui.Dummy(Vector2.Zero);
+
+        // Picked freely, the text can end up too close to the cards or the background; say so, with the numbers.
+        var onCards = ThemeColors.Contrast(colors.Text, colors.Cards);
+        var onBackground = ThemeColors.Contrast(colors.Text, colors.Background);
+        var accent = ThemeColors.Contrast(colors.Accent, colors.Cards);
+        string? warning = null;
+        if (Math.Min(onCards, onBackground) < ThemeColors.ReadableContrast)
+            warning = onCards <= onBackground
+                ? $"The text is hard to read on the cards: contrast {onCards:0.0}:1, where 4.5:1 or more reads well."
+                : $"The text is hard to read on the background: contrast {onBackground:0.0}:1, where 4.5:1 or more reads well.";
+        else if (accent < ThemeColors.VisibleContrast)
+            warning = $"The accent is hard to see on the cards: contrast {accent:0.0}:1, where 3:1 or more stands out.";
+        if (warning != null)
+        {
+            ImGui.Dummy(new Vector2(0, 2 * s));
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped(warning, Palette.Warn);
+        }
+        Ui.EndCard();
+    }
+
+    /// <summary>One colour: its name, the field with the wheel, and what it colours.</summary>
+    /// <returns>True when the change is done and worth saving.</returns>
+    private static bool ColorCell(string label, string hint, string id, uint value, Action<uint> set, uint fallback, ColorSwatch[] swatches, float fieldW, float colW)
+    {
+        Ui.Text(label);
+        var picked = value;
+        var save = Ui.ColorField(id, ref picked, fallback, fieldW, swatches);
+        if (picked != value) set(picked);
+        using (Ui.F.Small.Push()) Ui.Wrapped(hint, Palette.TextMuted, colW);
+        return save;
     }
 
     private static readonly string[] TooltipSizeNames = { "Small", "Normal", "Large", "Larger", "Largest" };
