@@ -40,6 +40,9 @@ public static class Planner
         var fishMet = new List<uint>();
         var baitUsers = new Dictionary<uint, List<uint>>();
         var baitLines = new HashSet<uint>();
+        // Fish caught as collectables for a reduction (fish → the item it's reduced into), and the other way round.
+        var reduceFish = new Dictionary<uint, uint>();
+        var reduceFishOf = new Dictionary<uint, List<uint>>();
         var fallback = options.FallbackBait != 0 && VendorOk(catalog.Sources(options.FallbackBait)) && catalog.RecipesFor(options.FallbackBait).Count == 0
             ? options.FallbackBait
             : 0u;
@@ -135,6 +138,28 @@ public static class Planner
                     Visit(ing.ItemId);
                 }
             }
+            else if (line.Supply == Supply.Reduce && options.FishBaits != null)
+            {
+                // The fish a reduction may be caught from bring their bait, like fish on the order (a fish on the order
+                // itself isn't caught for reduction, and already brings its own).
+                foreach (var fish in Reduction.Sources(catalog, itemId, options.FishForReduction).Where(s => Reduction.IsFished(catalog, s)))
+                {
+                    if (lines.ContainsKey(fish) || reduceFish.ContainsKey(fish) || options.FishBaits(fish) is not { Count: > 0 } fishBaitList) continue;
+                    var used = fishBaitList.Where(b => b.Bait != 0 && b.Bait != fish && b.PerCatch > 0 && !double.IsNaN(b.PerCatch)
+                                                       && !(lines.TryGetValue(b.Bait, out var known) && known.Supply == Supply.Fish)).ToList();
+                    if (used.Count == 0) continue;
+                    fishBaits[fish] = used;
+                    fishMet.Add(fish);
+                    reduceFish[fish] = itemId;
+                    if (!reduceFishOf.TryGetValue(itemId, out var fishes)) reduceFishOf[itemId] = fishes = new List<uint>();
+                    fishes.Add(fish);
+                    foreach (var (bait, _) in used)
+                    {
+                        AddBait(bait, fish);
+                        Visit(bait);
+                    }
+                }
+            }
             else if (line.Supply == Supply.Fish && options.FishBaits?.Invoke(itemId) is { Count: > 0 } baits)
             {
                 // A fish brings the bait it is cast with: its tackle and its predators' bait (never another fish
@@ -209,8 +234,8 @@ public static class Planner
                 // Crafted for the order, and a gil vendor sells it too: the fisher buys what it casts when it gets there
                 // (crafting comes after the fishing), so the line keeps only what's crafted.
                 else if (line.Supply == Supply.Craft) casts = 0;
-                // Spare only for bait the run buys; bait it can't buy only needs the estimate.
-                else if (casts + takenOver > 0 && line.Supply == Supply.Vendor) casts += Math.Max(0, options.SpareBait);
+                // Spare only for bait the run buys (from a vendor or at an exchange); bait it can't buy only needs the estimate.
+                else if (casts + takenOver > 0 && line.Supply is Supply.Vendor or Supply.Exchange) casts += Math.Max(0, options.SpareBait);
                 needed += casts + takenOver;
             }
             line.Needed = needed;
@@ -219,6 +244,12 @@ public static class Planner
             if (line.Supply == Supply.Fish && line.Remaining > 0 && fishBaits.TryGetValue(id, out var baits))
                 foreach (var (bait, perCatch) in baits)
                     baitDemand[bait] = baitDemand.GetValueOrDefault(bait) + line.Remaining * perCatch;
+            // A reduction may come wholly from its fish (each collectable gives at least one): their bait for all of it,
+            // shared out when several fish give it. Gathered collectables of it only leave bait over.
+            if (line.Supply == Supply.Reduce && line.Remaining > 0 && reduceFishOf.TryGetValue(id, out var reductionFish))
+                foreach (var fish in reductionFish)
+                    foreach (var (bait, perCatch) in fishBaits[fish])
+                        baitDemand[bait] = baitDemand.GetValueOrDefault(bait) + (double)line.Remaining / reductionFish.Count * perCatch;
 
             if (line.Supply != Supply.Craft || line.Recipe == null) return;
             line.Crafts = (line.Remaining + line.Recipe.Yield - 1) / line.Recipe.Yield;
@@ -226,7 +257,9 @@ public static class Planner
                 demand[ing.ItemId] = demand.GetValueOrDefault(ing.ItemId) + line.Crafts * ing.Amount;
         }
 
-        bool StillFished(uint fish) => lines.TryGetValue(fish, out var l) && l.Supply == Supply.Fish && l.Remaining > 0;
+        bool StillFished(uint fish) => lines.TryGetValue(fish, out var l)
+            ? l.Supply == Supply.Fish && l.Remaining > 0
+            : reduceFish.TryGetValue(fish, out var reduced) && lines.TryGetValue(reduced, out var r) && r.Remaining > 0;
 
         void MarkHq(uint itemId)
         {
@@ -289,6 +322,13 @@ public static class Planner
             if (VendorOk(src))
             {
                 line.Supply = Supply.Vendor;
+                line.ManualReason = null;
+                return;
+            }
+            // Sold for scrips the run can pay or earn: bought at the exchange before fishing, like a material.
+            if (src.Has(Obtain.Exchange) && options.BuyExchange?.Invoke(line.ItemId, 1) is { CanBuy: true })
+            {
+                line.Supply = Supply.Exchange;
                 line.ManualReason = null;
                 return;
             }
@@ -357,7 +397,7 @@ public static class Planner
             else if (src.Has(Obtain.Fish)) line.Supply = Supply.Fish;
             else if (vendorOk) line.Supply = Supply.Vendor;
             else if (src.Has(Obtain.Drop)) line.Supply = Supply.Drop;
-            else if (src.Has(Obtain.Reduce)) line.Supply = Supply.Reduce;
+            else if (src.Has(Obtain.Reduce) && Reduction.Sources(catalog, line.ItemId, options.FishForReduction).Count > 0) line.Supply = Supply.Reduce;
             // Last of all: bought with scrips at an exchange (earned with collectables first when short).
             else if (src.Has(Obtain.Exchange)) line.Supply = Supply.Exchange;
             else
@@ -365,6 +405,8 @@ public static class Planner
                 line.Supply = Supply.Manual;
                 line.ManualReason = src.Has(Obtain.Vendor)
                     ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
+                    : src.Has(Obtain.Reduce)
+                        ? "Only from aetherial reduction of fish, and fishing for reductions is off (Settings, Fishing)"
                     : src.Has(Obtain.ReduceElsewhere)
                         ? (src.Places & ~Place.OpenWorld) != Place.None
                             ? $"Only from aetherial reduction of collectables gathered in {Places.Describe(src.Places & ~Place.OpenWorld)}, which a run can't go to"

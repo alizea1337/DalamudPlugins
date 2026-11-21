@@ -671,6 +671,9 @@ internal sealed class PlanPage : Page
                 break;
             case Supply.Exchange when Plans.BookOffer(line.ItemId) is { } offer:
             {
+                // Bait sold for scrips says what it's for first, like bait from a vendor.
+                if (IsBait(line))
+                    chips.Add(new ChipText(new[] { "bait for " + FishList(line.NeededFor, catalog), "bait" }, Palette.SupplyColor(Supply.Fish), FontAwesomeIcon.Worm));
                 var each = $"{offer.Cost:N0} {offer.CurrencyName} each";
                 chips.Add(new ChipText(new[] { $"{each}, {offer.Who} in {offer.PlaceName}", each, $"{offer.Cost:N0} each" },
                     Palette.SupplyColor(Supply.Exchange), FontAwesomeIcon.Coins));
@@ -682,7 +685,7 @@ internal sealed class PlanPage : Page
             case Supply.Reduce:
             {
                 // The collectables the run gathers for it (the gatherer picks the node that suits best).
-                var from = catalog.ReducedFrom(line.ItemId);
+                var from = Reduction.Sources(catalog, line.ItemId, Config.Fishing.FishForReduction);
                 var names = from.Take(2).Select(catalog.ItemName).ToList();
                 var full = "from " + string.Join(" or ", names) + (from.Count > 2 ? $" (or {from.Count - 2} more)" : "");
                 chips.Add(new ChipText(new[] { full, "reduce " + names.FirstOrDefault(), "reduce" }, Palette.SupplyColor(Supply.Reduce), FontAwesomeIcon.Magic));

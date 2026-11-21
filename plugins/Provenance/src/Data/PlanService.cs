@@ -293,6 +293,7 @@ internal sealed class PlanService : IDisposable
         return Planner.Build(order, catalog, owned, new PlannerOptions
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
+            FishForReduction = c.Fishing.FishForReduction,
             HqOwned = id => ownedHq.GetValueOrDefault(id),
             PreferVendor = c.Buying.PreferVendor,
             VendorMaxPrice = c.Buying.VendorMaxPrice,

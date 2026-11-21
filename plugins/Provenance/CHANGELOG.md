@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.2
+
+- Bait sold only for scrips is bought at a scrip exchange before fishing, like other scrip items: with
+  the scrips you have, or earned first with collectables. Before, the run only bought bait for gil and
+  fished with Versatile Lure instead, on which every fish in the hole bites. Red Maggots for Purple
+  Palate, for example, cost 5 Orange Gatherers' Scrips each.
+- Fish caught for aetherial reduction bring their bait onto the plan, like fish on the order. Before,
+  their bait didn't show at all, so nothing said it was missing.
+- New setting (Fishing): *Fish for aetherial reduction*. Off, the run only reduces gathered
+  collectables and waits for their nodes, crafting meanwhile; an item that only comes from fish is
+  then one to get yourself.
+
 ## 0.16.1
 
 - Fixed: when a timed node's time ran out before the order had enough, the run kept flying round its

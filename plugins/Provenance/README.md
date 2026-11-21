@@ -51,7 +51,8 @@ the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, ic
   best gearset, travels and flies there, finds the node among its known spawn spots, and works the
   gathering window with a rotation solver (ported from GatherBuddy Reborn) or the collectable
   rotation, always to the end of the node. Items that only come from aetherial reduction are gathered
-  or fished as collectables (Collector's Glove on for those fish, rod or spearfishing) and reduced
+  or fished as collectables (Collector's Glove on for those fish, rod or spearfishing, with their bait;
+  *Fish for aetherial reduction* in Settings, Fishing turns the fishing off) and reduced
   between nodes and catches. Between nodes it extracts materia and reduces spare
   collectables. Node positions it sees are remembered on your PC (never uploaded). *Pause*
   finishes the current node (or catch) first. The run stops on its own when you are knocked out, when only a

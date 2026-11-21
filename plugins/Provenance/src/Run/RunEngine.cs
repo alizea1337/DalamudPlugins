@@ -2287,7 +2287,7 @@ internal sealed class RunEngine : IDisposable
         var catalog = plugin.Plans.Catalog;
         if (catalog == null || target.Supply != Supply.Reduce) return Array.Empty<ReductionSource>();
         var ids = reduceFor.Where(kv => kv.Value.ItemId == target.ItemId).Select(kv => kv.Key).ToList();
-        if (ids.Count == 0) ids = catalog.ReducedFrom(target.ItemId).ToList();
+        if (ids.Count == 0) ids = Reduction.Sources(catalog, target.ItemId, plugin.Config.Fishing.FishForReduction).ToList();
         var now = DateTimeOffset.UtcNow;
         var list = new List<ReductionSource>();
         foreach (var id in ids)
@@ -2389,7 +2389,10 @@ internal sealed class RunEngine : IDisposable
     /// </summary>
     private readonly Dictionary<uint, GatherTarget> reduceFor = new();
 
-    /// <summary>The workers' targets: reduction targets swapped for the collectables they come from (gathered or fished).</summary>
+    /// <summary>
+    /// The workers' targets: reduction targets swapped for the collectables they come from, gathered, and fished
+    /// while fishing for reductions is on (Settings, Fishing).
+    /// </summary>
     private List<GatherTarget> GathererTargets(List<GatherTarget> targets)
     {
         reduceFor.Clear();
@@ -2399,7 +2402,7 @@ internal sealed class RunEngine : IDisposable
         foreach (var t in targets)
         {
             if (t.Supply != Supply.Reduce) { list.Add(t); continue; }
-            foreach (var source in catalog.ReducedFrom(t.ItemId))
+            foreach (var source in Reduction.Sources(catalog, t.ItemId, plugin.Config.Fishing.FishForReduction))
             {
                 if (direct.Contains(source) || reduceFor.ContainsKey(source)) continue;
                 reduceFor[source] = t;

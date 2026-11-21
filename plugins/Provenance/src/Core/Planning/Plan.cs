@@ -32,6 +32,12 @@ public sealed class PlannerOptions
     public bool CountOwnedTargets { get; init; }
 
     /// <summary>
+    /// Items from aetherial reduction may come from fished collectables too (and those fish bring their bait). Off:
+    /// only gathered ones count, and an item only reduced from fish is got by hand.
+    /// </summary>
+    public bool FishForReduction { get; init; } = true;
+
+    /// <summary>
     /// How many of an item are owned in high quality. Lines made in high quality (<see cref="PlanLine.Hq"/>)
     /// count only these; null counts every one owned, whatever its quality.
     /// </summary>

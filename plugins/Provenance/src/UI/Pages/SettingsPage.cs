@@ -376,7 +376,8 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.BeginCard(width: w);
         var v = f.BuyBait;
-        if (Ui.Checkbox("Buy bait", ref v, "Buys the bait each fish needs from a gil vendor before fishing (up to the vendor price cap under General), and more if it runs out during the run.")) { f.BuyBait = v; Changed(); }
+        if (Ui.Checkbox("Buy bait", ref v, "Buys the bait each fish needs before fishing: from a gil vendor (up to the vendor price cap under General), "
+                + "or at a scrip exchange when only that sells it, with your scrips or ones the run earns first. More from a gil vendor if it runs out during the run.")) { f.BuyBait = v; Changed(); }
         if (f.BuyBait)
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 30 * s);
@@ -390,7 +391,7 @@ internal sealed class SettingsPage : Page
             Ui.Muted("per kind, on top of what the catches need");
         }
         v = f.VersatileLureFallback;
-        if (Ui.Checkbox("Versatile Lure when the bait can't be bought", ref v, "Some bait is only sold for scrips or has to be crafted. With this on, those fish are caught with Versatile Lure from Limsa Lominsa Lower Decks instead; bites can come more slowly. Off: that bait has to be in your bags.")) { f.VersatileLureFallback = v; Changed(); }
+        if (Ui.Checkbox("Versatile Lure when the bait can't be bought", ref v, "Some bait has to be crafted, or is sold for scrips you don't have and the run won't earn. With this on, those fish are caught with Versatile Lure from Limsa Lominsa Lower Decks instead: every fish there bites on it, so the one you want comes much more slowly. Off: that bait has to be in your bags.")) { f.VersatileLureFallback = v; Changed(); }
         v = f.UseBuffs;
         if (Ui.Checkbox("Use fishing buffs", ref v, "Patience, Prize Catch, Makeshift Bait, Chum, Surface Slap and Identical Cast, when the catch needs them and there's GP. "
                 + "Lures are always used for fish that only come to a lure, and Mooch II and Thaliak's Favor whenever a catch needs them.")) { f.UseBuffs = v; Config.Save(); }
@@ -406,6 +407,10 @@ internal sealed class SettingsPage : Page
         ImGui.Dummy(new Vector2(0, 4 * s));
         v = f.DiscardByCatch;
         if (Ui.Checkbox("Throw away fish caught on the side", ref v, "Fish the order doesn't need are kept while fishing and thrown away once gathering is done: main bags only, never anything the order uses, never what you had before.")) { f.DiscardByCatch = v; Config.Save(); }
+        v = f.FishForReduction;
+        if (Ui.Checkbox("Fish for aetherial reduction", ref v, "Many items from aetherial reduction come from a fish as well as from gathered collectables. "
+                + "On: the run also fishes for them, with their bait, while no node of theirs is up. Off: only gathered collectables are reduced, and the run waits for their nodes (crafting meanwhile); "
+                + "an item that only comes from fish is then one to get yourself.")) { f.FishForReduction = v; Changed(); }
         Ui.EndCard();
     }
 

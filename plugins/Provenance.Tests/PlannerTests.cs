@@ -321,6 +321,76 @@ public class PlannerTests
         };
 
     [Fact]
+    public void Bait_sold_only_for_scrips_is_bought_at_the_exchange()
+    {
+        const uint Maggots = 43858;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Maggots, new ItemSources(Obtain.Exchange, 0, Places: Place.OpenWorld));
+        var options = new PlannerOptions
+        {
+            FishBaits = id => id == Trout ? new[] { (Maggots, 2.0) } : Array.Empty<(uint, double)>(),
+            SpareBait = 10,
+            FallbackBait = VersatileLure,
+            BuyExchange = (_, _) => new BookPurchase(true, "5 Orange Gatherers' Scrips each"),
+        };
+        var plan = Planner.Build(OrderOf((Trout, 10)), catalog, Nothing, options);
+        var bait = plan[Maggots]!;
+        Assert.Equal(Supply.Exchange, bait.Supply);
+        Assert.Equal(20 + 10, bait.Needed);            // the catches plus the spare
+        Assert.True(bait.WillBuy);
+        Assert.Equal(new[] { Trout }, bait.NeededFor);
+        Assert.Null(plan[VersatileLure]);              // no stand-in needed
+
+        // Not affordable (no scrips, earning off): Versatile Lure stands in for all of it, as for other bait the run can't buy.
+        options = new PlannerOptions
+        {
+            FishBaits = options.FishBaits, FallbackBait = VersatileLure,
+            BuyExchange = (_, _) => new BookPurchase(false, "costs 5 Orange Gatherers' Scrips each"),
+        };
+        plan = Planner.Build(OrderOf((Trout, 10)), catalog, Nothing, options);
+        Assert.Null(plan[Maggots]);
+        Assert.Equal(new[] { Trout }, plan[VersatileLure]!.NeededFor);
+    }
+
+    [Fact]
+    public void Fish_caught_for_a_reduction_bring_their_bait_unless_fishing_for_it_is_off()
+    {
+        const uint Sand = 46246, Quartz = 46247, Palate = 46249, Maggots = 43858;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Quartz, new ItemSources(Obtain.GatherTimed, 0, Places: Place.OpenWorld));
+        catalog.SetSources(Palate, new ItemSources(Obtain.Fish, 0, Places: Place.OpenWorld));
+        catalog.SetSources(Maggots, new ItemSources(Obtain.Exchange, 0, Places: Place.OpenWorld));
+        catalog.SetReducedFrom(Sand, Quartz, Palate);
+        PlannerOptions Options(bool fishing) => new()
+        {
+            FishForReduction = fishing,
+            FishBaits = id => id == Palate ? new[] { (Maggots, 1.5) } : Array.Empty<(uint, double)>(),
+            BuyExchange = (_, _) => new BookPurchase(true, "5 Orange Gatherers' Scrips each"),
+        };
+
+        var plan = Planner.Build(OrderOf((Sand, 20)), catalog, Nothing, Options(fishing: true));
+        Assert.Equal(Supply.Reduce, plan[Sand]!.Supply);
+        var bait = plan[Maggots]!;
+        Assert.Equal(Supply.Exchange, bait.Supply);
+        Assert.Equal(30, bait.Needed);                 // all 20 could come from the fish, 1.5 bait each
+        Assert.Equal(new[] { Palate }, bait.NeededFor);
+
+        // Fishing for reductions off: only the quartz counts, and no bait.
+        plan = Planner.Build(OrderOf((Sand, 20)), catalog, Nothing, Options(fishing: false));
+        Assert.Equal(Supply.Reduce, plan[Sand]!.Supply);
+        Assert.Null(plan[Maggots]);
+
+        // Only from the fish, and fishing for it off: got by hand, with the reason.
+        var fishOnly = new FakeCatalog();
+        fishOnly.SetSources(Palate, new ItemSources(Obtain.Fish, 0, Places: Place.OpenWorld));
+        fishOnly.SetReducedFrom(Sand, Palate);
+        plan = Planner.Build(OrderOf((Sand, 20)), fishOnly, Nothing, Options(fishing: false));
+        Assert.Equal(Supply.Manual, plan[Sand]!.Supply);
+        Assert.Contains("fishing for reductions is off", plan[Sand]!.ManualReason);
+        Assert.Equal(Supply.Reduce, Planner.Build(OrderOf((Sand, 20)), fishOnly, Nothing, Options(fishing: true))[Sand]!.Supply);
+    }
+
+    [Fact]
     public void Fish_lines_bring_their_bait_bought_from_a_vendor()
     {
         var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (Lugworm, 1.5) } }, spare: 20));

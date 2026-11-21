@@ -161,6 +161,11 @@ public sealed class FishingSettings
     public int WindowLeadMinutes { get; set; } = 3;
     /// <summary>After fishing, throw away fish caught on the side that the order doesn't need (main bags only).</summary>
     public bool DiscardByCatch { get; set; } = true;
+    /// <summary>
+    /// Fish for items from aetherial reduction too, not only gather for them. Off: only gathered collectables are
+    /// reduced, and an item that only comes from fish is one to get yourself.
+    /// </summary>
+    public bool FishForReduction { get; set; } = true;
 }
 
 /// <summary>The Security tab: getting unstuck, trades, and limits for a run.</summary>

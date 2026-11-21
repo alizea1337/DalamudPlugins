@@ -71,7 +71,7 @@ internal static class Readiness
                 issues.Add(new ReadinessIssue(line.ItemId, 0, "Comes from aetherial reduction, which this character hasn't unlocked yet: it comes with the quest \"No Longer a Collectable\" in Mor Dhona (a gatherer at level 56).", true));
                 continue;
             }
-            var sources = catalog.ReducedFrom(line.ItemId);
+            var sources = Reduction.Sources(catalog, line.ItemId, cfg.Fishing.FishForReduction);
             var known = sources.Select(id => (Id: id, Needs: catalog.GatherNeedsFor(id, Level)))
                 .Where(x => x.Needs.HasValue).Select(x => (x.Id, Needs: x.Needs!.Value)).ToList();
             if (known.Count > 0 && known.All(x => Level(x.Needs.ClassJobId) < x.Needs.Level))
