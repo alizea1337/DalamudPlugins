@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: when a timed node's time ran out before the order had enough, the run kept flying round its\n  spawn spots until it came back (up to a whole Eorzean day), while other things on the order could\n  have been gathered meanwhile. The run now leaves a timed node as soon as its time is over, on the way\n  there or between its spots, and gathers what's up instead (or waits for the next window when nothing\n  is). The run log says when it moves on.\r\n",
+    "Changelog": "- Bait sold only for scrips is bought at a scrip exchange before fishing, like other scrip items: with\n  the scrips you have, or earned first with collectables. Before, the run only bought bait for gil and\n  fished with Versatile Lure instead, on which every fish in the hole bites. Red Maggots for Purple\n  Palate, for example, cost 5 Orange Gatherers' Scrips each.\n- Running out of such bait during a run no longer means Versatile Lure: the run goes back to the\n  exchange and buys what the catches still need (with the spare), earning the scrips first with\n  collectables when short, then goes on fishing.\n- Bait per catch is learned: every session with a fish's own bait counts the bait used up and the\n  fish landed, and the next plan buys by that. Some holes take far more than the data's guess, because\n  other fish with the same tug and bite time get hooked in its place (Purple Palate, for one).\n- Fish caught for aetherial reduction bring their bait onto the plan, like fish on the order. Before,\n  their bait didn't show at all, so nothing said it was missing.\n- New setting (Fishing): *Fish for aetherial reduction*. Off, the run only reduces gathered\n  collectables and waits for their nodes, crafting meanwhile; an item that only comes from fish is\n  then one to get yourself.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.16.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.1/latest.zip",
+    "AssemblyVersion": "0.16.2.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.16.2/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795218721
+    "LastUpdate": 1795221676
   }
 ]
