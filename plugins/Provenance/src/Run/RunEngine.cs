@@ -497,6 +497,7 @@ internal sealed class RunEngine : IDisposable
         fishWindDownUntil = default;
         Crafter.Begin(Array.Empty<CraftJob>());
         scripRounds = 0;
+        restocks.Clear();
         extrasCrafted = false;
         pendingEnd = null;
         startedAt = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
@@ -604,6 +605,33 @@ internal sealed class RunEngine : IDisposable
             LogScripRound($"{plugin.Plans.PurchasesForLater} more to buy with scrips: ");
         }
         else Add("Bought with scrips; on to the order.", false);
+        StartRetainers();
+    }
+
+    /// <summary>Restocks of scrip bait this run, per bait: a cap keeps a restock that brings none from going round for ever.</summary>
+    private readonly Dictionary<uint, int> restocks = new();
+    private const int MaxRestocks = 3;
+
+    /// <summary>Bait the fisher may wait for the run to buy at a scrip exchange instead of falling back to Versatile Lure.</summary>
+    private bool CanRestock(uint bait) => restocks.GetValueOrDefault(bait) < MaxRestocks && plugin.Plans.CanBuyWithScrips(bait);
+
+    /// <summary>
+    /// The fisher ran out of bait only a scrip exchange sells. The plan, rebuilt from the bags, wants it again (for
+    /// the catches still to come, with the spare): earn scrips first when short, buy it with the rest of what the
+    /// exchange still owes the order, then on with the order. The same rounds as before the order started.
+    /// </summary>
+    private void RestockAtExchange(uint bait)
+    {
+        restocks[bait] = restocks.GetValueOrDefault(bait) + 1;
+        Gather.Pause();
+        Gather.Stop();
+        StopFisher();
+        plugin.Plans.Rebuild();
+        scripPhase = plugin.Plans.ScripTasks.Count > 0;
+        bookStop = false;
+        Add($"Out of {ItemName(bait)}: {(scripPhase ? "earning scrips, then buying more" : "buying more")} at the scrip exchange.", false);
+        if (scripPhase && ScripBuysNow() > 0) { BeginBookStop(); return; }
+        if (scripPhase) LogScripRound("Earning scrips first: ");
         StartRetainers();
     }
 
@@ -813,7 +841,7 @@ internal sealed class RunEngine : IDisposable
             Stop($"Can't get {ItemName(orphan.ItemId)}: the collectables it's reduced from are on the order as themselves. Get it yourself.", true, now: true);
             return;
         }
-        Fish.Begin(workTargets.Where(t => t.Supply == Supply.Fish), GathererLeft, NeededCollectables, OnUsedAsBait, ReduceNow, reduceFor.ContainsKey);
+        Fish.Begin(workTargets.Where(t => t.Supply == Supply.Fish), GathererLeft, NeededCollectables, OnUsedAsBait, ReduceNow, reduceFor.ContainsKey, CanRestock);
         fishBegun = true;
         landActiveSince = DateTime.UtcNow;
         UpdateFishWaits();
@@ -1341,6 +1369,8 @@ internal sealed class RunEngine : IDisposable
             return;
         }
         if (!Vnav.Available) { Stop("vnavmesh was unloaded.", true, now: true); return; }
+        // Out of bait only a scrip exchange sells: buy more (earning the scrips first when short), then carry on.
+        if (Fish.RestockBait is var restock and not 0 && !craftingBetween) { RestockAtExchange(restock); return; }
 
         UpdateFishWaits();
         CountActiveTime();

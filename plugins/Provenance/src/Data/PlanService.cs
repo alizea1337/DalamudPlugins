@@ -294,6 +294,7 @@ internal sealed class PlanService : IDisposable
         {
             CountOwnedTargets = c.Stock.CountFinishedItems,
             FishForReduction = c.Fishing.FishForReduction,
+            ScripBait = CanBuyWithScrips,
             HqOwned = id => ownedHq.GetValueOrDefault(id),
             PreferVendor = c.Buying.PreferVendor,
             VendorMaxPrice = c.Buying.VendorMaxPrice,
@@ -415,11 +416,29 @@ internal sealed class PlanService : IDisposable
     /// <summary>The bait one catch of a fish uses up, by bait (worked out once per fish).</summary>
     public IReadOnlyList<(uint Bait, double PerCatch)> BaitPerCatch(uint fishId)
     {
-        if (baitPerCatch.TryGetValue(fishId, out var known)) return known;
         if (Catalog is not { } catalog) return Array.Empty<(uint, double)>();
-        var list = catalog.Gather.Fish(fishId) is { } fish ? BaitNeeds.PerCatch(fish, catalog.Gather.Fish) : Array.Empty<(uint, double)>();
-        baitPerCatch[fishId] = list;
-        return list;
+        if (!baitPerCatch.TryGetValue(fishId, out var list))
+            baitPerCatch[fishId] = list = catalog.Gather.Fish(fishId) is { } f ? BaitNeeds.PerCatch(f, catalog.Gather.Fish) : Array.Empty<(uint, double)>();
+        // The fish's own bait (first) as the runs found it: same-tug fish can take much more of it than the data says.
+        if (list.Count == 0 || !config().Timings.BaitUse.TryGetValue(fishId, out var seen) || catalog.Gather.Fish(fishId)?.Bait != list[0].Bait) return list;
+        var adjusted = list.ToList();
+        adjusted[0] = (list[0].Bait, BaitUse.Blend(list[0].PerCatch, seen));
+        return adjusted;
+    }
+
+    /// <summary>
+    /// An item a scrip exchange sells that the run can pay for now or earn the scrips for (Settings, Run: earn scrips
+    /// when short), such as bait no gil vendor sells. Decided apart from the scrip budget, which only counts what's
+    /// already on the plan.
+    /// </summary>
+    public bool CanBuyWithScrips(uint itemId)
+    {
+        if (Catalog is not { } catalog || !catalog.Sources(itemId).Has(Obtain.Exchange) || BookOffer(itemId) is not { } offer) return false;
+        // Earnable: a collectable this character can make or gather now pays that scrip (no planning here: this is
+        // asked while a plan is built).
+        return GameState.CurrencyCount(offer.CurrencyItemId) >= offer.Cost
+               || (config().Run.EarnScrips
+                   && Core.Scrips.ScripPlanner.Candidates(offer.CurrencyItemId, offer.Cost, catalog.Collectables, JobLevel, o => CanEarnWith(o, catalog)).Any());
     }
 
     /// <summary>Fishing time one catch of a fish takes, in seconds (worked out once per fish; 0 without fish data).</summary>

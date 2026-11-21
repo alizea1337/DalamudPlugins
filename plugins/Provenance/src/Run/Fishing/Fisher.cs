@@ -53,6 +53,8 @@ internal sealed unsafe partial class Fisher : IDisposable
         Gear,
         Bait,
         Shop,
+        /// <summary>Out of bait only a scrip exchange sells: waits for the run to buy more (<see cref="RestockBait"/>).</summary>
+        Restock,
         // Rod fishing
         Stand,
         Travel,
@@ -179,6 +181,9 @@ internal sealed unsafe partial class Fisher : IDisposable
         yield return $"step {step}, status \"{Status}\", waiting {Waiting}, busy {Busy}, rod out {RodOut}";
         if (current is { } t) yield return $"target: {Name(t.ItemId)} ({t.ItemId}), {left(t)} left, collect {collect(t.ItemId)}";
         if (spot is { } s) yield return $"spot: {SpotLabel(s)} ({s.Id}, territory {s.TerritoryId}, {(s.Spear ? "spearfishing" : "rod")}), bait {bait}";
+        if (fish is { } f && plugin.Config.Timings.BaitUse.TryGetValue(f.ItemId, out var seen))
+            yield return $"bait seen for {Name(f.ItemId)}: {seen.Bait:0} bait for {seen.Catches} catches";
+        if (RestockBait != 0) yield return $"waiting for the run to buy more {Name(RestockBait)} ({RestockBait}) at a scrip exchange";
         yield return "targets: " + string.Join("; ", targets.Select(x => $"{Name(x.ItemId)} ({x.ItemId}), {left(x)} left"));
         foreach (var (id, why) in unreachable) yield return $"can't fish {Name(id)} ({id}): {why}";
         if (upkeep.Busy) yield return "upkeep: " + upkeep.Status;
@@ -229,9 +234,11 @@ internal sealed unsafe partial class Fisher : IDisposable
     /// <param name="consumed">Called when fish the run counts leave the bags as bait (mooch, swimbait): item id, amount.</param>
     /// <param name="reduceNow">Collectables caught to be reduced; reduced between catches as soon as they're in the bags.</param>
     /// <param name="collect">Fish to catch as collectables (for aetherial reduction): Collector's Glove goes on for them.</param>
+    /// <param name="restockable">Bait the run can buy more of at a scrip exchange (paying or earning the scrips).</param>
     public void Begin(IEnumerable<GatherTarget> targets, Func<GatherTarget, int> left, Func<IReadOnlySet<uint>> neededCollectables, Action<uint, int> consumed,
-        Func<IReadOnlySet<uint>>? reduceNow = null, Func<uint, bool>? collect = null)
+        Func<IReadOnlySet<uint>>? reduceNow = null, Func<uint, bool>? collect = null, Func<uint, bool>? restockable = null)
     {
+        this.restockable = restockable ?? (_ => false);
         this.targets = targets.Where(t => t.Supply == Supply.Fish).ToList();
         this.left = left;
         this.neededCollectables = neededCollectables;
@@ -262,6 +269,8 @@ internal sealed unsafe partial class Fisher : IDisposable
         bait = 0;
         caught.Clear();
         byCatch.Clear();
+        RestockBait = 0;
+        sessionStart = null;
         castsAtSpot = nodesAtSpot = 0;
         sessionCounted = true;
         ResetChoice();
@@ -535,7 +544,35 @@ internal sealed unsafe partial class Fisher : IDisposable
     {
         if (sessionCounted) return;
         castsAtSpot += angler.Casts;
+        LearnBait();
         sessionCounted = true;
+    }
+
+    /// <summary>Bait the run can buy more of at a scrip exchange (from the run).</summary>
+    private Func<uint, bool> restockable = _ => false;
+
+    /// <summary>Out of this bait, which only a scrip exchange sells: the run buys more, then fishing goes on. 0 otherwise.</summary>
+    public uint RestockBait { get; private set; }
+
+    /// <summary>What a session with the fish's own bait started with: the fish, the bait, the bait in the bags, its catches so far.</summary>
+    private (uint Fish, uint Bait, int InBags, int Caught)? sessionStart;
+
+    /// <summary>
+    /// After a session with the fish's own bait: the bait it used up and the fish it landed go into what the runs
+    /// learn about that fish (Timings.BaitUse), so the next plan buys enough.
+    /// </summary>
+    private void LearnBait()
+    {
+        if (sessionStart is not { } s) return;
+        sessionStart = null;
+        var used = s.InBags - GameState.BagCount(s.Bait);
+        var landed = caught.GetValueOrDefault(s.Fish) - s.Caught;
+        if (used < 0 || (used == 0 && landed <= 0)) return; // bought some meanwhile, or nothing happened
+        var learned = plugin.Config.Timings.BaitUse;
+        if (!learned.TryGetValue(s.Fish, out var seen)) learned[s.Fish] = seen = new Core.Fishing.BaitUse();
+        seen.Bait += used;
+        seen.Catches += Math.Max(0, landed);
+        plugin.Config.Save();
     }
 
     private void SettleTick()

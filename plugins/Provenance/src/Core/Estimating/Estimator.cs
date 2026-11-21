@@ -35,6 +35,9 @@ public sealed class Timings
     /// <summary>The part of a collectable visit spent inside the node, where GP doesn't come back.</summary>
     public double SecondsInCollectableNode { get; set; } = 20;
 
+    /// <summary>Bait a fish really took per catch, by fish (see <see cref="Fishing.BaitUse"/>), learned while fishing.</summary>
+    public Dictionary<uint, Fishing.BaitUse> BaitUse { get; set; } = new();
+
     /// <summary>Moves a figure toward a new measurement (exponential average, 30% weight).</summary>
     public static double Blend(double current, double measured) => current * 0.7 + measured * 0.3;
 }

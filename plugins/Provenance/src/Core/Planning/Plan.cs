@@ -38,6 +38,12 @@ public sealed class PlannerOptions
     public bool FishForReduction { get; init; } = true;
 
     /// <summary>
+    /// Bait a run can buy at a scrip exchange: the scrips are at hand, or it can earn them. Such bait is planned as an
+    /// exchange purchase (the scrip budget then counts it). Null: bait is only bought for gil.
+    /// </summary>
+    public System.Func<uint, bool>? ScripBait { get; init; }
+
+    /// <summary>
     /// How many of an item are owned in high quality. Lines made in high quality (<see cref="PlanLine.Hq"/>)
     /// count only these; null counts every one owned, whatever its quality.
     /// </summary>

@@ -192,4 +192,18 @@ public class BaitNeedsTests
         Assert.Equal(BaitNeeds.SpearCommonSeconds, BaitNeeds.SecondsPerCatch(small, lookup), 6);
         Assert.Equal(BaitNeeds.SpearBigSeconds, BaitNeeds.SecondsPerCatch(big, lookup), 6);
     }
+
+    [Fact]
+    public void Learned_bait_per_catch_moves_the_plan_toward_what_was_seen()
+    {
+        // Nothing seen yet: the data's figure.
+        Assert.Equal(1.4, BaitUse.Blend(1.4, null), 6);
+        Assert.Equal(1.4, BaitUse.Blend(1.4, new BaitUse()), 6);
+        // 30 bait for 2 catches: (1.4 × 3 + 30) / 5.
+        Assert.Equal((1.4 * 3 + 30) / 5, BaitUse.Blend(1.4, new BaitUse { Bait = 30, Catches = 2 }), 6);
+        // Bait gone without a catch raises it too.
+        Assert.True(BaitUse.Blend(1.4, new BaitUse { Bait = 12, Catches = 0 }) > 5);
+        // Many catches: close to what was seen.
+        Assert.Equal(10.0, BaitUse.Blend(1.4, new BaitUse { Bait = 10_000, Catches = 1_000 }), 1);
+    }
 }

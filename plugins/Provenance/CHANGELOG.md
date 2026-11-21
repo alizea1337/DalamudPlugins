@@ -6,6 +6,12 @@
   the scrips you have, or earned first with collectables. Before, the run only bought bait for gil and
   fished with Versatile Lure instead, on which every fish in the hole bites. Red Maggots for Purple
   Palate, for example, cost 5 Orange Gatherers' Scrips each.
+- Running out of such bait during a run no longer means Versatile Lure: the run goes back to the
+  exchange and buys what the catches still need (with the spare), earning the scrips first with
+  collectables when short, then goes on fishing.
+- Bait per catch is learned: every session with a fish's own bait counts the bait used up and the
+  fish landed, and the next plan buys by that. Some holes take far more than the data's guess, because
+  other fish with the same tug and bite time get hooked in its place (Purple Palate, for one).
 - Fish caught for aetherial reduction bring their bait onto the plan, like fish on the order. Before,
   their bait didn't show at all, so nothing said it was missing.
 - New setting (Fishing): *Fish for aetherial reduction*. Off, the run only reduces gathered

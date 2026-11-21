@@ -22,7 +22,8 @@ namespace Provenance.Run.Fishing;
 internal sealed unsafe partial class Fisher
 {
     /// <summary>What to cast with, what to buy first, or why there's no bait for this fish.</summary>
-    private sealed record BaitPlan(uint Use, List<Purchase> Buy, string? Problem);
+    /// <param name="Restock">Bait to buy more of at a scrip exchange first (the run does that); 0 when none.</param>
+    private sealed record BaitPlan(uint Use, List<Purchase> Buy, string? Problem, uint Restock = 0);
 
     // The place to stand.
     private Vector3 standPos;
@@ -94,6 +95,8 @@ internal sealed unsafe partial class Fisher
             use = f.Bait;
             buy.Add(new Purchase(f.Bait, SpotChoice.BaitToBuy(f, catches, s.SpareBait), own));
         }
+        // Sold only at a scrip exchange, and the scrips are there or can be earned: the run buys more, not Versatile Lure.
+        else if (s.BuyBait && restockable(f.Bait)) return new BaitPlan(0, new List<Purchase>(), null, f.Bait);
         else if (s.VersatileLureFallback && InBags(lure)) use = lure;
         else if (s.VersatileLureFallback && Shop(lure) is { } lureOffer)
         {
@@ -107,6 +110,7 @@ internal sealed unsafe partial class Fisher
             if (Data.Fish(id) is not { Spear: false } p || p.Bait == 0 || p.Bait == use || InBags(p.Bait) || buy.Any(b => b.ItemId == p.Bait)) continue;
             var amount = SpotChoice.BaitToBuy(p, Math.Max(1, count) * Math.Max(1, catches), s.SpareBait);
             if (Shop(p.Bait) is { } offer) { buy.Add(new Purchase(p.Bait, amount, offer)); continue; }
+            if (s.BuyBait && restockable(p.Bait)) return new BaitPlan(0, new List<Purchase>(), null, p.Bait);
             // Versatile Lure stands in for it as well.
             if (s.VersatileLureFallback && (use == lure || InBags(lure) || buy.Any(b => b.ItemId == lure))) continue;
             if (s.VersatileLureFallback && Shop(lure) is { } stand) { buy.Add(new Purchase(lure, amount, stand)); continue; }
@@ -133,6 +137,15 @@ internal sealed unsafe partial class Fisher
             NoteUnreachable(t.ItemId, plan.Problem);
             ranked = null;
             Go(Step.Choose);
+            return;
+        }
+        if (plan.Restock != 0)
+        {
+            // The run sees this and goes to the exchange (earning the scrips first when short); fishing starts again after.
+            RestockBait = plan.Restock;
+            log($"Out of {Name(plan.Restock)}; it's sold for scrips, so the run goes and buys more.", false);
+            Status = $"Out of {Name(plan.Restock)}; buying more at a scrip exchange";
+            Go(Step.Restock);
             return;
         }
         if (plan.Buy.Count > 0)
@@ -418,6 +431,8 @@ internal sealed unsafe partial class Fisher
             FallbackBait = Settings.VersatileLureFallback ? FishAccess.VersatileLure : 0,
         });
         sessionCounted = false;
+        // Fishing with its own bait: learn how much of it a catch really takes (see LearnBait).
+        sessionStart = bait != 0 && fish!.Bait == bait ? (fish.ItemId, bait, GameState.BagCount(bait), caught.GetValueOrDefault(fish.ItemId)) : null;
         standLearned = false;
         switching = false;
         nextCheck = DateTime.UtcNow.AddSeconds(3);

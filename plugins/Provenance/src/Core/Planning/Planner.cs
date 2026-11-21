@@ -326,7 +326,7 @@ public static class Planner
                 return;
             }
             // Sold for scrips the run can pay or earn: bought at the exchange before fishing, like a material.
-            if (src.Has(Obtain.Exchange) && options.BuyExchange?.Invoke(line.ItemId, 1) is { CanBuy: true })
+            if (src.Has(Obtain.Exchange) && options.ScripBait?.Invoke(line.ItemId) == true)
             {
                 line.Supply = Supply.Exchange;
                 line.ManualReason = null;

@@ -331,6 +331,7 @@ public class PlannerTests
             FishBaits = id => id == Trout ? new[] { (Maggots, 2.0) } : Array.Empty<(uint, double)>(),
             SpareBait = 10,
             FallbackBait = VersatileLure,
+            ScripBait = _ => true,
             BuyExchange = (_, _) => new BookPurchase(true, "5 Orange Gatherers' Scrips each"),
         };
         var plan = Planner.Build(OrderOf((Trout, 10)), catalog, Nothing, options);
@@ -345,6 +346,7 @@ public class PlannerTests
         options = new PlannerOptions
         {
             FishBaits = options.FishBaits, FallbackBait = VersatileLure,
+            ScripBait = _ => false,
             BuyExchange = (_, _) => new BookPurchase(false, "costs 5 Orange Gatherers' Scrips each"),
         };
         plan = Planner.Build(OrderOf((Trout, 10)), catalog, Nothing, options);
@@ -365,6 +367,7 @@ public class PlannerTests
         {
             FishForReduction = fishing,
             FishBaits = id => id == Palate ? new[] { (Maggots, 1.5) } : Array.Empty<(uint, double)>(),
+            ScripBait = _ => true,
             BuyExchange = (_, _) => new BookPurchase(true, "5 Orange Gatherers' Scrips each"),
         };
 
