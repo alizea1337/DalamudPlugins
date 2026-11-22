@@ -51,12 +51,19 @@ internal sealed class CosmicPlanner
     private DateTime planningSince;
     private List<CosmicClassPlan>? frozen;
 
+    /// <summary>The loading screen shows at least until then after "Work it out again", so the click is seen even when every rotation is known.</summary>
+    private DateTime showPlanningUntil;
+
+    /// <summary>When the plan shown was worked out (it settled).</summary>
+    public DateTime WorkedOutAt { get; private set; }
+
     /// <summary>Works the plan out again (the "Work it out again" link).</summary>
     public void Replan()
     {
         frozenKey = null;
         judgeLimit.Clear();
         last = null;
+        showPlanningUntil = DateTime.UtcNow.AddSeconds(1.2);
     }
     private DateTime builtAt;
     private readonly Dictionary<uint, int> judgeLimit = new();
@@ -126,8 +133,12 @@ internal sealed class CosmicPlanner
             classes = s.Classes.Where(c => c is >= 8 and <= 18).Distinct()
                 .Select(c => c >= 16 ? PlanTwoClass(catalog.Cosmic, planet.Value, c, ranksKnown) : PlanClass(catalog.Cosmic, planet.Value, c, ranksKnown)).ToList();
             var elapsed = (DateTime.UtcNow - planningSince).TotalSeconds;
-            settled = !classes.Any(c => c.Pending) || elapsed >= ThinkSeconds;
-            if (settled) frozen = classes;
+            settled = !classes.Any(c => c.Pending) && DateTime.UtcNow >= showPlanningUntil || elapsed >= ThinkSeconds;
+            if (settled)
+            {
+                frozen = classes;
+                WorkedOutAt = DateTime.Now;
+            }
         }
         var secondsLeft = settled ? 0 : Math.Max(0, ThinkSeconds - (DateTime.UtcNow - planningSince).TotalSeconds);
         var best = classes.Where(c => c.Ranking.Best != null).Select(c => c.Ranking.Best!.CreditsPerHour).DefaultIfEmpty(0).Max();
@@ -342,9 +353,11 @@ internal sealed class CosmicPlanner
         }
         if (final == null) return new Judgement(Tier.None, Basis.Estimated, "Not a crafting mission", 0);
         var (tier, basis) = CosmicPicker.PredictCraft(final.FinalQuality, final.MaxQuality, Record(m.Id));
-        var reason = final.MaxQuality > 0
-            ? $"best rotation reaches {final.FinalQuality:N0} of {final.MaxQuality:N0} quality" + (basis == Basis.Learned ? ", judged from earlier runs" : "")
-            : "finishing is all it takes";
+        var reason = final.MaxQuality <= 0 ? "finishing is all it takes"
+            : (final.FinalQuality >= final.MaxQuality
+                ? $"best rotation reaches full quality ({final.MaxQuality:N0})"
+                : $"best rotation reaches {final.FinalQuality:N0} of {final.MaxQuality:N0} quality")
+              + (basis == Basis.Learned ? ", judged from earlier runs" : "");
         return new Judgement(tier, basis, reason, CosmicPicker.CraftSeconds(m, steps));
     }
 

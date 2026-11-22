@@ -6,6 +6,9 @@
   same stats, level and food is there at once next time, so the Cosmic plan and order estimates come
   up much faster after the first time. A new raphael-cli starts them afresh.
 - Up to three rotations are worked out at a time (was two).
+- The Cosmic plan says when it was worked out, and *Work it out again* shows the loading screen for a
+  moment, so the click is seen even when every rotation is already known (it then comes to the same).
+  A rotation going past the most quality an item has reads "reaches full quality".
 - The Cosmic plan works out a mission's steps in between (pulp before the paper) for progress only:
   the judgement only goes by the last craft's quality, and the craft itself still aims every step at full
   quality.

@@ -55,6 +55,13 @@ internal sealed partial class PlanPage
         if (!plan.RanksKnown)
             using (Ui.F.Small.Push())
                 Ui.Wrapped("Which mission classes you've opened is read once you're on a planet; until then it goes by level.", Palette.TextFaint);
+        var workedOut = Plugin.CosmicPlanner.WorkedOutAt;
+        if (workedOut != default)
+        {
+            using (Ui.F.Small.Push()) Ui.Text($"Worked out at {workedOut:HH:mm}.", Palette.TextFaint);
+            ImGui.SameLine(0, 8 * s);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 4 * s);
+        }
         if (Ui.LinkButton("Work it out again", Palette.TextMuted, FontAwesomeIcon.Redo,
                 "Judges the missions again, with what Provenance has worked out since (the plan otherwise stays as it is until the planet, crafters, gear or food change).",
                 "##replan"))
