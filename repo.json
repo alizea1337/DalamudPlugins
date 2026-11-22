@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- New option (After the order): *Also after Cosmic Exploration*. With it on, the Cosmic Exploration loop\n  goes to the place picked there (where it started, an inn room, home, the crafting spot) when it\n  finishes on its own: its goal, its time limit, or the shopping list bought, after any fortunes it still\n  draws. Stopping it yourself or a problem leaves you where you are; Pause and Stop work on the way.\n- Cosmic Exploration: *Pause* and *Resume* next to *Stop* (on its page, on the Plan page and in the\n  compact strip). A pause waits for the item being crafted; anything else (the trip, buying, drawing\n  fortunes, gathering) stops where it is, fishing reels in first, and Resume carries on from there. A\n  mission's own time limit keeps running meanwhile.\n- Pausing an order run on its way back after the order (home, inn room, crafting spot) now stops the\n  trip; Resume sets off again. Before, the trip went on regardless.\r\n",
+    "Changelog": "- Fixed (Cosmic Exploration): the second craft of a mission with Stellar Steady Hand started without a\n  rotation and was finished with Basic Synthesis alone, so it broke. Its rotation was dropped to be worked\n  out again for the uses left, but the craft didn't wait for the new one; now it does.\n- Fixed (Cosmic Exploration): crafting another item for gold didn't see the Cosmic Containers left when\n  they sat in the bags rather than the Cosmopouch, so a mission was reported after one craft. Supplies\n  and gathered materials now count wherever they are.\n- A detailed debug log: every step of the Cosmic loop and the crafter, what the board offered and how it\n  was judged, each rotation and action, and each decision with its numbers, kept in memory and in a file\n  per day in the plugin's logs folder (a week's worth). The bug report carries its last 150 lines.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.7.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.7/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.7/latest.zip",
+    "AssemblyVersion": "0.19.8.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.8/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.8/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795386206
+    "LastUpdate": 1795386693
   }
 ]
