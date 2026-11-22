@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: the first action of a craft could be sent while the character was still sitting down to craft,\n  so the game refused it (seen with Quick Innovation), and the crafter then finished the item with Basic\n  Synthesis alone, burning the durability with CP left and quality low. The crafter now waits out the\n  game's animation lock before every action. Should the game still refuse one, the crafter skips it and\n  goes on with the rotation (Basic Synthesis only finishes what progress is left); only an action that\n  saves or restores durability still means Basic Synthesis. A refused specialist action (Heart and Soul,\n  Quick Innovation) leaves them out of the rotations for the rest of the session, and the log says the\n  game's reason, for bug reports.\n- Cosmic Exploration:\n  - **Two-class missions** (Sinus Ardorum): a miner, botanist or fisher gathers the material at the\n    mission's map marker (the fisher with the mission's bait, at the hole's recorded stands) and the\n    crafter it pairs with makes the item, round after round until gold, keeping time to report. Tick\n    both classes and turn on *Two-class missions* under Extras. Miner, Botanist and Fisher can be ticked\n    for that now; their own missions come later.\n  - **Cosmic Fortunes** (extra): draws with the planet's credits, 1,000 a spin, when they near the 10,000\n    cap and before the loop ends; Big Bang tickets are drawn too. It picks the wheel with the better\n    prizes (unlockables, then rarer items).\n  - **Drone Modules** can go on the shopping list: bought from Kaede on Oizys or Auxesia with that\n    planet's dronebits, and bought when dronebits near their 5,000 cap.\n  - The page shows Cosmocredits, the planet's credits and dronebits against their caps; the loop's log\n    says when one nears its cap and what would spend it.\n  - The Plan page shows a loading screen while Provenance works out the missions, and takes the\n    best found within 30 seconds; the plan then stays as it is until the planet, crafters, gear or food\n    change (or *Work it out again*), instead of switching around while late rotations come in. The loop\n    gives the board's missions the same 30 seconds.\r\n",
+    "Changelog": "- Cosmic Exploration: the plan (and the loop, for the board's missions) gives the rotations up to a minute\n  to be worked out before taking the best found, instead of 30 seconds.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.0/latest.zip",
+    "AssemblyVersion": "0.19.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795382952
+    "LastUpdate": 1795383154
   }
 ]
