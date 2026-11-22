@@ -253,6 +253,8 @@ public sealed class AfterOrderSettings
     public uint HomeAetheryte { get; set; }
     public byte HomeSubIndex { get; set; }
     public string HomeLabel { get; set; } = "";
+    /// <summary>The Cosmic Exploration loop goes there too when it finishes on its own (goal, time limit, shopping list).</summary>
+    public bool AfterCosmic { get; set; }
 }
 
 /// <summary>Farming monster drops with a basic combo.</summary>

@@ -144,6 +144,18 @@ internal sealed class SettingsPage : Page
                     Ui.Wrapped("No crafting spot saved yet. Save one on the Crafting page.", Palette.Warn);
                 break;
         }
+        if (a.Place != AfterOrderPlace.Stay)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            var cosmic = a.AfterCosmic;
+            if (Ui.Checkbox("Also after Cosmic Exploration", ref cosmic,
+                    "When the Cosmic Exploration loop finishes on its own (its goal, its time limit, the shopping list bought), it goes there too, after any "
+                    + "cosmic fortunes it still draws. Stopping it yourself, or a problem, leaves you where you are."))
+            {
+                a.AfterCosmic = cosmic;
+                Config.Save();
+            }
+        }
         Ui.EndCard();
     }
 

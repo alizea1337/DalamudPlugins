@@ -2,6 +2,10 @@
 
 ## 0.19.7
 
+- New option (After the order): *Also after Cosmic Exploration*. With it on, the Cosmic Exploration loop
+  goes to the place picked there (where it started, an inn room, home, the crafting spot) when it
+  finishes on its own: its goal, its time limit, or the shopping list bought, after any fortunes it still
+  draws. Stopping it yourself or a problem leaves you where you are; Pause and Stop work on the way.
 - Cosmic Exploration: *Pause* and *Resume* next to *Stop* (on its page, on the Plan page and in the
   compact strip). A pause waits for the item being crafted; anything else (the trip, buying, drawing
   fortunes, gathering) stops where it is, fishing reels in first, and Resume carries on from there. A

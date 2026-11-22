@@ -18,7 +18,7 @@ namespace Provenance.Run.Cosmic;
 /// </summary>
 internal sealed unsafe class CosmicRun
 {
-    private enum Step { Idle, Travel, Choose, SwitchJob, OpenBoard, ReadBoard, Accept, Gather, Craft, Report, Buy, Fortunes, Finished }
+    private enum Step { Idle, Travel, Choose, SwitchJob, OpenBoard, ReadBoard, Accept, Gather, Craft, Report, Buy, Fortunes, Home, Finished }
 
     /// <summary>A two-class mission starts another round only with this much of its time left (gathering, then crafting).</summary>
     private const int RoundSeconds = 300;
@@ -44,6 +44,12 @@ internal sealed unsafe class CosmicRun
     private readonly BookBuyer buyer;
     private readonly FortuneDrawer fortunes;
     private readonly CosmicGatherer gatherer;
+    /// <summary>The trip to the "After the order" place, when that's set to follow the loop too.</summary>
+    private readonly Homecoming home;
+    /// <summary>Where the loop was started from (for "Where it started").</summary>
+    private (uint Territory, Vector3 Position)? startedFrom;
+    /// <summary>What the loop finishes with once the trip home is over.</summary>
+    private string? finishAfterHome;
     /// <summary>What happens once the gearset change is done (a two-class mission's next gathering round).</summary>
     private Action? afterSwitch;
     private int rounds;
@@ -91,6 +97,7 @@ internal sealed unsafe class CosmicRun
         buyer = new BookBuyer(plugin, Log);
         fortunes = new FortuneDrawer(Log);
         gatherer = new CosmicGatherer(plugin, Log);
+        home = new Homecoming(plugin, Log);
     }
 
     public bool Active => step is not (Step.Idle or Step.Finished);
@@ -118,6 +125,7 @@ internal sealed unsafe class CosmicRun
         buyer.Cancel();
         fortunes.Cancel();
         gatherer.Cancel();
+        if (step == Step.Home) home.Cancel();
         Paused = true;
         Status = "Paused";
         Log("Paused.", false);
@@ -139,6 +147,9 @@ internal sealed unsafe class CosmicRun
                 break;
             case Step.Gather:
                 if (Mission is { } m) StartRound2(m);
+                break;
+            case Step.Home:
+                if (!home.Begin(plugin.Config.AfterOrder, startedFrom)) { var r = finishAfterHome ?? "Done."; finishAfterHome = null; Finish(r, false); }
                 break;
             case Step.Fortunes:
             case Step.Buy:
@@ -187,6 +198,8 @@ internal sealed unsafe class CosmicRun
         fortunesBroken = false;
         classIndex = 0;
         startedAt = DateTime.UtcNow;
+        startedFrom = Services.Objects.LocalPlayer is { } me ? (Services.ClientState.TerritoryType, me.Position) : null;
+        finishAfterHome = null;
         creditsAtStart = Integrations.Cosmic.Credits;
         stopAfterCraft = false;
         Log($"Started on {planet.Name()}: {GoalText()}.", false);
@@ -199,6 +212,13 @@ internal sealed unsafe class CosmicRun
     public void Stop(string reason = "Stopped.", bool problem = false)
     {
         if (!Active) return;
+        if (step == Step.Home)
+        {
+            home.Cancel();
+            finishAfterHome = null;
+            Finish(reason, problem);
+            return;
+        }
         if (step == Step.Craft && crafter.MidCraft && !problem && !Paused)
         {
             stopAfterCraft = true;
@@ -209,9 +229,27 @@ internal sealed unsafe class CosmicRun
         Finish(reason, problem);
     }
 
-    private void Finish(string reason, bool problem, bool missionLeft = true)
+    /// <param name="goHome">Finished on its own (goal, time limit, shopping list): the "After the order" trip follows when it's set for the loop too.</param>
+    private void Finish(string reason, bool problem, bool missionLeft = true, bool goHome = false)
     {
         Paused = Pausing = false;
+        if (goHome && !problem && plugin.Config.AfterOrder.AfterCosmic && Integrations.Cosmic.ActiveMission == 0)
+        {
+            trip.Cancel();
+            buyer.Cancel();
+            fortunes.Cancel();
+            gatherer.Cancel();
+            Integrations.Cosmic.CloseBoard();
+            Interact.Close("WKSRecipeNotebook");
+            if (home.Begin(plugin.Config.AfterOrder, startedFrom))
+            {
+                finishAfterHome = reason;
+                Log(reason + " Heading back.", false);
+                Status = "Heading back";
+                step = Step.Home;
+                return;
+            }
+        }
         trip.Cancel();
         buyer.Cancel();
         fortunes.Cancel();
@@ -255,6 +293,7 @@ internal sealed unsafe class CosmicRun
                 case Step.Report: Report(); break;
                 case Step.Buy: TickBuy(); break;
                 case Step.Fortunes: TickFortunes(); break;
+                case Step.Home: TickHome(); break;
             }
         }
         catch (Exception e)
@@ -909,6 +948,17 @@ internal sealed unsafe class CosmicRun
             StartFortunes(p, reason);
             return;
         }
+        Finish(reason, false, goHome: true);
+    }
+
+    private void TickHome()
+    {
+        home.Tick();
+        Status = home.Status.Length > 0 ? home.Status : "Heading back";
+        if (!home.Finished) return;
+        if (home.Failure is { } why) Log("Couldn't get back: " + why, true);
+        var reason = finishAfterHome ?? "Done.";
+        finishAfterHome = null;
         Finish(reason, false);
     }
 
@@ -929,7 +979,7 @@ internal sealed unsafe class CosmicRun
             // Without draws the credits would go over the cap again right away: don't try again this run.
             fortunesBroken = true;
         }
-        if (finishAfterFortunes is { } reason) { finishAfterFortunes = null; Finish(reason, false); return; }
+        if (finishAfterFortunes is { } reason) { finishAfterFortunes = null; Finish(reason, false, goHome: true); return; }
         Go(Step.Choose, 1);
     }
 
