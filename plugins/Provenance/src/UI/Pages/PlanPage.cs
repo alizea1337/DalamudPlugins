@@ -47,6 +47,7 @@ internal sealed partial class PlanPage : Page
         get
         {
             var plan = Plans.Plan;
+            if (CosmicMode) return CosmicStatus;
             if (Config.Order.IsEmpty) return ("The order is empty", Palette.TextFaint);
             if (plan.Missing.Count > 0) return (plan.Missing.Count == 1 ? "1 item to get yourself before starting" : $"{plan.Missing.Count} items to get yourself before starting", Palette.Danger);
             var blocking = Plans.Readiness.Count(i => i.Blocking);
@@ -70,6 +71,11 @@ internal sealed partial class PlanPage : Page
         get
         {
             var runs = Plugin.Runs;
+            if (CosmicMode)
+            {
+                foreach (var a in CosmicActions) yield return a;
+                yield break;
+            }
             if (runs.Active)
             {
                 yield return new FooterAction("Show the run", Ui.Kind.Primary, FontAwesomeIcon.Running, Go<RunPage>);

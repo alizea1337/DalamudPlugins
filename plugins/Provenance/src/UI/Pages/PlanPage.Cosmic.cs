@@ -18,6 +18,54 @@ internal sealed partial class PlanPage
     /// <summary>Shown when crafters are ticked for Cosmic Exploration and the order is empty, or while the loop runs.</summary>
     private bool ShowsCosmic => Config.Cosmic.Classes.Any(c => c is >= 8 and <= 15) && (Config.Order.IsEmpty || Plugin.CosmicLoop.Active);
 
+    /// <summary>The page is the Cosmic plan (no order): the action bar starts and clears that instead of the order.</summary>
+    private bool CosmicMode => ShowsCosmic && Config.Order.IsEmpty;
+
+    /// <summary>Why the loop didn't start from here, shown above the plan.</summary>
+    private string? cosmicStartProblem;
+
+    private (string Text, Vector4 Color) CosmicStatus
+    {
+        get
+        {
+            var loop = Plugin.CosmicLoop;
+            if (loop.Active) return ("Cosmic Exploration: " + loop.Status, Palette.Accent);
+            var plan = Plugin.CosmicPlanner.Plan();
+            if (!plan.Settled) return ("Cosmic Exploration: working out the missions", Palette.TextMuted);
+            return plan.Best is { Ranking.Best: { } } best
+                ? ($"Cosmic Exploration: about {plan.CreditsPerHour:N0} Cosmocredits an hour with {CosmicPlanner.JobName(best.ClassJob)}", Palette.Accent)
+                : ("Cosmic Exploration: no crafter has a mission it can do yet", Palette.Warn);
+        }
+    }
+
+    private IEnumerable<FooterAction> CosmicActions
+    {
+        get
+        {
+            var loop = Plugin.CosmicLoop;
+            if (loop.Active)
+            {
+                yield return new FooterAction("Show the loop", Ui.Kind.Secondary, FontAwesomeIcon.Rocket, Go<CosmicPage>);
+                yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(),
+                    Tooltip: "Stops once the item being crafted is finished. A mission under way stays as it is.");
+                yield break;
+            }
+            yield return new FooterAction("Clear", Ui.Kind.Ghost, FontAwesomeIcon.Times, () =>
+                {
+                    Config.Cosmic.Classes.Clear();
+                    cosmicStartProblem = null;
+                    Config.Save();
+                },
+                Tooltip: "Unticks the crafters and gatherers on the Cosmic Exploration page, so this page goes back to the order. The goal, extras and shopping list stay.");
+            yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () =>
+                {
+                    cosmicStartProblem = loop.Start();
+                    if (cosmicStartProblem == null) Go<CosmicPage>();
+                },
+                Tooltip: "Starts the Cosmic Exploration loop with this plan: the missions each crafter reliably golds, until the goal is met.");
+        }
+    }
+
     private void DrawCosmic(GameCatalog catalog)
     {
         var s = Ui.S;
@@ -26,6 +74,13 @@ internal sealed partial class PlanPage
         var cs = Config.Cosmic;
         Ui.Heading("Cosmic Exploration", plan.Planet is { } p ? $"On {p.Name()}: {GoalLine(cs)}." : null);
         ImGui.Dummy(new Vector2(0, 2 * s));
+        if (cosmicStartProblem != null && !Plugin.CosmicLoop.Active)
+        {
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped("Can't start: " + cosmicStartProblem, Palette.Warn, w);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+        }
         if (plan.Problem != null)
         {
             Ui.BeginCard(Palette.WithAlpha(Palette.Warn, 0.08f), width: w);

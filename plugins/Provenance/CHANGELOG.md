@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.4
+
+- Fixed: with the Cosmic Exploration plan on the Plan page (and no order), the action bar still belonged
+  to the empty order: "The order is empty" and a Start that couldn't be pressed. It now shows the Cosmic
+  plan's pace, starts the Cosmic loop, and has *Clear* to untick the crafters and go back to the order
+  (the goal, extras and shopping list stay); *Stop* while the loop runs.
+
 ## 0.19.3
 
 - Cosmic Exploration: new option *Leave out EX and EX+ missions* (under the crafters): the loop and the
