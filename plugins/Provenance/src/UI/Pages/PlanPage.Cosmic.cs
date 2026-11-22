@@ -45,9 +45,8 @@ internal sealed partial class PlanPage
             var loop = Plugin.CosmicLoop;
             if (loop.Active)
             {
-                yield return new FooterAction("Show the loop", Ui.Kind.Secondary, FontAwesomeIcon.Rocket, Go<CosmicPage>);
-                yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(),
-                    Tooltip: "Stops once the item being crafted is finished. A mission under way stays as it is.");
+                yield return new FooterAction("Show the loop", Ui.Kind.Ghost, FontAwesomeIcon.Rocket, Go<CosmicPage>);
+                foreach (var a in CosmicPage.CosmicRunActions(loop)) yield return a;
                 yield break;
             }
             yield return new FooterAction("Clear", Ui.Kind.Ghost, FontAwesomeIcon.Times, () =>

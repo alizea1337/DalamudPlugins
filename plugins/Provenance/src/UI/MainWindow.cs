@@ -561,11 +561,7 @@ internal sealed class MainWindow : Window
     private List<Pages.FooterAction> CosmicCompactActions()
     {
         var loop = plugin.CosmicLoop;
-        if (loop.Active)
-            return new List<Pages.FooterAction>
-            {
-                new("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(), Tooltip: "Stops once the item being crafted is finished. A mission under way stays as it is."),
-            };
+        if (loop.Active) return Pages.CosmicPage.CosmicRunActions(loop).ToList();
         return new List<Pages.FooterAction>
         {
             new("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () =>
@@ -584,9 +580,9 @@ internal sealed class MainWindow : Window
         var goal = s.Goal == CosmicGoal.Cosmocredits ? $"{credits:N0} of {s.CreditsTarget:N0} Cosmocredits" : $"{credits:N0} Cosmocredits";
         if (!loop.Active)
             return (Palette.TextFaint, "Cosmic Exploration", "not running", fraction, goal);
-        var detail = loop.Mission is { } m ? m.Label : loop.Status;
+        var detail = loop.Paused ? "paused" : loop.Pausing ? "pausing after this craft" : loop.Mission is { } m ? m.Label : loop.Status;
         var parts = $"{loop.Missions} {(loop.Missions == 1 ? "mission" : "missions")}, +{loop.Earned:N0}";
-        return (Palette.Accent, "Cosmic Exploration", detail, fraction, $"{goal}, {parts}");
+        return (loop.Paused || loop.Pausing ? Palette.Warn : Palette.Accent, "Cosmic Exploration", detail, fraction, $"{goal}, {parts}");
     }
 
     private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) CompactState()

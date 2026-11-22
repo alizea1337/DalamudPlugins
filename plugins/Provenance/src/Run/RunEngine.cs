@@ -945,6 +945,15 @@ internal sealed class RunEngine : IDisposable
         else if (Stage == RunStage.Retainers) { Retainers.RequestPause(); Headline = "Pausing after this retainer"; }
         else if (Stage == RunStage.Hunt) { Hunt.RequestPause(); Headline = "Pausing after this fight"; }
         else if (Stage == RunStage.ToSpot) Headline = "Pausing at " + toSpotWhat;
+        else if (Stage == RunStage.Return)
+        {
+            // The trip after the order stops where it is; Resume sets off again.
+            Home.Cancel();
+            Phase = RunPhase.Paused;
+            Headline = "Paused on the way back";
+            Add("Paused on the way back.", false);
+            return;
+        }
         else if (FishingNow)
         {
             // The rod stays out between casts: the fisher lands the catch under way, then reels in.
@@ -964,6 +973,12 @@ internal sealed class RunEngine : IDisposable
         else if (Stage == RunStage.Retainers) Retainers.Resume();
         else if (Stage == RunStage.Hunt) Hunt.Resume();
         else if (Stage == RunStage.Craft || craftingBetween) Crafter.Resume();
+        else if (Stage == RunStage.Return && wasPaused && !Home.Begin(plugin.Config.AfterOrder, startedAt) && pendingEnd is { } end)
+        {
+            pendingEnd = null;
+            End(RunPhase.Finished, end.Headline, end.Detail, end.Problem);
+            return;
+        }
         else if (Stage == RunStage.Gather && wasPaused) HandBackToGathering(log: false);
         else if (Stage == RunStage.Gather && worker == Worker.Fish)
         {
@@ -1174,7 +1189,7 @@ internal sealed class RunEngine : IDisposable
         // closed it (and then pauses, as Pause() asked). Never twice in one frame.
         if (Stage == RunStage.Gather && !pausedForDuty && !knockedOut && !(workerTicked && worker == Worker.Fish)
             && (Fish.Busy || Services.Condition[ConditionFlag.Fishing])) TickWorker(Worker.Fish);
-        if ((Stage is RunStage.Return or RunStage.ToSpot || spotBetween) && !pausedForDuty && !knockedOut) Home.Tick();
+        if ((Stage is RunStage.Return or RunStage.ToSpot || spotBetween) && !pausedForDuty && !knockedOut && !(Stage == RunStage.Return && Phase == RunPhase.Paused)) Home.Tick();
         if (working && Stage == RunStage.Learn && buyingBooks) Books.Tick();
         if (DateTime.UtcNow < nextCheck) return;
         nextCheck = DateTime.UtcNow + CheckEvery;

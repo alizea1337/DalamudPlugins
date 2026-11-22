@@ -94,6 +94,60 @@ internal sealed unsafe class CosmicRun
     }
 
     public bool Active => step is not (Step.Idle or Step.Finished);
+    /// <summary>Paused: nothing moves until <see cref="Resume"/>.</summary>
+    public bool Paused { get; private set; }
+    /// <summary>Asked to pause while crafting: it pauses once the item under way is finished.</summary>
+    public bool Pausing { get; private set; }
+
+    /// <summary>
+    /// Pauses: right away (the trip, buying, fortunes and gathering stop where they are; fishing reels in), or after the
+    /// item being crafted. A mission's own time keeps running meanwhile.
+    /// </summary>
+    public void Pause()
+    {
+        if (!Active || Paused || Pausing) return;
+        if (step == Step.Craft && crafter.Started && !crafter.Finished)
+        {
+            crafter.RequestPause();
+            Pausing = true;
+            Status = "Pausing after this craft";
+            Log("Pause asked for; finishing the item being crafted first.", false);
+            return;
+        }
+        trip.Cancel();
+        buyer.Cancel();
+        fortunes.Cancel();
+        gatherer.Cancel();
+        Paused = true;
+        Status = "Paused";
+        Log("Paused.", false);
+    }
+
+    /// <summary>Carries on with the step it paused in (a trip, a purchase or a gathering round starts that step again).</summary>
+    public void Resume()
+    {
+        if (!Active || !(Paused || Pausing)) return;
+        var was = Paused;
+        Paused = Pausing = false;
+        Log("Resumed.", false);
+        if (step == Step.Craft) { crafter.Resume(); return; }
+        if (!was) return;
+        switch (step)
+        {
+            case Step.Travel:
+                if (CosmicPlanner.TargetPlanet(Settings) is { } planet) trip.Begin(planet);
+                break;
+            case Step.Gather:
+                if (Mission is { } m) StartRound2(m);
+                break;
+            case Step.Fortunes:
+            case Step.Buy:
+                // Worked out again from what's at hand (the cap and goal checks start buying or drawing again).
+                if (finishAfterFortunes is { } reason) { finishAfterFortunes = null; FinishAfterFortunes(reason); }
+                else Go(Step.Choose, 0.5);
+                break;
+        }
+    }
     public string Status { get; private set; } = "";
     public string? Problem { get; private set; }
     public IReadOnlyList<(DateTime At, string Text, bool Problem)> Lines => log;
@@ -145,7 +199,7 @@ internal sealed unsafe class CosmicRun
     public void Stop(string reason = "Stopped.", bool problem = false)
     {
         if (!Active) return;
-        if (step == Step.Craft && crafter.MidCraft && !problem)
+        if (step == Step.Craft && crafter.MidCraft && !problem && !Paused)
         {
             stopAfterCraft = true;
             crafter.RequestPause();
@@ -157,6 +211,7 @@ internal sealed unsafe class CosmicRun
 
     private void Finish(string reason, bool problem, bool missionLeft = true)
     {
+        Paused = Pausing = false;
         trip.Cancel();
         buyer.Cancel();
         fortunes.Cancel();
@@ -176,8 +231,14 @@ internal sealed unsafe class CosmicRun
 
     public void Tick()
     {
-        // Stopped mid-fishing: the rod is reeled in and stowed even though the loop is done.
-        if (!Active) { gatherer.WindDown(); return; }
+        // Stopped (or paused) mid-fishing: the rod is reeled in and stowed even though nothing else moves.
+        if (!Active || Paused) { gatherer.WindDown(); return; }
+        if (Pausing)
+        {
+            crafter.Tick();
+            if (crafter.IsPaused || crafter.Finished) { Pausing = false; Paused = true; Status = "Paused"; }
+            return;
+        }
         if (DateTime.UtcNow < waitUntil) return;
         try
         {

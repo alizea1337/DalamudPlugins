@@ -40,14 +40,29 @@ internal sealed class CosmicPage : Page
         {
             if (Loop.Active)
             {
-                yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => Loop.Stop(),
-                    Tooltip: "Stops once the item being crafted is finished. A mission under way stays as it is.");
+                foreach (var a in CosmicRunActions(Loop)) yield return a;
                 yield break;
             }
             yield return new FooterAction("See the plan", Ui.Kind.Secondary, FontAwesomeIcon.ListUl, Go<PlanPage>,
                 Tooltip: "Which mission each crafter would take, what it pays an hour, and how long the goal takes.");
             yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => startProblem = Loop.Start());
         }
+    }
+
+
+    /// <summary>The Cosmic loop's buttons while it runs: Stop, and Pause / Resume.</summary>
+    public static IEnumerable<FooterAction> CosmicRunActions(Run.Cosmic.CosmicRun loop)
+    {
+        yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(),
+            Tooltip: loop.Paused ? "Ends the loop. A mission under way stays as it is." : "Stops once the item being crafted is finished. A mission under way stays as it is.");
+        if (loop.Paused)
+            yield return new FooterAction("Resume", Ui.Kind.Primary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Carries on where it paused.");
+        else if (loop.Pausing)
+            yield return new FooterAction("Keep going", Ui.Kind.Secondary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Never mind the pause.");
+        else
+            yield return new FooterAction("Pause", Ui.Kind.Secondary, FontAwesomeIcon.Pause, loop.Pause,
+                Tooltip: "Pauses after the item being crafted, otherwise right away (a trip, buying, fortunes or gathering stop where they are). "
+                         + "A mission's own time limit keeps running meanwhile.");
     }
 
     public override void Draw()

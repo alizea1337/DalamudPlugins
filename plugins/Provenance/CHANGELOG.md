@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.7
+
+- Cosmic Exploration: *Pause* and *Resume* next to *Stop* (on its page, on the Plan page and in the
+  compact strip). A pause waits for the item being crafted; anything else (the trip, buying, drawing
+  fortunes, gathering) stops where it is, fishing reels in first, and Resume carries on from there. A
+  mission's own time limit keeps running meanwhile.
+- Pausing an order run on its way back after the order (home, inn room, crafting spot) now stops the
+  trip; Resume sets off again. Before, the trip went on regardless.
+
 ## 0.19.6
 
 - Character page: in the food and medicine lists, the three that add the most at your stats wear a pill
