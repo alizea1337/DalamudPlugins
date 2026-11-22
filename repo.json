@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Colours (Settings, Interface): pick the accent, the background, the cards and the text. Each opens a\n  colour wheel with a field for the hex code (#86D0C2, or the short #8DC) and a few swatches to pick at\n  once; the window changes while you pick, Escape puts the colour back. Fields, buttons, lines and the\n  muted text follow as shades of what you pick. When the text gets hard to read on the cards or the\n  background, or the accent hard to see, the card says so with the contrast. *Reset to defaults* brings\n  back the first colours.\r\n",
+    "Changelog": "- Things to get yourself now say where they really come from, and whether it's the game or Provenance\n  that can't get them:\n  - sold for another currency, with the price and who sells it (\"Sold for 3 Bicolor Gemstones by the\n    gemstone trader in Old Sharlayan, and Provenance doesn't spend Bicolor Gemstones\"), for Grand\n    Company seals, brought back by retainers on ventures, or sold by other players on the market board;\n  - only in the Diadem, Cosmic Exploration or Ocean Fishing: \"which Provenance doesn't support yet\";\n  - over the vendor price cap: where to change it (Settings, General).\n  Before, many of them only said \"No gathering, fishing, vendor or monster source\".\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.17.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.17.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.17.0/latest.zip",
+    "AssemblyVersion": "0.17.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.17.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.17.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795285739
+    "LastUpdate": 1795379672
   }
 ]
