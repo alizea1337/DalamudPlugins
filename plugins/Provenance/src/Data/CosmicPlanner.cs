@@ -14,12 +14,19 @@ internal sealed record ConsumableHint(uint ClassJob, uint Food, bool FoodHq, int
 
 /// <param name="Problem">Why the class can't take missions at all ("no gearset saved"), or null.</param>
 /// <param name="Pending">Rotations are still being worked out, or more missions are about to be judged: the ranking may still change.</param>
-internal sealed record CosmicClassPlan(uint ClassJob, int Level, MissionRanking Ranking, string? Problem, ConsumableHint? Hint, bool Pending = false);
+/// <param name="Judged">Missions whose rotation is worked out, of <paramref name="Total"/> to judge.</param>
+internal sealed record CosmicClassPlan(uint ClassJob, int Level, MissionRanking Ranking, string? Problem, ConsumableHint? Hint, bool Pending = false,
+    int Judged = 0, int Total = 0);
 
 /// <param name="ToGoal">Time left to the goal at the best class's pace; null when the goal has no end or nothing can be done.</param>
+/// <param name="Settled">The rotations are worked out (or the time for it is up): the ranking holds until something changes.</param>
+/// <param name="SecondsLeft">While working out: how long until the best found so far is taken.</param>
 internal sealed record CosmicPlan(Planet? Planet, IReadOnlyList<CosmicClassPlan> Classes, double CreditsPerHour, TimeSpan? ToGoal,
-    int CreditsNeeded, string? Problem, bool RanksKnown)
+    int CreditsNeeded, string? Problem, bool RanksKnown, bool Settled = true, double SecondsLeft = 0)
 {
+    public int Judged => Classes.Sum(c => c.Judged);
+    public int Total => Classes.Sum(c => c.Total);
+
     public CosmicClassPlan? Best => Classes.Where(c => c.Ranking.Best != null).MaxBy(c => c.Ranking.Best!.CreditsPerHour);
 }
 
@@ -34,8 +41,23 @@ internal sealed class CosmicPlanner
     private const int JudgeFirst = 8;
     private const int JudgeMost = 24;
 
+    /// <summary>The longest the plan waits for rotations; then the best found so far is taken and kept.</summary>
+    public const int ThinkSeconds = 30;
+
     private readonly Plugin plugin;
     private CosmicPlan? last;
+    /// <summary>What the kept ranking was worked out for (planet, crafters, their levels and stats, food), when it started, and the ranking itself.</summary>
+    private string? frozenKey;
+    private DateTime planningSince;
+    private List<CosmicClassPlan>? frozen;
+
+    /// <summary>Works the plan out again (the "Work it out again" link).</summary>
+    public void Replan()
+    {
+        frozenKey = null;
+        judgeLimit.Clear();
+        last = null;
+    }
     private DateTime builtAt;
     private readonly Dictionary<uint, int> judgeLimit = new();
 
@@ -76,9 +98,38 @@ internal sealed class CosmicPlanner
             return new CosmicPlan(null, Array.Empty<CosmicClassPlan>(), 0, null, 0,
                 $"Cosmic Exploration isn't open yet: it starts with the quest \"{Cosmic.UnlockQuestName(Planet.SinusArdorum)}\" in Old Sharlayan.", ranksKnown);
         if (Raphael.ExecutablePath() == null)
-            return new CosmicPlan(planet, Array.Empty<CosmicClassPlan>(), 0, null, 0, "raphael-cli.exe wasn't found next to Provenance, so rotations can't be worked out.", ranksKnown);
+            return new CosmicPlan(planet, Array.Empty<CosmicClassPlan>(), 0, null, 0, "Provenance's crafting solver (raphael-cli.exe) is missing next to it, so missions can't be worked out. Reinstalling Provenance brings it back.", ranksKnown);
 
-        var classes = s.Classes.Where(c => c is >= 8 and <= 15).Distinct().Select(c => PlanClass(catalog.Cosmic, planet.Value, c, ranksKnown)).ToList();
+        // The ranking is worked out once (up to ThinkSeconds) and then kept until what it depends on changes, so it doesn't
+        // jump around while late rotations come in.
+        var key = Key(s, planet.Value);
+        if (key != frozenKey)
+        {
+            frozenKey = key;
+            frozen = null;
+            planningSince = DateTime.UtcNow;
+        }
+        List<CosmicClassPlan> classes;
+        var settled = true;
+        if (frozen != null)
+        {
+            classes = frozen;
+            // A crafter frozen without a mission, still being worked out (or just widened): keep at it.
+            for (var i = 0; i < classes.Count; i++)
+                if (classes[i] is { Pending: true, Ranking.Best: null } stuck)
+                    classes[i] = stuck.ClassJob >= 16
+                        ? PlanTwoClass(catalog.Cosmic, planet.Value, stuck.ClassJob, ranksKnown)
+                        : PlanClass(catalog.Cosmic, planet.Value, stuck.ClassJob, ranksKnown);
+        }
+        else
+        {
+            classes = s.Classes.Where(c => c is >= 8 and <= 18).Distinct()
+                .Select(c => c >= 16 ? PlanTwoClass(catalog.Cosmic, planet.Value, c, ranksKnown) : PlanClass(catalog.Cosmic, planet.Value, c, ranksKnown)).ToList();
+            var elapsed = (DateTime.UtcNow - planningSince).TotalSeconds;
+            settled = !classes.Any(c => c.Pending) || elapsed >= ThinkSeconds;
+            if (settled) frozen = classes;
+        }
+        var secondsLeft = settled ? 0 : Math.Max(0, ThinkSeconds - (DateTime.UtcNow - planningSince).TotalSeconds);
         var best = classes.Where(c => c.Ranking.Best != null).Select(c => c.Ranking.Best!.CreditsPerHour).DefaultIfEmpty(0).Max();
         var needed = CreditsNeeded(s, catalog.Cosmic);
         TimeSpan? toGoal = null;
@@ -90,7 +141,16 @@ internal sealed class CosmicPlanner
         }
         if (withHints) foreach (var c in classes) WithHint(c, needed, s);
         else hints.Clear();
-        return new CosmicPlan(planet, classes.OrderByDescending(c => c.Ranking.Best?.CreditsPerHour ?? -1).ToList(), best, toGoal, needed, null, ranksKnown);
+        return new CosmicPlan(planet, classes.OrderByDescending(c => c.Ranking.Best?.CreditsPerHour ?? -1).ToList(), best, toGoal, needed, null, ranksKnown,
+            settled, secondsLeft);
+    }
+
+    /// <summary>Everything the ranking depends on: planet, crafters, their levels and stats, the food in use.</summary>
+    private string Key(CosmicSettings s, Planet planet)
+    {
+        var profile = plugin.Plans.Profile;
+        var jobs = string.Join(";", s.Classes.OrderBy(c => c).Select(c => profile?.Job(c) is { } j ? $"{c}:{j.Level}:{string.Join(",", j.Stats)}" : c.ToString()));
+        return $"{planet}|{jobs}|{InUse(plugin)}|{s.Extras}|{Cosmic.Loaded}|{s.Records.Values.Sum(r => r.Total)}";
     }
 
     /// <summary>Cosmocredits still to earn for the goal (0 when it has no amount, or it's reached).</summary>
@@ -105,9 +165,13 @@ internal sealed class CosmicPlanner
         };
     }
 
-    /// <summary>What the shopping list costs: each item as many times as it's on the list.</summary>
+    /// <summary>What the shopping list costs in Cosmocredits: each item as many times as it's on the list (Drone Modules cost dronebits).</summary>
     public static int ShoppingCost(CosmicSettings s, CosmicData data)
-        => s.Shopping.Sum(w => data.Shop.FirstOrDefault(x => x.ItemId == w.ItemId) is { } item ? w.Count * item.Cost : 0);
+        => s.Shopping.Sum(w => data.Shop.FirstOrDefault(x => x.ItemId == w.ItemId) is { Dronebits: false } item ? w.Count * item.Cost : 0);
+
+    /// <summary>What the shopping list costs in a planet's dronebits.</summary>
+    public static int DronebitCost(CosmicSettings s, CosmicData data, Planet planet)
+        => s.Shopping.Sum(w => data.Shop.FirstOrDefault(x => x.ItemId == w.ItemId) is { Dronebits: true } item && item.Planet == planet ? w.Count * item.Cost : 0);
 
     private CosmicClassPlan PlanClass(CosmicData data, Planet planet, uint classJob, bool ranksKnown)
     {
@@ -133,8 +197,71 @@ internal sealed class CosmicPlanner
             widened = true;
         }
         var skipped = ranking.Skipped.Concat(closed).ToList();
+        var stillWorking = ranking.Skipped.Count(x => x.Reason == StillWorking);
         return new CosmicClassPlan(classJob, job.Level, ranking with { Skipped = skipped },
-            ranking.Best == null && candidates.Count == 0 ? $"{name} has no crafting missions open on {planet.Name()}." : null, null, solving || widened);
+            ranking.Best == null && candidates.Count == 0 ? $"{name} has no crafting missions open on {planet.Name()}." : null, null, solving || widened,
+            judged.Count - stillWorking, judged.Count);
+    }
+
+    /// <summary>Rounds of gathering and crafting a two-class mission is reckoned to take for gold, until runs of it say otherwise.</summary>
+    public const int TwoClassRounds = 3;
+
+    /// <summary>
+    /// A miner's, botanist's or fisher's plan: for now its two-class missions on Sinus Ardorum (gather or fish the
+    /// material, the partner crafter makes the item), judged by the partner crafter's rotation.
+    /// </summary>
+    private CosmicClassPlan PlanTwoClass(CosmicData data, Planet planet, uint classJob, bool ranksKnown)
+    {
+        var name = JobName(classJob);
+        var s = plugin.Config.Cosmic;
+        var empty = new MissionRanking(Array.Empty<MissionChoice>(), Array.Empty<SkippedMission>(), false);
+        var job = plugin.Plans.Profile?.Job(classJob);
+        if (GameState.BestGearset(classJob) < 0) return new CosmicClassPlan(classJob, 0, empty, $"No gearset saved for {name}. Save one, then check your character on the Character page.", null);
+        if (!s.Has(CosmicExtra.TwoClassMissions))
+            return new CosmicClassPlan(classJob, job?.Level ?? 0, empty, $"{name} takes two-class missions for now: turn on \"Two-class missions\" under Extras. Its own missions come in a later version.", null);
+        if (planet != Planet.SinusArdorum)
+            return new CosmicClassPlan(classJob, job?.Level ?? 0, empty, $"{name}'s two-class missions are only on Sinus Ardorum; its own missions come in a later version.", null);
+        if (job is not { Level: > 0 }) return new CosmicClassPlan(classJob, 0, empty, $"{name}'s level isn't known yet. Check your character on the Character page.", null);
+        var gather = plugin.Plans.Catalog?.Gather;
+        var all = data.For(planet, classJob).Where(m => m.Kinds == MissionKind.TwoClass && m.ClassJob == classJob && m.IsCraft
+            && (classJob == 18
+                ? gather?.Fish(m.Steps[0].IngredientId)?.Spots.Any(id => gather.Spot(id) is { Stands.Count: > 0 }) == true
+                : m.Marker != null)).ToList();
+        var paired = all.Where(m => s.Classes.Contains(m.SecondClassJob)).ToList();
+        if (paired.Count == 0)
+            return new CosmicClassPlan(classJob, job.Level, empty,
+                $"{name}'s two-class missions pair it with {string.Join(", ", all.Select(m => JobName(m.SecondClassJob)).Distinct())}; tick one of those crafters too.", null);
+        var closed = new List<SkippedMission>();
+        var open = new List<CosmicMission>();
+        foreach (var m in paired)
+        {
+            var isOpen = ranksKnown
+                ? CosmicPicker.RankOpen(m.Rank, job.Level, r => Count(data, classJob, r, false), r => Count(data, classJob, r, true))
+                : job.Level >= m.Rank.Level();
+            if (isOpen) open.Add(m);
+            else closed.Add(new SkippedMission(m, CosmicPicker.RankRequirement(m.Rank) + $" (for {name})"));
+        }
+        var ranking = CosmicPicker.Rank(open, JudgeTwoClass, Record);
+        var stillWorking = ranking.Skipped.Count(x => x.Reason == StillWorking);
+        return new CosmicClassPlan(classJob, job.Level, ranking with { Skipped = ranking.Skipped.Concat(closed).ToList() }, null, null,
+            stillWorking > 0, open.Count - stillWorking, open.Count);
+    }
+
+    /// <summary>A two-class mission judged by its crafter's rotation; its length counts the gathering rounds too.</summary>
+    public Judgement? JudgeTwoClass(CosmicMission m)
+    {
+        var partner = plugin.Plans.Profile?.Job(m.SecondClassJob);
+        if (partner is not { Level: > 0 } || partner.Stats.Length < 3 || partner.Stats[0] <= 0)
+            return new Judgement(Tier.None, Basis.Estimated, $"{JobName(m.SecondClassJob)}'s stats aren't known; check your character on the Character page", 0);
+        var j = Judge(m, partner.Level, partner.Stats, partner.Manipulation, InUse(plugin));
+        if (j == null || j.Tier == Tier.None) return j;
+        var amount = m.Steps.Count > 0 ? m.Steps[0].IngredientAmount : 1;
+        var gather = m.ClassJob == 18 ? amount * 60.0 : 90.0;
+        return j with
+        {
+            Reason = $"{JobName(m.SecondClassJob)}'s {j.Reason}",
+            Seconds = (j.Seconds - 20) * TwoClassRounds + gather * TwoClassRounds + 40,
+        };
     }
 
     /// <summary>

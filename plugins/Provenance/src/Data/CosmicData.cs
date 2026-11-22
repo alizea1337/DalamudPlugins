@@ -10,8 +10,13 @@ namespace Provenance.Data;
 /// <summary>Something the Cosmocredit Exchange sells, with where it sits in the shop.</summary>
 /// <param name="Index">Its row in the special shop, which is the order the shop window lists it in.</param>
 /// <param name="MateriaParam">For materia: the stat it adds (BaseParam), else 0; <paramref name="MateriaGrade"/> its grade.</param>
+/// <param name="Currency">What it costs: Cosmocredits, or a planet's dronebits.</param>
+/// <param name="Planet">Only sold on this planet (Drone Modules, at Kaede); null: at the Cosmocredit trader on every planet.</param>
 internal sealed record CosmicShopItem(uint ShopId, int Index, uint ItemId, string Name, int Count, int Cost, uint Icon,
-    uint MateriaParam = 0, int MateriaGrade = -1);
+    uint MateriaParam = 0, int MateriaGrade = -1, uint Currency = Planets.Cosmocredit, Planet? Planet = null)
+{
+    public bool Dronebits => Currency != Planets.Cosmocredit;
+}
 
 /// <summary>An NPC on a planet the loop walks to.</summary>
 internal sealed record CosmicNpc(uint Id, uint Territory, Vector3 Position);
@@ -36,6 +41,29 @@ internal sealed class CosmicData
 
     /// <summary>Cosmocredit Exchange rows: cosmetics and mounts, and materials, materia and items.</summary>
     public static readonly uint[] CosmocreditShops = { 1770945, 1770977 };
+
+    /// <summary>Drone Modules for dronebits, per planet (Kaede opens them through her talk).</summary>
+    public static readonly (uint Shop, Planet Planet)[] DroneShops = { (1771006, Planet.Oizys), (1771038, Planet.Auxesia) };
+
+    /// <summary>Kaede, who trades dronebits for Drone Modules (Oizys and Auxesia).</summary>
+    public static CosmicNpc? DroneTrader(Planet p) => p switch
+    {
+        Planet.Oizys => new CosmicNpc(1052654, 1310, new Vector3(-206.4f, 0.5f, 131.1f)),
+        Planet.Auxesia => new CosmicNpc(1056828, 1319, new Vector3(302.2f, 205.6f, 398.6f)),
+        _ => null,
+    };
+
+    /// <summary>Orbitingway, at the Cosmic Fortunes counter.</summary>
+    public static CosmicNpc Fortunes(Planet p) => p switch
+    {
+        Planet.SinusArdorum => new CosmicNpc(1052612, 1237, new Vector3(18.8f, 2.2f, -18.9f)),
+        Planet.Phaenna => new CosmicNpc(1052642, 1291, new Vector3(358.8f, 53.2f, -438.9f)),
+        Planet.Oizys => new CosmicNpc(1052652, 1310, new Vector3(-157.7f, 1.2f, 154.0f)),
+        _ => new CosmicNpc(1056826, 1319, new Vector3(291.0f, 206.2f, 349.4f)),
+    };
+
+    /// <summary>Every NPC id Orbitingway has (Sinus Ardorum swaps hers as it's built up).</summary>
+    public static readonly HashSet<uint> FortuneIds = new() { 1052590, 1052602, 1052611, 1052612, 1052642, 1052652, 1056826 };
 
     private readonly Dictionary<uint, CosmicMission> missions = new();
     private readonly Dictionary<(Planet, uint), List<CosmicMission>> byClass = new();
@@ -145,11 +173,20 @@ internal sealed class CosmicData
 
             uint supplied = 0;
             var suppliedCount = 0;
-            if (row.WKSMissionSupplyItem.ValueNullable is { } supply && supply.Item.Count > 0)
-            {
-                supplied = supply.Item[0].ValueNullable?.Item.RowId ?? 0;
-                suppliedCount = supply.ItemCount.Count > 0 ? supply.ItemCount[0] : 0;
-            }
+            uint bait = 0;
+            if (row.WKSMissionSupplyItem.ValueNullable is { } supply)
+                for (var i = 0; i < supply.Item.Count; i++)
+                {
+                    if (supply.Item[i].ValueNullable is not { } info || info.Item.RowId == 0) continue;
+                    // Sub-category 5: bait for stellar missions; anything else is what the crafts start from.
+                    if (info.WKSItemSubCategory.RowId == 5) { bait = info.Item.RowId; continue; }
+                    if (supplied != 0) continue;
+                    supplied = info.Item.RowId;
+                    suppliedCount = i < supply.ItemCount.Count ? supply.ItemCount[i] : 0;
+                }
+            MissionMarker? marker = null;
+            if (todo is { } withMarker && withMarker.MapMarker.ValueNullable is { } m && (m.X != 0 || m.Y != 0))
+                marker = new MissionMarker(m.X - 1024f, m.Y - 1024f, m.Radius);
 
             var reward = row.MissionReward.ValueNullable is { } rw
                 ? new MissionReward(rw.CosmoCredits, rw.PlanetCredits, rw.BaseDronebits, rw.Item.RowId, rw.Item.RowId != 0 ? rw.ItemCount : 0)
@@ -157,7 +194,7 @@ internal sealed class CosmicData
 
             var mission = new CosmicMission(row.RowId, name, Planets.OfMission(row.RowId), first - 1, second,
                 (MissionRank)Math.Clamp((int)row.LevelGroup, 1, 6), kinds, row.MissionTime, (int)row.SilverStarRequirement,
-                (int)row.GoldStarRequirement, steps, supplied, suppliedCount, targets, action, charges, reward, row.LockedBehind.RowId);
+                (int)row.GoldStarRequirement, steps, supplied, suppliedCount, targets, action, charges, reward, row.LockedBehind.RowId, marker, bait);
             missions[row.RowId] = mission;
             Note(mission.Planet, mission.ClassJob, mission);
             if (second != 0) Note(mission.Planet, second, mission);
@@ -205,7 +242,9 @@ internal sealed class CosmicData
                 if (m.Item[g].RowId != 0) materia[m.Item[g].RowId] = (m.BaseParam.RowId, g);
 
         var stock = new List<CosmicShopItem>();
-        foreach (var shopId in CosmocreditShops)
+        var shops = CosmocreditShops.Select(id => (Shop: id, Currency: Planets.Cosmocredit, Planet: (Planet?)null))
+            .Concat(DroneShops.Select(d => (d.Shop, d.Planet.Dronebit(), (Planet?)d.Planet)));
+        foreach (var (shopId, currency, planet) in shops)
         {
             if (Services.Data.GetExcelSheet<SpecialShop>().GetRowOrDefault(shopId) is not { } shop) continue;
             var index = 0;
@@ -216,17 +255,17 @@ internal sealed class CosmicData
                 foreach (var r in entry.ReceiveItems)
                     if (r.Item.RowId != 0) { received = r.Item.RowId; count = r.ReceiveCount; break; }
                 foreach (var c in entry.ItemCosts)
-                    if (c.ItemCost.RowId == Planets.Cosmocredit) { price = c.CurrencyCost; break; }
+                    if (c.ItemCost.RowId == currency) { price = c.CurrencyCost; break; }
                 if (received == 0) continue;
                 var at = index++;
                 if (price == 0 || items.GetRowOrDefault(received) is not { } item) continue;
                 var (param, grade) = materia.TryGetValue(item.RowId, out var mg) ? mg : (0u, -1);
-                stock.Add(new CosmicShopItem(shopId, at, item.RowId, item.Name.ExtractText(), Math.Max(1, (int)count), (int)price, item.Icon, param, grade));
+                stock.Add(new CosmicShopItem(shopId, at, item.RowId, item.Name.ExtractText(), Math.Max(1, (int)count), (int)price, item.Icon, param, grade, currency, planet));
             }
         }
         Shop = stock;
         // Crafting (70 craftsmanship, 71 control, 11 CP) and gathering (72 gathering, 73 perception, 10 GP) materia, the top grade of each.
         var stats = new uint[] { 70, 71, 11, 72, 73, 10 };
-        TopMateria = stats.Select(p => stock.Where(s => s.MateriaParam == p).MaxBy(s => s.MateriaGrade)).OfType<CosmicShopItem>().ToList();
+        TopMateria = stats.Select(p => stock.Where(s => s.MateriaParam == p && !s.Dronebits).MaxBy(s => s.MateriaGrade)).OfType<CosmicShopItem>().ToList();
     }
 }

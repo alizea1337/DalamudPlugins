@@ -72,6 +72,19 @@ internal sealed unsafe class Crafter
     private int doneThisJob;
     private bool pauseRequested;
     private bool leaveStanceOnPause;
+    private DateTime lastEquip;
+
+    /// <summary>A specialist action (Heart and Soul, Quick Innovation) was refused this session: rotations leave them out from then on.</summary>
+    private bool specialistRefused;
+
+    /// <summary>
+    /// Actions a rotation can't do without: they save or restore durability, so going on without one could break the
+    /// item. Any other action the game refuses is skipped, and Basic Synthesis finishes whatever progress is left.
+    /// </summary>
+    private static readonly HashSet<uint> Essential = new() { 4574, 4631, 4639, 100003, 100467, 100475 };
+
+    /// <summary>Raphael's ids of the specialist actions (Heart and Soul, Quick Innovation).</summary>
+    private static readonly HashSet<uint> SpecialistActions = new() { 100419, 100459 };
 
     /// <summary>
     /// While timed nodes are still to be gathered: craft only recipes whose materials are in the bags and
@@ -322,11 +335,19 @@ internal sealed unsafe class Crafter
             if (gearset < 0) { Fail($"There's no gearset saved for {Current.Recipe.Job}. Save one and start again."); return; }
             Status = $"Switching to {Current.Recipe.Job}";
             GameState.EquipGearset(gearset);
-            deadline = DateTime.UtcNow.AddSeconds(8);
+            deadline = DateTime.UtcNow.AddSeconds(15);
+            lastEquip = DateTime.UtcNow;
             Wait(0.5);
             return;
         }
         if (DateTime.UtcNow > deadline) { Fail($"Couldn't switch to {Current.Recipe.Job}."); return; }
+        // Still busy a moment ago (gathering, fishing, an animation): the change didn't take, so ask again.
+        if (DateTime.UtcNow - lastEquip > TimeSpan.FromSeconds(2.5) && !Services.Condition[ConditionFlag.Gathering]
+            && !Services.Condition[ConditionFlag.Fishing] && !Services.Condition[ConditionFlag.Casting])
+        {
+            GameState.EquipGearset(GameState.BestGearset(job));
+            lastEquip = DateTime.UtcNow;
+        }
         Wait(0.3);
     }
 
@@ -422,7 +443,7 @@ internal sealed unsafe class Crafter
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
             var hqIn = Current.Cosmic ? null : HqIngredients(Current);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
-                manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic,
+                manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused,
                 Current.Quality ?? (Current.Hq ? null : 0), hqIn, Current.SteadyHand);
             Status = "Working out the rotation";
             raphael.ForgetFailure(request);
@@ -679,6 +700,13 @@ internal sealed unsafe class Crafter
             if (stepIndex == stepIndexBefore && DateTime.UtcNow < deadline) { Wait(0.1); return; }
             actionPending = false; // applied, or timed out and we move on
         }
+        // Sitting down at the start of a craft, and every action's animation, lock actions for a moment; one sent then is
+        // refused. Wait the lock out (the game keeps it), and give the very first action a second after the window opens.
+        if (ActionManager.Instance()->AnimationLock > 0 || actionIndex == 0 && !fallback && DateTime.UtcNow - synthStarted < TimeSpan.FromSeconds(1))
+        {
+            Wait(0.1);
+            return;
+        }
 
         var job = Current!.Recipe.Job.ClassJobId();
         uint raphaelId;
@@ -701,9 +729,25 @@ internal sealed unsafe class Crafter
         CurrentAction = CraftActions.Name(raphaelId);
         if (!GameState.CanUse(type, id))
         {
-            if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(2);
+            // The first action gets a little longer: the craft can take a moment to accept actions.
+            if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(actionIndex == 0 ? 4 : 2);
             if (DateTime.UtcNow < deadline) { Wait(0.1); return; }
-            log($"Couldn't use {CurrentAction}; finishing with Basic Synthesis.", true);
+            var why = $"the game says {GameState.ActionStatus(type, id)}, step {actionIndex + 1} of {macro.Count}";
+            if (SpecialistActions.Contains(raphaelId) && !specialistRefused)
+            {
+                specialistRefused = true;
+                log("Specialist actions are left out of the rotations from now on (one was refused).", true);
+            }
+            // Not one the rotation hangs on: go on without it, and Basic Synthesis finishes what progress is left at the end.
+            if (!fallback && !Essential.Contains(raphaelId))
+            {
+                log($"Couldn't use {CurrentAction} ({why}); going on without it.", true);
+                LastQuality = -1;
+                actionIndex++;
+                deadline = default;
+                return;
+            }
+            log($"Couldn't use {CurrentAction} ({why}); finishing with Basic Synthesis.", true);
             fallback = true;
             LastQuality = -1;
             deadline = default;

@@ -39,6 +39,17 @@ public static class Planets
         _ => 1319,
     };
 
+    /// <summary>Dronebits cap here; they buy Drone Modules (Oizys and Auxesia only).</summary>
+    public const int DronebitCap = 5000;
+
+    /// <summary>The planet's dronebits (Oizys, Auxesia), or 0 where there are none.</summary>
+    public static uint Dronebit(this Planet p) => p switch
+    {
+        Planet.Oizys => 49170,
+        Planet.Auxesia => 49171,
+        _ => 0,
+    };
+
     /// <summary>The planet's own credit (Lunar Credit on Sinus Ardorum).</summary>
     public static uint CreditItem(this Planet p) => p switch
     {
@@ -128,6 +139,9 @@ public sealed record MissionStep(uint RecipeId, uint ItemId, uint IngredientId, 
 /// <summary>An item the objective asks for, and how many.</summary>
 public sealed record MissionTarget(uint ItemId, int Count);
 
+/// <summary>Where a mission happens: the middle of its map marker in world coordinates (x, z), and how far it reaches.</summary>
+public sealed record MissionMarker(float X, float Z, float Radius);
+
 /// <param name="Cosmocredits">Base amounts: a better score pays more (learned per mission, see <see cref="MissionRecord"/>).</param>
 /// <param name="TokenItem">Exploration Tokens on later planets' harder missions, or 0.</param>
 public sealed record MissionReward(int Cosmocredits, int PlanetCredits, int Dronebits, uint TokenItem = 0, int Tokens = 0);
@@ -138,6 +152,8 @@ public sealed record MissionReward(int Cosmocredits, int PlanetCredits, int Dron
 /// <param name="Steps">The recipes in crafting order, the ones in between first; empty for gatherers.</param>
 /// <param name="Targets">What the objective asks for: one item mostly, three different ones on some missions.</param>
 /// <param name="Previous">The mission before it in its chain, or 0.</param>
+/// <param name="Marker">Where gatherers (and fishers) work, from the mission's map marker; null for crafting missions.</param>
+/// <param name="Bait">The bait a fishing mission hands out, or 0.</param>
 public sealed record CosmicMission(
     uint Id,
     string Name,
@@ -156,7 +172,9 @@ public sealed record CosmicMission(
     StellarAction Action,
     int ActionCharges,
     MissionReward Reward,
-    uint Previous = 0)
+    uint Previous = 0,
+    MissionMarker? Marker = null,
+    uint Bait = 0)
 {
     public bool IsCraft => Steps.Count > 0;
 

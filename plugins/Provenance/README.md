@@ -98,7 +98,9 @@ keeps it from sliding things around.
   Cosmocredits, a shopping list from the Cosmocredit trader (bought when the credits are there), or until
   stopped, with an optional time limit. The Plan page shows which mission each crafter takes, Cosmocredits
   an hour and how long the goal takes, and suggests food and medicine when they'd reach better missions.
-  Gathering and fishing missions come later.
+  Two-class missions on Sinus Ardorum (a miner, botanist or fisher gathers, the crafter makes) and Cosmic
+  Fortunes (spending the planet's credits) are extras; Drone Modules can go on the shopping list. The
+  gatherers' and fisher's own missions come later.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
@@ -122,7 +124,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
 | Scrips | Buying books and materials at scrip exchanges, earning scrips with collectables (done) |
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
-| Cosmic Exploration | Crafting missions (done; since 0.18), then gathering missions with critical missions and red alerts, then fishing missions, then Cosmic Fortunes, Master and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
+| Cosmic Exploration | Crafting missions (done; since 0.18), two-class missions and Cosmic Fortunes (done; since 0.19), then gathering missions with critical missions and red alerts, then fishing missions, then Master missions and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
 
 ### To do
 

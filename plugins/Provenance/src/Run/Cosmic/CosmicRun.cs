@@ -18,7 +18,14 @@ namespace Provenance.Run.Cosmic;
 /// </summary>
 internal sealed unsafe class CosmicRun
 {
-    private enum Step { Idle, Travel, Choose, SwitchJob, OpenBoard, ReadBoard, Accept, Craft, Report, Buy, Finished }
+    private enum Step { Idle, Travel, Choose, SwitchJob, OpenBoard, ReadBoard, Accept, Gather, Craft, Report, Buy, Fortunes, Finished }
+
+    /// <summary>A two-class mission starts another round only with this much of its time left (gathering, then crafting).</summary>
+    private const int RoundSeconds = 300;
+    /// <summary>At most this many rounds of a two-class mission.</summary>
+    private const int MaxRounds = 2 * CosmicPlanner.TwoClassRounds;
+    /// <summary>The mission's score after the last round, to see a round still adds to it.</summary>
+    private uint roundScore;
 
     /// <summary>Keep this many Cosmocredits when buying materia at the cap.</summary>
     private const int MateriaFloor = 5000;
@@ -29,6 +36,15 @@ internal sealed unsafe class CosmicRun
     private readonly Crafter crafter;
     private readonly PlanetTrip trip = new();
     private readonly BookBuyer buyer;
+    private readonly FortuneDrawer fortunes;
+    private readonly CosmicGatherer gatherer;
+    /// <summary>What happens once the gearset change is done (a two-class mission's next gathering round).</summary>
+    private Action? afterSwitch;
+    private int rounds;
+    /// <summary>The loop finishes with this once the fortunes are drawn (null: it goes on).</summary>
+    private string? finishAfterFortunes;
+    /// <summary>Drawing failed once this run: not tried again until the next start.</summary>
+    private bool fortunesBroken;
     private readonly List<(DateTime At, string Text, bool Problem)> log = new();
     private readonly HashSet<string> saidOnce = new();
 
@@ -59,12 +75,16 @@ internal sealed unsafe class CosmicRun
     /// <summary>Cosmocredits spent at the trader during this run, so what was earned still adds up.</summary>
     private int spent;
     private int creditsBeforeBuying;
+    /// <summary>Times the plan was worked out again while nothing could be taken (a stuck plan ends the run after a few).</summary>
+    private int replans;
 
     public CosmicRun(Plugin plugin)
     {
         this.plugin = plugin;
         crafter = new Crafter(plugin, Log);
         buyer = new BookBuyer(plugin, Log);
+        fortunes = new FortuneDrawer(Log);
+        gatherer = new CosmicGatherer(plugin, Log);
     }
 
     public bool Active => step is not (Step.Idle or Step.Finished);
@@ -94,7 +114,7 @@ internal sealed unsafe class CosmicRun
         if (CosmicPlanner.TargetPlanet(Settings) is not { } planet)
             return $"Cosmic Exploration isn't open yet: it starts with the quest \"{Integrations.Cosmic.UnlockQuestName(Planet.SinusArdorum)}\".";
         if (!Integrations.Cosmic.Unlocked(planet)) return $"{planet.Name()} isn't open yet: it opens with the quest \"{Integrations.Cosmic.UnlockQuestName(planet)}\".";
-        if (Raphael.ExecutablePath() == null) return "raphael-cli.exe wasn't found next to Provenance, so rotations can't be worked out.";
+        if (Raphael.ExecutablePath() == null) return "Provenance's crafting solver (raphael-cli.exe) is missing next to it, so missions can't be worked out. Reinstalling Provenance brings it back.";
         if (Integrations.Cosmic.ActiveMission is var active and not 0 && Data.Mission(active) is { IsCraft: false } other)
             return $"The mission \"{other.Name}\" is under way and isn't a crafting one; finish or abandon it first.";
 
@@ -104,6 +124,7 @@ internal sealed unsafe class CosmicRun
         Problem = null;
         Missions = Golds = 0;
         spent = 0;
+        fortunesBroken = false;
         classIndex = 0;
         startedAt = DateTime.UtcNow;
         creditsAtStart = Integrations.Cosmic.Credits;
@@ -132,6 +153,9 @@ internal sealed unsafe class CosmicRun
     {
         trip.Cancel();
         buyer.Cancel();
+        fortunes.Cancel();
+        gatherer.Cancel();
+        afterSwitch = null;
         Integrations.Cosmic.CloseBoard();
         Interact.Close("WKSRecipeNotebook");
         if (problem) Problem = reason;
@@ -146,7 +170,9 @@ internal sealed unsafe class CosmicRun
 
     public void Tick()
     {
-        if (!Active || DateTime.UtcNow < waitUntil) return;
+        // Stopped mid-fishing: the rod is reeled in and stowed even though the loop is done.
+        if (!Active) { gatherer.WindDown(); return; }
+        if (DateTime.UtcNow < waitUntil) return;
         try
         {
             switch (step)
@@ -157,9 +183,11 @@ internal sealed unsafe class CosmicRun
                 case Step.OpenBoard: OpenBoard(); break;
                 case Step.ReadBoard: ReadBoard(); break;
                 case Step.Accept: Accept(); break;
+                case Step.Gather: TickGather(); break;
                 case Step.Craft: TickCraft(); break;
                 case Step.Report: Report(); break;
                 case Step.Buy: TickBuy(); break;
+                case Step.Fortunes: TickFortunes(); break;
             }
         }
         catch (Exception e)
@@ -186,6 +214,21 @@ internal sealed unsafe class CosmicRun
         // A mission already under way (taken by hand, or before a restart): craft it, when it's a crafting one.
         if (Integrations.Cosmic.ActiveMission is var active and not 0)
         {
+            if (data.Mission(active) is { IsCraft: true } tc && tc.Is(MissionKind.TwoClass))
+            {
+                classJob = tc.ClassJob;
+                Mission = tc;
+                expected = Tier.Bronze;
+                resumed = true;
+                rounds = 0;
+                roundScore = Integrations.Cosmic.Score;
+                missionStarted = DateTime.UtcNow;
+                creditsBefore = Integrations.Cosmic.Credits;
+                reportSent = false;
+                Log($"Carrying on with \"{tc.Name}\", already under way.", false);
+                StartRound(tc);
+                return;
+            }
             if (data.Mission(active) is { IsCraft: true } m && m.ClassJob is >= 8 and <= 15)
             {
                 classJob = m.ClassJob;
@@ -201,7 +244,7 @@ internal sealed unsafe class CosmicRun
             return;
         }
 
-        if (TimeUp()) { Finish($"Stopped after {Settings.TimeLimitMinutes} minutes, as set.", false); return; }
+        if (TimeUp()) { FinishAfterFortunes($"Stopped after {Settings.TimeLimitMinutes} minutes, as set."); return; }
         var credits = Integrations.Cosmic.Credits;
         if (Settings.Shopping.Count > 0)
         {
@@ -218,19 +261,35 @@ internal sealed unsafe class CosmicRun
         {
             // Close to the cap counts: the missions' credits beyond it would be lost anyway.
             case CosmicGoal.Cosmocredits when credits >= Math.Min(Settings.CreditsTarget, Planets.CosmocreditCap - CapMargin):
-                Finish($"Goal reached: {credits:N0} Cosmocredits.", false);
+                FinishAfterFortunes($"Goal reached: {credits:N0} Cosmocredits.");
                 return;
             case CosmicGoal.ShoppingList when Settings.Shopping.Count == 0:
-                Finish("The shopping list is empty.", false);
+                FinishAfterFortunes("The shopping list is empty.");
                 return;
-            case CosmicGoal.ShoppingList when credits >= CosmicPlanner.ShoppingCost(Settings, data):
-                StartBuying(Settings.Shopping.ToList(), "Buying the shopping list");
-                return;
+            case CosmicGoal.ShoppingList:
+            {
+                // Everything that can be bought here is paid for: buy it. Drone Modules of another planet wait for that planet.
+                var here = Settings.Shopping.Where(BuyableHere).ToList();
+                foreach (var w in Settings.Shopping.Except(here))
+                    if (saidOnce.Add("elsewhere" + w.ItemId))
+                        Log($"{plugin.Plans.Catalog?.ItemName(w.ItemId)} can only be bought on its own planet; it stays on the list.", true);
+                var affordable = Affordable();
+                if (here.Count > 0 && affordable.Count == here.Count && affordable.All(a => here.Any(h => h.ItemId == a.ItemId && h.Count == a.Count)))
+                {
+                    StartBuying(here, "Buying the shopping list");
+                    return;
+                }
+                var parts = affordable.Where(a => Item(a) is { } it && GameState.CurrencyCount(it.Currency) >= Cap(it) - CapMargin
+                                                  && here.Any(h => h.ItemId == a.ItemId && h.Count * it.Cost > Cap(it))).ToList();
+                if (parts.Count > 0) { StartBuying(parts, "Buying part of the shopping list (it costs more than the currency holds at once)"); return; }
+                if (here.Count == 0) { FinishAfterFortunes("Nothing left on the shopping list can be bought on this planet."); return; }
+                break;
+            }
         }
         // Near the cap more credits would be lost: spend some first (materia only with nothing on the shopping list).
         if (credits >= Planets.CosmocreditCap - CapMargin)
         {
-            var affordable = Affordable(credits);
+            var affordable = Affordable().Where(w => Item(w)?.Dronebits == false).ToList();
             if (affordable.Count > 0) { StartBuying(affordable, "At the Cosmocredit cap: buying from the shopping list"); return; }
             if (Settings.Shopping.Count == 0 && Settings.Has(CosmicExtra.MateriaAtCap) && MateriaOrders(credits) is { Count: > 0 } materia)
             {
@@ -241,12 +300,45 @@ internal sealed unsafe class CosmicRun
                 Log("Cosmocredits are at the cap, so what missions pay beyond it is lost. Put something on the shopping list, or turn on \"Buy materia at the Cosmocredit cap\".", true);
         }
 
+        if (Integrations.Cosmic.CurrentPlanet is { } planetHere)
+        {
+            var planetCredits = GameState.CurrencyCount(planetHere.CreditItem());
+            if (planetCredits >= Planets.PlanetCreditCap - FortuneDrawer.Price)
+            {
+                if (Settings.Has(CosmicExtra.CosmicFortunes) && !fortunesBroken && FortuneDrawer.CanDraw(planetHere)) { StartFortunes(planetHere, null); return; }
+                if (saidOnce.Add("planetcap"))
+                    Log($"{planetCredits:N0} of {Planets.PlanetCreditCap:N0} {planetHere.Name()} credits: what missions pay beyond the cap is lost. "
+                        + "Turn on Cosmic Fortunes (extras) to spend them.", true);
+            }
+            if (planetHere.Dronebit() is var bit and not 0 && GameState.CurrencyCount(bit) >= Planets.DronebitCap - 500)
+            {
+                var modules = Affordable().Where(w => Item(w)?.Dronebits == true).ToList();
+                if (modules.Count > 0) { StartBuying(modules, "Near the dronebit cap: buying Drone Modules from the shopping list"); return; }
+                if (saidOnce.Add("dronecap"))
+                    Log($"{GameState.CurrencyCount(bit):N0} of {Planets.DronebitCap:N0} dronebits: what missions pay beyond the cap is lost. "
+                        + (Settings.Shopping.Any(w => Item(w) is { Dronebits: true } it && it.Planet == planetHere)
+                            ? "The Drone Modules on the shopping list can't be paid for yet."
+                            : $"Put {planetHere.Name()} Drone Modules on the shopping list to spend them."), true);
+            }
+        }
+
         var plan = plugin.CosmicPlanner.Plan(fresh: true);
         var usable = plan.Classes.Where(c => c.Problem == null && c.Ranking.Best != null).Select(c => c.ClassJob).ToList();
+        if (usable.Count > 0) replans = 0;
         if (usable.Count == 0)
         {
             var why = plan.Problem ?? string.Join(" ", plan.Classes.Select(c => c.Problem ?? $"{CosmicPlanner.JobName(c.ClassJob)}: no mission it can open reaches silver with this gear."));
-            if (plan.Problem == null && plan.Classes.Any(c => c.Pending)) { Status = "Working out rotations"; Wait(1); return; }
+            if (plan.Problem == null && plan.Classes.Any(c => c.Pending))
+            {
+                if (plan.Settled)
+                {
+                    if (++replans > 4) { Finish("Working out the missions took too long; try again in a while (what was worked out is kept).", true); return; }
+                    plugin.CosmicPlanner.Replan();
+                }
+                Status = "Working out rotations";
+                Wait(1);
+                return;
+            }
             Finish(why.Length > 0 ? why : "None of the ticked crafters can take a mission.", true);
             return;
         }
@@ -277,6 +369,7 @@ internal sealed unsafe class CosmicRun
     {
         if (GameState.CurrentJob == classJob && !Services.Condition[ConditionFlag.Casting])
         {
+            if (afterSwitch is { } then) { afterSwitch = null; Wait(0.8); then(); return; }
             Go(Mission != null && Integrations.Cosmic.ActiveMission == Mission.Id ? Step.Craft : Step.OpenBoard, 0.8);
             if (step == Step.Craft) BeginCraft(Mission!);
             return;
@@ -333,14 +426,16 @@ internal sealed unsafe class CosmicRun
         if (job == null) { Finish($"{CosmicPlanner.JobName(classJob)}'s stats aren't known. Check your character on the Character page.", true); return; }
         var candidates = offered.Distinct().Select(data.Mission).OfType<CosmicMission>().Where(m => m.IsCraft && m.ClassJob == classJob && Allowed(m)).ToList();
         var consumables = CosmicPlanner.InUse(plugin);
-        var ranking = CosmicPicker.Rank(candidates, m => plugin.CosmicPlanner.Judge(m, job.Level, job.Stats, job.Manipulation, consumables), plugin.CosmicPlanner.Record);
+        var ranking = CosmicPicker.Rank(candidates,
+            m => m.Is(MissionKind.TwoClass) ? plugin.CosmicPlanner.JudgeTwoClass(m) : plugin.CosmicPlanner.Judge(m, job.Level, job.Stats, job.Manipulation, consumables),
+            plugin.CosmicPlanner.Record);
         // Every offered mission judged before picking, so a better one still being worked out isn't passed over; after
-        // three minutes the best of those judged, and with none judged at all, more waiting (up to ten).
+        // 30 seconds the best of those judged, and with none judged at all, more waiting (up to five minutes).
         var solving = ranking.Skipped.Count(x => x.Reason == CosmicPlanner.StillWorking);
         if (solving > 0)
         {
             var waited = DateTime.UtcNow - judgingSince;
-            if (waited < TimeSpan.FromMinutes(3) || ranking.Best == null && waited < TimeSpan.FromMinutes(10))
+            if (waited < TimeSpan.FromSeconds(CosmicPlanner.ThinkSeconds) || ranking.Best == null && waited < TimeSpan.FromMinutes(5))
             {
                 Status = $"Working out rotations for the board's missions ({candidates.Count - solving} of {candidates.Count})";
                 Wait(0.5);
@@ -362,10 +457,11 @@ internal sealed unsafe class CosmicRun
         Go(Step.Accept);
     }
 
-    /// <summary>Which special missions the extras allow (critical and two-class missions come with gathering, later).</summary>
+    /// <summary>Which special missions the extras allow (critical missions come with gathering, later).</summary>
     private bool Allowed(CosmicMission m)
     {
-        if (m.Is(MissionKind.Critical) || m.Is(MissionKind.TwoClass)) return false;
+        if (m.Is(MissionKind.Critical)) return false;
+        if (m.Is(MissionKind.TwoClass) && !(Settings.Has(CosmicExtra.TwoClassMissions) && Settings.Classes.Contains(m.SecondClassJob))) return false;
         if (m.Is(MissionKind.Master) && !Settings.Has(CosmicExtra.MasterMissions)) return false;
         if (m.Is(MissionKind.Chained) && !Settings.Has(CosmicExtra.ChainedMissions)) return false;
         if ((m.Is(MissionKind.Weather) || m.Is(MissionKind.Time)) && !Settings.Has(CosmicExtra.WeatherTimeMissions)) return false;
@@ -379,6 +475,17 @@ internal sealed unsafe class CosmicRun
         {
             Integrations.Cosmic.CloseBoard();
             Log($"Took {m.Label} (expecting {expected.ToString().ToLowerInvariant()}).", false);
+            if (m.Is(MissionKind.TwoClass))
+            {
+                missionStarted = DateTime.UtcNow;
+                creditsBefore = Integrations.Cosmic.Credits;
+                reportSent = false;
+                reportedTier = Tier.None;
+                rounds = 0;
+                roundScore = 0;
+                StartRound(m);
+                return;
+            }
             BeginCraft(m);
             return;
         }
@@ -401,10 +508,13 @@ internal sealed unsafe class CosmicRun
                 SteadyHand: m.Action == StellarAction.SteadyHand ? m.ActionCharges : 0, UseConsumables: Settings.UseConsumables));
         }
         if (jobs.Count == 0) { Finish($"The recipes of \"{m.Name}\" weren't found.", true); return; }
-        missionStarted = DateTime.UtcNow;
-        creditsBefore = Integrations.Cosmic.Credits;
-        reportSent = false;
-        reportedTier = Tier.None;
+        if (!m.Is(MissionKind.TwoClass))
+        {
+            missionStarted = DateTime.UtcNow;
+            creditsBefore = Integrations.Cosmic.Credits;
+            reportSent = false;
+            reportedTier = Tier.None;
+        }
         crafter.Begin(jobs);
         Go(Step.Craft);
     }
@@ -429,7 +539,62 @@ internal sealed unsafe class CosmicRun
             Finish("Crafting stopped: " + why + " The mission was abandoned.", true, missionLeft: false);
             return;
         }
+        if (Mission is { } tc && tc.Is(MissionKind.TwoClass))
+        {
+            if (Integrations.Cosmic.ActiveMission != tc.Id) { Go(Step.Report, 0.5); return; }
+            var score = Integrations.Cosmic.Score;
+            var rose = score > roundScore;
+            roundScore = score;
+            if (Integrations.Cosmic.Rank < Tier.Gold && rose && rounds < MaxRounds && TimeLeft(tc) > RoundSeconds && !TimeUp())
+            {
+                Log($"Round {rounds} done: {Integrations.Cosmic.Rank.ToString().ToLowerInvariant()} so far ({score:N0}), going round again for gold.", false);
+                StartRound(tc);
+                return;
+            }
+        }
         Go(Step.Report, 1.5);
+    }
+
+    /// <summary>Seconds a mission still has (its time limit since it was taken; plenty when it has none).</summary>
+    private double TimeLeft(CosmicMission m)
+        => m.TimeLimitSeconds <= 0 ? double.MaxValue : m.TimeLimitSeconds - (DateTime.UtcNow - missionStarted).TotalSeconds;
+
+    /// <summary>A two-class round: the gatherer's gearset, the material for one craft, then the crafter crafts it.</summary>
+    private void StartRound(CosmicMission m)
+    {
+        rounds++;
+        if (GameState.CurrentJob != m.ClassJob)
+        {
+            classJob = m.ClassJob;
+            afterSwitch = () => StartRound2(m);
+            EquipFor(m.ClassJob);
+            return;
+        }
+        StartRound2(m);
+    }
+
+    private void StartRound2(CosmicMission m)
+    {
+        var first = m.Steps[0];
+        var crafts = Math.Max(1, CosmicPicker.Crafts(m)[0]);
+        gatherer.Begin(m, first.IngredientId, crafts * first.IngredientAmount);
+        Go(Step.Gather);
+    }
+
+    private void TickGather()
+    {
+        gatherer.Tick();
+        Status = gatherer.Status;
+        if (!gatherer.Finished) return;
+        if (gatherer.Failure is { } why)
+        {
+            if (Integrations.Cosmic.ActiveMission != Mission!.Id) { Go(Step.Report, 0.5); return; }
+            if (Integrations.Cosmic.Rank > Tier.None) { Log(why + " Reporting what's done.", true); craftFailed = true; Go(Step.Report, 1); return; }
+            Integrations.Cosmic.Abandon();
+            Finish(why + " The mission was abandoned.", true, missionLeft: false);
+            return;
+        }
+        BeginCraft(Mission!);
     }
 
     private void Report()
@@ -481,21 +646,45 @@ internal sealed unsafe class CosmicRun
 
     // ------------------------------------------------------------------ buying
 
-    /// <summary>The shopping list's items the credits pay for now, in list order.</summary>
-    private List<CosmicWish> Affordable(int credits)
+    private CosmicShopItem? Item(CosmicWish w) => Data?.Shop.FirstOrDefault(x => x.ItemId == w.ItemId);
+
+    /// <summary>Sold where the loop is: the Cosmocredit trader's stock anywhere, Drone Modules only on their planet.</summary>
+    private bool BuyableHere(CosmicWish w)
+        => Item(w) is { } item && (item.Planet == null || item.Planet == Integrations.Cosmic.CurrentPlanet);
+
+    /// <summary>
+    /// The shopping list's items that what's at hand pays for now (each in its own currency), in list order: whole,
+    /// and, for one whose whole count costs more than its currency holds at its cap, as many as it pays for.
+    /// </summary>
+    private List<CosmicWish> Affordable()
     {
-        var data = Data!;
+        var budget = new Dictionary<uint, int>();
         var list = new List<CosmicWish>();
         foreach (var w in Settings.Shopping)
         {
-            if (data.Shop.FirstOrDefault(x => x.ItemId == w.ItemId) is not { } item) continue;
+            if (!BuyableHere(w) || Item(w) is not { } item) continue;
+            if (!budget.TryGetValue(item.Currency, out var have)) have = GameState.CurrencyCount(item.Currency);
             var cost = w.Count * item.Cost;
-            if (cost > credits) continue;
-            credits -= cost;
-            list.Add(w);
+            if (cost <= have)
+            {
+                budget[item.Currency] = have - cost;
+                list.Add(w);
+                continue;
+            }
+            var units = have / Math.Max(1, item.Cost);
+            if (cost > Cap(item) && units > 0)
+            {
+                budget[item.Currency] = have - units * item.Cost;
+                list.Add(new CosmicWish { ItemId = w.ItemId, Count = units });
+                continue;
+            }
+            budget[item.Currency] = have;
         }
         return list;
     }
+
+    /// <summary>Most of an item's currency there can be at once.</summary>
+    private static int Cap(CosmicShopItem item) => item.Dronebits ? Planets.DronebitCap : Planets.CosmocreditCap;
 
     /// <summary>The top crafter and gatherer materia, one of each in turn, down to <see cref="MateriaFloor"/> Cosmocredits.</summary>
     private List<CosmicWish> MateriaOrders(int credits)
@@ -524,11 +713,23 @@ internal sealed unsafe class CosmicRun
         foreach (var w in wishes)
         {
             if (data.Shop.FirstOrDefault(x => x.ItemId == w.ItemId) is not { } item) continue;
-            var labels = item.ShopId == 1770977
-                ? (IReadOnlyList<string>)new[] { "Materials/Materia/Items", "Materia" }
-                : new[] { "Cosmocredit Exchange" };
-            var offer = new ExchangeOffer(item.ItemId, npcId, npcName, npc.Territory, new Vector2(npc.Position.X, npc.Position.Z),
-                Planets.Cosmocredit, "Cosmocredits", item.Cost, item.ShopId, 0, 0, 0, labels);
+            ExchangeOffer offer;
+            if (item.Dronebits)
+            {
+                // Drone Modules: Kaede, on their own planet, for its dronebits.
+                if (item.Planet is not { } droneplanet || CosmicData.DroneTrader(droneplanet) is not { } kaede) continue;
+                var currencyName = plugin.Plans.Catalog?.ItemNamePlural(item.Currency) ?? "dronebits";
+                offer = new ExchangeOffer(item.ItemId, kaede.Id, "Kaede", kaede.Territory, new Vector2(kaede.Position.X, kaede.Position.Z),
+                    item.Currency, currencyName, item.Cost, item.ShopId, 0, 0, 0, new[] { DroneMenuText, "drone modules" });
+            }
+            else
+            {
+                var labels = item.ShopId == 1770977
+                    ? (IReadOnlyList<string>)new[] { "Materials/Materia/Items", "Materia" }
+                    : new[] { "Cosmocredit Exchange" };
+                offer = new ExchangeOffer(item.ItemId, npcId, npcName, npc.Territory, new Vector2(npc.Position.X, npc.Position.Z),
+                    Planets.Cosmocredit, "Cosmocredits", item.Cost, item.ShopId, 0, 0, 0, labels);
+            }
             orders.Add(new BookOrder(item.ItemId, offer, Math.Max(1, w.Count)));
         }
         if (orders.Count == 0) { Finish("Nothing on the list could be bought from the Cosmocredit trader.", true); return; }
@@ -550,10 +751,75 @@ internal sealed unsafe class CosmicRun
         // Bought: off the shopping list.
         if (buying != null)
             foreach (var w in buying)
-                Settings.Shopping.RemoveAll(x => x.ItemId == w.ItemId && x.Count <= w.Count);
+                if (Settings.Shopping.FirstOrDefault(x => x.ItemId == w.ItemId) is { } wish)
+                {
+                    wish.Count -= w.Count;
+                    if (wish.Count <= 0) Settings.Shopping.Remove(wish);
+                }
         buying = null;
         plugin.Config.Save();
-        if (Settings.Goal == CosmicGoal.ShoppingList && Settings.Shopping.Count == 0) { Finish("Bought everything on the shopping list.", false); return; }
+        if (Settings.Goal == CosmicGoal.ShoppingList && Settings.Shopping.Count == 0) { FinishAfterFortunes("Bought everything on the shopping list."); return; }
+        Go(Step.Choose, 1);
+    }
+
+    /// <summary>Kaede's "Acquire drone modules".</summary>
+    private static string DroneMenuText
+    {
+        get
+        {
+            try
+            {
+                var s = Services.Data.Excel.GetSheet<Lumina.Excel.RawRow>(Dalamud.Utility.ClientLanguageExtensions.ToLumina(Services.Data.Language), "custom/009/CtsWksTreasure_00966");
+                return s.GetRowOrDefault(10)?.ReadStringColumn(1).ExtractText().Trim().TrimEnd('.') ?? "Acquire drone modules";
+            }
+            catch
+            {
+                return "Acquire drone modules";
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ fortunes
+
+    /// <summary>Draws the planet's credits; then goes on (<paramref name="thenFinish"/> null) or finishes with that.</summary>
+    private void StartFortunes(Planet planet, string? thenFinish)
+    {
+        Integrations.Cosmic.CloseBoard();
+        finishAfterFortunes = thenFinish;
+        Log($"Drawing cosmic fortunes with {planet.Name()} credits.", false);
+        fortunes.Begin(planet);
+        Go(Step.Fortunes);
+    }
+
+    /// <summary>Finishes, drawing the planet's credits first when Cosmic Fortunes is on and there's enough for a draw.</summary>
+    private void FinishAfterFortunes(string reason)
+    {
+        if (Settings.Has(CosmicExtra.CosmicFortunes) && !fortunesBroken && Integrations.Cosmic.CurrentPlanet is { } p && FortuneDrawer.CanDraw(p))
+        {
+            StartFortunes(p, reason);
+            return;
+        }
+        Finish(reason, false);
+    }
+
+    private void TickFortunes()
+    {
+        fortunes.Tick();
+        Status = fortunes.Status;
+        if (!fortunes.Finished) return;
+        if (fortunes.Failure == null && fortunes.Draws == 0 && Integrations.Cosmic.CurrentPlanet is { } p
+            && GameState.CurrencyCount(p.CreditItem()) >= Planets.PlanetCreditCap - FortuneDrawer.Price)
+        {
+            Log("Cosmic Fortunes: no fortune could be drawn; leaving them for this run.", true);
+            fortunesBroken = true;
+        }
+        if (fortunes.Failure is { } why)
+        {
+            Log("Cosmic Fortunes: " + why, true);
+            // Without draws the credits would go over the cap again right away: don't try again this run.
+            fortunesBroken = true;
+        }
+        if (finishAfterFortunes is { } reason) { finishAfterFortunes = null; Finish(reason, false); return; }
         Go(Step.Choose, 1);
     }
 

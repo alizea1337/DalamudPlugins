@@ -88,7 +88,27 @@ internal static unsafe class GameState
     public static int BagCount(uint itemId)
     {
         var inv = InventoryManager.Instance();
-        return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0);
+        // The Cosmopouch too: a Cosmic Exploration mission's supplies and catches (its bait, the fish) live there.
+        return inv == null ? 0 : inv->GetInventoryItemCount(itemId, false, false, false, 0) + inv->GetInventoryItemCount(itemId, true, false, false, 0) + PouchCount(itemId);
+    }
+
+    /// <summary>How many of an item the Cosmopouch holds (Cosmic Exploration missions keep their items there; empty otherwise).</summary>
+    public static int PouchCount(uint itemId)
+    {
+        var inv = InventoryManager.Instance();
+        if (inv == null) return 0;
+        var total = 0;
+        foreach (var type in new[] { InventoryType.Cosmopouch1, InventoryType.Cosmopouch2 })
+        {
+            var container = inv->GetInventoryContainer(type);
+            if (container == null || !container->IsLoaded) continue;
+            for (var i = 0; i < container->Size; i++)
+            {
+                var slot = container->GetInventorySlot(i);
+                if (slot != null && slot->ItemId == itemId) total += slot->Quantity;
+            }
+        }
+        return total;
     }
 
     private static readonly Lazy<HashSet<uint>> GatheredCollectables = new(() =>
@@ -154,6 +174,9 @@ internal static unsafe class GameState
         => ActionManager.Instance()->UseAction(ActionType.Item, hq ? itemId + 1_000_000 : itemId, 0xE000_0000, 65535);
 
     public static bool CanUse(ActionType type, uint id) => ActionManager.Instance()->GetActionStatus(type, id) == 0;
+
+    /// <summary>Why the game won't take an action right now (0: it would), for the log.</summary>
+    public static uint ActionStatus(ActionType type, uint id) => ActionManager.Instance()->GetActionStatus(type, id);
 
     public static bool Use(ActionType type, uint id) => ActionManager.Instance()->UseAction(type, id);
 }

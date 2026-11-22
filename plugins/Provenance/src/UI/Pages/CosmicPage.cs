@@ -127,6 +127,17 @@ internal sealed class CosmicPage : Page
         }
         var pick = Ui.DropdownList("##planet", planetItems, S.Planet + 1, "");
         if (pick >= 0) { S.Planet = pick - 1; Config.Save(); }
+        // What's at hand against the caps: Cosmocredits everywhere, the planet's own credits, and dronebits where there are any.
+        if (CosmicPlanner.TargetPlanet(S) is { } at)
+        {
+            var parts = new List<string>
+            {
+                $"{Cosmic.Credits:N0} of {Planets.CosmocreditCap:N0} Cosmocredits",
+                $"{GameState.CurrencyCount(at.CreditItem()):N0} of {Planets.PlanetCreditCap:N0} {at.Name()} credits",
+            };
+            if (at.Dronebit() is var bit and not 0) parts.Add($"{GameState.CurrencyCount(bit):N0} of {Planets.DronebitCap:N0} dronebits");
+            using (Ui.F.Small.Push()) Ui.Wrapped(string.Join(", ", parts) + ".", Palette.TextMuted);
+        }
 
         ImGui.Dummy(new Vector2(0, 4 * s));
         using (Ui.F.Strong.Push()) Ui.Text("Crafters");
@@ -156,13 +167,20 @@ internal sealed class CosmicPage : Page
                 Config.Save();
             }
         }
-        // Gatherers come later; shown so it's clear they're coming, and why they can't be picked yet.
+        // Gatherers and the fisher: two-class missions for now (Sinus Ardorum, with the crafter they pair with).
         for (uint job = 16; job <= 18; job++)
         {
             var name = CosmicPlanner.JobName(job);
             Place(Ui.ToggleChipWidth(name, job));
-            Ui.ToggleChip("##cj" + job, name, Palette.WithAlpha(Palette.TextFaint, 0.6f), false, job);
-            Ui.Tooltip(job == 18 ? "Fishing missions come in a later version." : "Gathering missions come in the next version.");
+            var on = S.Classes.Contains(job);
+            if (Ui.ToggleChip("##cj" + job, name, Palette.ClassJobColor(job), on, job))
+            {
+                if (on) S.Classes.Remove(job);
+                else S.Classes.Add(job);
+                Config.Save();
+            }
+            Ui.Tooltip($"For now {name} takes two-class missions on Sinus Ardorum: it {(job == 18 ? "fishes" : "gathers")} the material and a crafter makes the item. "
+                       + $"Needs \"Two-class missions\" on under Extras and the crafter it pairs with ticked too. Its own missions come in a later version.");
         }
         ImGui.SetCursorScreenPos(start + new Vector2(0, y + 30 * s));
         ImGui.Dummy(new Vector2(inner, 0));
@@ -243,9 +261,11 @@ internal sealed class CosmicPage : Page
         new(CosmicExtra.RedAlerts, "Red alerts",
             "Going to a red alert's sites when one starts on the planet. Comes with gathering missions in the next version.", false),
         new(CosmicExtra.TwoClassMissions, "Two-class missions",
-            "Sinus Ardorum missions where a gatherer collects what a crafter then makes. They need gathering, which comes in the next version.", false),
+            "Sinus Ardorum missions where a miner, botanist or fisher gathers the material and a crafter makes the item, in rounds until gold. "
+            + "Tick both: the gatherer and the crafter it pairs with.", true),
         new(CosmicExtra.CosmicFortunes, "Cosmic Fortunes",
-            "Drawing Cosmic Fortunes whenever there are 1,000 planet credits for a spin (planet credits buy nothing else). Comes in a later version.", false),
+            "Draws cosmic fortunes with the planet's credits (1,000 a spin; they buy nothing else): when they near the 10,000 cap, and before the "
+            + "loop ends. Big Bang tickets are drawn too. It picks the wheel with the better prizes (unlockables, then rarer items).", true),
         new(CosmicExtra.MechOps, "Mech ops",
             "Taking part in mech ops. Comes in a later version.", false),
     };
@@ -307,7 +327,7 @@ internal sealed class CosmicPage : Page
             if (ImGui.InputInt("##wish" + wish.ItemId, ref count, 1, 10)) { wish.Count = Math.Clamp(count, 1, 999); Config.Save(); }
             ImGui.SameLine(0, 10 * s);
             ImGui.SetCursorPosY(rowY + 5 * s);
-            Ui.Muted($"{wish.Count * item.Cost:N0} Cosmocredits");
+            Ui.Muted($"{wish.Count * item.Cost:N0} {CurrencyName(item)}");
             ImGui.SameLine(0, 6 * s);
             ImGui.SetCursorPosY(rowY);
             if (Ui.IconButton("##unwish" + wish.ItemId, FontAwesomeIcon.Times, "Take it off the list", Ui.Kind.Danger)) remove = wish;
@@ -322,7 +342,8 @@ internal sealed class CosmicPage : Page
         if (Ui.DropdownField("##addshop", null, "Add something from the Cosmocredit trader", 400 * s, FontAwesomeIcon.Plus))
         {
             shopList = data.Shop.OrderBy(x => x.ShopId == 1770977 ? 0 : 1).ThenBy(x => x.Index).ToList();
-            shopItems = shopList.Select(x => new DropdownItem(x.Name, $"{x.Cost:N0}", GameIcon: x.Icon)).ToList();
+            shopItems = shopList.Select(x => new DropdownItem(x.Name, x.Dronebits ? $"{x.Cost:N0} dronebits" : $"{x.Cost:N0}", GameIcon: x.Icon,
+                Tooltip: x.Dronebits ? $"From Kaede on {x.Planet?.Name()}, for its dronebits; it only works on {x.Planet?.Name()}." : null)).ToList();
         }
         var pick = Ui.DropdownList("##addshop", shopItems, -1, "The trader's stock couldn't be read.", 420 * s);
         if (pick >= 0)
@@ -337,12 +358,26 @@ internal sealed class CosmicPage : Page
         {
             var cost = CosmicPlanner.ShoppingCost(S, data);
             var have = Cosmic.Credits;
-            using (Ui.F.Small.Push())
-                Ui.Wrapped(cost <= have ? $"Costs {cost:N0} Cosmocredits; you have {have:N0}, enough for all of it."
-                    : $"Costs {cost:N0} Cosmocredits; you have {have:N0}, so {cost - have:N0} to earn.", Palette.TextMuted);
+            if (cost > 0)
+                using (Ui.F.Small.Push())
+                    Ui.Wrapped(cost <= have ? $"Costs {cost:N0} Cosmocredits; you have {have:N0}, enough for all of it."
+                        : $"Costs {cost:N0} Cosmocredits; you have {have:N0}, so {cost - have:N0} to earn.", Palette.TextMuted);
+            foreach (var p in new[] { Planet.Oizys, Planet.Auxesia })
+            {
+                var bits = CosmicPlanner.DronebitCost(S, data, p);
+                if (bits <= 0) continue;
+                var got = GameState.CurrencyCount(p.Dronebit());
+                using (Ui.F.Small.Push())
+                    Ui.Wrapped($"{p.Name()} Drone Modules cost {bits:N0} dronebits; you have {got:N0}."
+                               + (bits > Planets.DronebitCap ? $" That's more than the {Planets.DronebitCap:N0} dronebits can hold at once, so they're bought in parts." : ""),
+                        Palette.TextMuted);
+            }
         }
         Ui.EndCard();
     }
+
+    private string CurrencyName(CosmicShopItem item)
+        => item.Dronebits ? Plans.Catalog?.ItemNamePlural(item.Currency) ?? "dronebits" : "Cosmocredits";
 
     /// <summary>"1 h 20 min", "45 min".</summary>
     public static string Duration(TimeSpan t)

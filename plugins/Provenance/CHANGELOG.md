@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.19.0
+
+- Fixed: the first action of a craft could be sent while the character was still sitting down to craft,
+  so the game refused it (seen with Quick Innovation), and the crafter then finished the item with Basic
+  Synthesis alone, burning the durability with CP left and quality low. The crafter now waits out the
+  game's animation lock before every action. Should the game still refuse one, the crafter skips it and
+  goes on with the rotation (Basic Synthesis only finishes what progress is left); only an action that
+  saves or restores durability still means Basic Synthesis. A refused specialist action (Heart and Soul,
+  Quick Innovation) leaves them out of the rotations for the rest of the session, and the log says the
+  game's reason, for bug reports.
+- Cosmic Exploration:
+  - **Two-class missions** (Sinus Ardorum): a miner, botanist or fisher gathers the material at the
+    mission's map marker (the fisher with the mission's bait, at the hole's recorded stands) and the
+    crafter it pairs with makes the item, round after round until gold, keeping time to report. Tick
+    both classes and turn on *Two-class missions* under Extras. Miner, Botanist and Fisher can be ticked
+    for that now; their own missions come later.
+  - **Cosmic Fortunes** (extra): draws with the planet's credits, 1,000 a spin, when they near the 10,000
+    cap and before the loop ends; Big Bang tickets are drawn too. It picks the wheel with the better
+    prizes (unlockables, then rarer items).
+  - **Drone Modules** can go on the shopping list: bought from Kaede on Oizys or Auxesia with that
+    planet's dronebits, and bought when dronebits near their 5,000 cap.
+  - The page shows Cosmocredits, the planet's credits and dronebits against their caps; the loop's log
+    says when one nears its cap and what would spend it.
+  - The Plan page shows a loading screen while Provenance works out the missions, and takes the
+    best found within 30 seconds; the plan then stays as it is until the planet, crafters, gear or food
+    change (or *Work it out again*), instead of switching around while late rotations come in. The loop
+    gives the board's missions the same 30 seconds.
+
 ## 0.18.0
 
 - **Cosmic Exploration** (new sidebar section *Expeditions*): a loop that does stellar missions on the

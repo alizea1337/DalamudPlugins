@@ -34,6 +34,12 @@ internal sealed partial class PlanPage
             return;
         }
 
+        if (!plan.Settled)
+        {
+            DrawPlanning(plan, w);
+            return;
+        }
+
         // The pace and the time to the goal.
         Ui.BeginCard(width: w);
         if (plan.Best is { Ranking.Best: { } top } best)
@@ -49,6 +55,10 @@ internal sealed partial class PlanPage
         if (!plan.RanksKnown)
             using (Ui.F.Small.Push())
                 Ui.Wrapped("Which mission classes you've opened is read once you're on a planet; until then it goes by level.", Palette.TextFaint);
+        if (Ui.LinkButton("Work it out again", Palette.TextMuted, FontAwesomeIcon.Redo,
+                "Judges the missions again, with what Provenance has worked out since (the plan otherwise stays as it is until the planet, crafters, gear or food change).",
+                "##replan"))
+            Plugin.CosmicPlanner.Replan();
         if (cs.UseConsumables)
         {
             ImGui.Dummy(new Vector2(0, 2 * s));
@@ -65,6 +75,49 @@ internal sealed partial class PlanPage
         Ui.EndCard();
 
         foreach (var c in plan.Classes) DrawCosmicClass(c, w);
+    }
+
+    /// <summary>
+    /// While Raphael works the rotations out: a small orbit, what's done of what, and how long until the best found so far
+    /// is taken. With Reduce motion the orbit stands still.
+    /// </summary>
+    private static void DrawPlanning(CosmicPlan plan, float w)
+    {
+        var s = Ui.S;
+        Ui.BeginCard(width: w, padding: 22);
+        var start = ImGui.GetCursorScreenPos();
+        var size = 64 * s;
+        var c = start + new Vector2(size / 2);
+        var dl = ImGui.GetWindowDrawList();
+        // A planet with a moon going round it.
+        var orbit = 26 * s;
+        dl.AddCircle(c, orbit, Palette.U32(Palette.Line), 48, 1.2f * s);
+        dl.AddCircleFilled(c, 11 * s, Palette.U32(Palette.Raised));
+        dl.AddCircle(c, 11 * s, Palette.U32(Palette.WithAlpha(Palette.Accent, 0.45f)), 32, 1.5f * s);
+        var angle = Ui.ReduceMotion ? -MathF.PI / 2 : (float)(ImGui.GetTime() * 2.4) - MathF.PI / 2;
+        for (var i = 3; i >= 1; i--)
+        {
+            // A short fading trail behind the moon.
+            var a = angle - i * 0.22f;
+            if (Ui.ReduceMotion) break;
+            dl.AddCircleFilled(c + new Vector2(MathF.Cos(a), MathF.Sin(a)) * orbit, (4.5f - i) * s, Palette.U32(Palette.WithAlpha(Palette.Accent, 0.35f - i * 0.08f)));
+        }
+        dl.AddCircleFilled(c + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * orbit, 5 * s, Palette.U32(Palette.Accent));
+        ImGui.Dummy(new Vector2(size));
+
+        ImGui.SameLine(0, 18 * s);
+        ImGui.BeginGroup();
+        var textW = Ui.CardInnerWidth - size - 18 * s;
+        using (Ui.F.Strong.Push()) Ui.Text("Working out the best missions");
+        Ui.Wrapped($"Provenance works out how each mission crafts with your crafters' gear. The best it finds within {CosmicPlanner.ThinkSeconds} seconds is used, "
+                   + "and the plan stays as it is after that.", Palette.TextMuted, textW);
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var fraction = plan.Total == 0 ? 0f : (float)plan.Judged / plan.Total;
+        Ui.Bar("##cosmicplanning", fraction, Palette.Accent, MathF.Min(textW, 360 * s));
+        using (Ui.F.Small.Push())
+            Ui.Muted($"{plan.Judged} of {plan.Total} {(plan.Total == 1 ? "mission" : "missions")} worked out, {Math.Ceiling(plan.SecondsLeft):0} seconds at most");
+        ImGui.EndGroup();
+        Ui.EndCard();
     }
 
     private void DrawCosmicClass(CosmicClassPlan c, float w)
@@ -90,7 +143,7 @@ internal sealed partial class PlanPage
                 using (Ui.F.Small.Push()) Ui.Wrapped("No mission reaches gold reliably with this gear, so the loop takes silver ones for now.", Palette.Warn);
         }
         else if (c.Ranking.Skipped.Any(x => x.Reason.StartsWith("Still working")))
-            Ui.Wrapped("Working out the best rotations…", Palette.TextMuted);
+            Ui.Wrapped($"Provenance didn't finish working out these missions within {CosmicPlanner.ThinkSeconds} seconds. \"Work it out again\" in a moment: the ones it finished meanwhile are kept.", Palette.TextMuted);
         else
             Ui.Wrapped("No mission it can open reaches silver with this gear.", Palette.Warn);
 

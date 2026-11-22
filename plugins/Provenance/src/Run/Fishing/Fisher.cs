@@ -88,6 +88,9 @@ internal sealed unsafe partial class Fisher : IDisposable
     private readonly Shopper shopper;
     private readonly BaitShop baitShop;
     private readonly Angler angler = new();
+
+    /// <summary>The rod-fishing session runner, lent to the Cosmic loop's fisher missions (an order run and the loop never run together).</summary>
+    public Angler Angler => angler;
     private readonly SpearGame spear = new();
 
     private List<GatherTarget> targets = new();
