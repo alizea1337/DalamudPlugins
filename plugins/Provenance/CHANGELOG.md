@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.10
+
+- Expeditions: placeholder pages for Tribes, Custom Deliveries, The Diadem and Ocean Fishing. They only say
+  what they're planned for; nothing on them works yet. Their sidebar rows sit a step quieter and say
+  "Not built yet" on hover.
+
 ## 0.19.9
 
 - Fixed (Cosmic Fortunes): the game could crash at the fortune wheels. Picking the second wheel sent the

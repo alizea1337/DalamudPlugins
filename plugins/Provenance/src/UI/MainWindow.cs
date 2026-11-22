@@ -443,7 +443,10 @@ internal sealed class MainWindow : Window
             var gs = ImGui.CalcTextSize(glyph);
             dl.AddText(new Vector2(min.X + 20 * s - gs.X / 2, midY - gs.Y / 2), Palette.U32(iconColor), glyph);
         }
-        var textColor = Palette.Mix(Palette.Mix(Palette.TextMuted, Palette.Text, lift), Palette.Text, on);
+        // A page not built yet sits a step quieter (still readable: about 5:1 on the sidebar) and says so on hover.
+        var idleText = page.Placeholder ? Palette.Mix(Palette.TextMuted, Palette.TextFaint, 0.35f) : Palette.TextMuted;
+        var textColor = Palette.Mix(Palette.Mix(idleText, Palette.Text, lift), Palette.Text, on);
+        if (page.Placeholder && hovered) Ui.ShowTooltip("Not built yet: this page is a placeholder.");
         dl.AddText(new Vector2(min.X + 38 * s, midY - ImGui.GetTextLineHeight() / 2), Palette.U32(textColor), page.Title);
 
         var right = max.X - 10 * s;

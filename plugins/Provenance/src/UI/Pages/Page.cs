@@ -35,6 +35,9 @@ internal abstract class Page
     /// <summary>Small count drawn on the sidebar row (for example items still missing).</summary>
     public virtual (int Count, Vector4 Color)? Badge => null;
 
+    /// <summary>Not built yet: its sidebar row sits a step quieter (with a hover note) and the page only says so.</summary>
+    public virtual bool Placeholder => false;
+
     /// <summary>A dot on the sidebar row for something under way; it pulses while it works.</summary>
     public virtual (Vector4 Color, bool Pulse)? Live => null;
 

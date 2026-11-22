@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using Dalamud.Game.Command;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Provenance.Data;
@@ -55,7 +56,14 @@ public sealed class Plugin : IDalamudPlugin
         {
             new(null, new Page[] { new BrowsePage(this), new PlanPage(this) }),
             new("Status", new Page[] { new RunPage(this) }),
-            new("Expeditions", new Page[] { new CosmicPage(this) }),
+            new("Expeditions", new Page[]
+            {
+                new CosmicPage(this),
+                new PlaceholderPage(this, "Tribes", FontAwesomeIcon.Handshake, "the daily allied society (tribe) quests, from taking them to handing them in"),
+                new PlaceholderPage(this, "Custom Deliveries", FontAwesomeIcon.BoxOpen, "the weekly custom deliveries, making what each client asks for and delivering it"),
+                new PlaceholderPage(this, "The Diadem", FontAwesomeIcon.Cloud, "gathering in the Diadem"),
+                new PlaceholderPage(this, "Ocean Fishing", FontAwesomeIcon.Ship, "ocean fishing voyages"),
+            }),
             new("Tools", new Page[] { new CharacterPage(this) }),
             new("Settings", new Page[]
             {
