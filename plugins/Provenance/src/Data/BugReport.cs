@@ -150,6 +150,13 @@ internal static class BugReport
             foreach (var e in plugin.CosmicLoop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
         }
 
+        var debug = Integrations.DebugLog.Recent(150);
+        if (debug.Count > 0)
+        {
+            Section("Debug log (last lines, oldest first; the whole of today's is in the plugin's logs folder)");
+            foreach (var l in debug) Line(l);
+        }
+
         // ---------------------------------------------------------------- settings and plugins
         Section("Settings");
         var c = plugin.Config;

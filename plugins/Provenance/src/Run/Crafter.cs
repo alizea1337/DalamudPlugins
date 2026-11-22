@@ -452,6 +452,8 @@ internal sealed unsafe class Crafter
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused,
                 Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed));
             Status = "Working out the rotation";
+            DebugLog.Write("crafter", $"solve recipe {r.RecipeId} ({plugin.Plans.Catalog!.ItemName(r.ItemId)}), level {request.Level}, stats {request.Craftsmanship}/{request.Control}/{request.Cp}, "
+                                      + $"Steady Hand {request.SteadyHand}, target {request.TargetQuality?.ToString() ?? "max"}, specialist {request.Specialist}, manipulation {request.Manipulation}, cosmic {Current.Cosmic}");
             raphael.ForgetFailure(request);
             macroHq = hqIn;
             solvingFor = request;
@@ -479,6 +481,7 @@ internal sealed unsafe class Crafter
         var solution = task.Result;
         macro = solution.Actions.ToList();
         LastQuality = solution.FinalQuality;
+        DebugLog.Write("crafter", $"rotation {macro.Count} steps, quality {solution.FinalQuality} of {solution.MaxQuality}: {string.Join(" ", macro)}");
         var name = plugin.Plans.Catalog!.ItemName(r.ItemId);
         if (solvingFor is { } asked)
             LastSolve = $"{name} (recipe {r.RecipeId}{(Current.Hq ? ", HQ" : "")}): Craftsmanship {asked.Craftsmanship}, Control {asked.Control}, CP {asked.Cp}, level {asked.Level}, "
@@ -555,6 +558,7 @@ internal sealed unsafe class Crafter
     /// <summary>A mission recipe's ingredients come from the Cosmopouch: HQ ones first (they start the craft with quality), then NQ.</summary>
     private void CosmicIngredients()
     {
+        if (macro.Count == 0) { Go(Step.Solve); return; }
         if (!Ready(CosmicNotebook) || SelectedRecipe() != Current!.Recipe.RecipeId) { Go(Step.OpenRecipe); return; }
         var entry = SelectedEntry();
         if (entry == null) { Wait(0.3); return; }
@@ -665,6 +669,7 @@ internal sealed unsafe class Crafter
             actionPending = false;
             fallback = false;
             stepIndexBefore = -1;
+            DebugLog.Write("crafter", $"synthesis started: recipe {Current!.Recipe.RecipeId}, craft {doneThisJob + 1} of {Current.Crafts}, rotation {macro.Count} steps");
             Status = $"Crafting {plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId)}";
             Go(Step.Acting);
             return;
@@ -762,6 +767,7 @@ internal sealed unsafe class Crafter
         deadline = DateTime.UtcNow.AddSeconds(6);
         stepIndexBefore = stepIndex;
         actionPending = GameState.Use(type, id);
+        DebugLog.Write("crafter", $"step {actionIndex + 1}/{macro.Count} {CurrentAction} ({id}){(fallback ? " fallback" : "")}: {(actionPending ? "sent" : "not sent")}");
         if (actionPending) actionsUsed++;
         if (actionPending && raphaelId == StellarSteadyHand) SteadyHandUsed++;
         if (actionPending && !fallback) actionIndex++;
@@ -790,10 +796,12 @@ internal sealed unsafe class Crafter
         var name = plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId);
         log($"Crafted {name} ({doneThisJob} of {Current.Crafts}).", false);
         if (Current.Cosmic && macro.Contains(StellarSteadyHand)) macro.Clear();
+        DebugLog.Write("crafter", $"crafted {name} ({doneThisJob} of {Current.Crafts}), {actionsUsed} actions, rotation quality {LastQuality}, Steady Hand used {SteadyHandUsed}");
         Crafted?.Invoke(Current.Recipe);
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
-        Go(doneThisJob < Current.Crafts ? Step.Ingredients : Step.NextRecipe, keepWait: true);
+        // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.
+        Go(doneThisJob < Current.Crafts ? macro.Count == 0 ? Step.Solve : Step.Ingredients : Step.NextRecipe, keepWait: true);
     }
 
     // ------------------------------------------------------------------ helpers

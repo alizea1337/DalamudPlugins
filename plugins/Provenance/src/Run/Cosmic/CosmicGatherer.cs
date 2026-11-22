@@ -94,7 +94,8 @@ internal sealed unsafe class CosmicGatherer
         windingDown = false;
     }
 
-    private int Have => GameState.PouchCount(item);
+    /// <summary>What's gathered so far: in the bags or the Cosmopouch.</summary>
+    private int Have => GameState.BagCount(item);
 
     public void Tick()
     {

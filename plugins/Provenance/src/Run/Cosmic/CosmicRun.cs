@@ -549,6 +549,9 @@ internal sealed unsafe class CosmicRun
             }
             if (ranking.Best == null) { Finish("Working out the rotations for the board's missions took too long.", true); return; }
         }
+        DebugLog.Write("cosmic", $"board for {classJob}: [{string.Join(",", offered.Distinct())}]; ranked: "
+                                 + string.Join("; ", ranking.Choices.Take(6).Select(c => $"{c.Mission.Id} {c.Mission.Label} {c.Judgement.Tier} {c.CreditsPerHour:0}/h ({c.Judgement.Reason})"))
+                                 + "; skipped: " + string.Join("; ", ranking.Skipped.Take(6).Select(x => $"{x.Mission.Id} {x.Reason}")));
         if (ranking.Best is not { } best)
         {
             Log($"{CosmicPlanner.JobName(classJob)}: nothing on the board it reliably reaches silver on with this gear; trying another crafter.", false);
@@ -659,6 +662,7 @@ internal sealed unsafe class CosmicRun
         {
             var score = Integrations.Cosmic.Score;
             var rose = score > roundScore;
+            DebugLog.Write("cosmic", $"after the crafts: rank {Integrations.Cosmic.Rank}, score {score} (was {roundScore}), extra crafts {extraCrafts}, time left {TimeLeft(more):0} s, Steady Hand left {steadyHandLeft}");
             roundScore = score;
             if (rose && extraCrafts < MaxExtraCrafts && TimeLeft(more) > 60 && OneMore(more) is { Count: > 0 } jobs)
             {
@@ -696,7 +700,10 @@ internal sealed unsafe class CosmicRun
         var supplies = 0;
         for (var i = 0; i < m.Steps.Count; i++)
             if (m.Steps[i].IngredientId == m.SuppliedItem) supplies += crafts[i] * m.Steps[i].IngredientAmount;
-        if (m.SuppliedItem == 0 || GameState.PouchCount(m.SuppliedItem) < supplies) return new List<CraftJob>();
+        // The supplies can sit in the bags or the Cosmopouch: both count.
+        var have = m.SuppliedItem == 0 ? 0 : GameState.BagCount(m.SuppliedItem);
+        DebugLog.Write("cosmic", $"one more {final.ItemId}: {supplies} of {m.SuppliedItem} needed, {have} at hand (pouch {GameState.PouchCount(m.SuppliedItem)})");
+        if (m.SuppliedItem == 0 || have < supplies) return new List<CraftJob>();
         var jobs = new List<CraftJob>();
         for (var i = 0; i < m.Steps.Count; i++)
             if (crafts[i] > 0 && (catalog.CosmicRecipe(m.Steps[i].RecipeId) ?? catalog.Recipe(m.Steps[i].RecipeId)) is { } recipe)
@@ -999,11 +1006,16 @@ internal sealed unsafe class CosmicRun
         log.Add((DateTime.Now, text, problem));
         if (log.Count > 200) log.RemoveAt(0);
         Services.Log.Information("[Cosmic] {Text}", text);
+        DebugLog.Write("cosmic", (problem ? "[!] " : "") + text);
     }
 
     private void Go(Step next, double wait = 0, bool keepDeadline = false)
     {
-        if (next != step) tries = 0;
+        if (next != step)
+        {
+            tries = 0;
+            DebugLog.Write("cosmic", $"step {step} -> {next}; mission {Integrations.Cosmic.ActiveMission}, score {Integrations.Cosmic.Score}, rank {Integrations.Cosmic.Rank}, job {GameState.CurrentJob}");
+        }
         step = next;
         if (!keepDeadline) deadline = default;
         if (wait > 0) Wait(wait);

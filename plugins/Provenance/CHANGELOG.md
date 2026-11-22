@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.19.8
+
+- Fixed (Cosmic Exploration): the second craft of a mission with Stellar Steady Hand started without a
+  rotation and was finished with Basic Synthesis alone, so it broke. Its rotation was dropped to be worked
+  out again for the uses left, but the craft didn't wait for the new one; now it does.
+- Fixed (Cosmic Exploration): crafting another item for gold didn't see the Cosmic Containers left when
+  they sat in the bags rather than the Cosmopouch, so a mission was reported after one craft. Supplies
+  and gathered materials now count wherever they are.
+- A detailed debug log: every step of the Cosmic loop and the crafter, what the board offered and how it
+  was judged, each rotation and action, and each decision with its numbers, kept in memory and in a file
+  per day in the plugin's logs folder (a week's worth). The bug report carries its last 150 lines.
+
 ## 0.19.7
 
 - New option (After the order): *Also after Cosmic Exploration*. With it on, the Cosmic Exploration loop
