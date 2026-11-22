@@ -59,6 +59,11 @@ internal static class Palette
     }
 
     public static readonly Vector4 Danger = Hex(0xEF8F8F);
+
+    /// <summary>Medal colours for a podium: gold, silver, bronze.</summary>
+    public static readonly Vector4 Gold = Hex(0xE9C46A);
+    public static readonly Vector4 Silver = Hex(0xC8CFD9);
+    public static readonly Vector4 Bronze = Hex(0xD6A06E);
     public static readonly Vector4 Warn = Hex(0xE8C77D);
 
     public static Vector4 JobColor(Job job) => job switch

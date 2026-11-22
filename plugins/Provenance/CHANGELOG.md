@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.6
+
+- Character page: in the food and medicine lists, the three that add the most at your stats wear a pill
+  on the right, *Best* in gold, *2nd best* in silver and *3rd best* in bronze, instead of a few words at
+  the start of the line where they got lost.
+
 ## 0.19.5
 
 - Cosmic Exploration, from the first runs in game:

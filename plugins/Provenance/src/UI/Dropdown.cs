@@ -18,8 +18,10 @@ namespace Provenance.UI;
 /// <param name="Job">A ClassJob row: its glyph, in the job's colour, leads the label.</param>
 /// <param name="Disabled">Shown faded and can't be picked (the tooltip says why).</param>
 /// <param name="Tooltip">Shown while the row is hovered.</param>
+/// <param name="Pill">A tinted pill at the row's right edge, with an icon and a word, in its colour ("Best" in gold).</param>
 internal sealed record DropdownItem(string Label, string? Detail = null, string? Sub = null, string? Badge = null,
-    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null, uint Job = 0, bool Disabled = false, string? Tooltip = null);
+    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null, uint Job = 0, bool Disabled = false, string? Tooltip = null,
+    (string Text, Vector4 Color, FontAwesomeIcon Icon)? Pill = null);
 
 /// <summary>
 /// The select field and its list. The field is a pill with the current choice and a chevron; the list
@@ -338,6 +340,26 @@ internal static partial class Ui
         {
             dl.AddCircleFilled(new Vector2(x + 4 * s, top + bodyH / 2), 4 * s, Palette.U32(c));
             x += 18 * s;
+        }
+
+        // The pill sits at the right edge, centred on the label's line; the badge or detail goes to its left.
+        if (item.Pill is { } pill)
+        {
+            float pw, ph = 20 * s, iw, tw2;
+            using (F.IconSmall.Push()) iw = ImGui.CalcTextSize(pill.Icon.ToIconString()).X;
+            using (F.Small.Push()) tw2 = ImGui.CalcTextSize(pill.Text).X;
+            pw = 8 * s + iw + 5 * s + tw2 + 9 * s;
+            var py = top + (bodyH - ph) / 2;
+            var pmin = new Vector2(right - pw, py);
+            dl.AddRectFilled(pmin, pmin + new Vector2(pw, ph), Palette.U32(Palette.WithAlpha(pill.Color, 0.16f)), ph / 2);
+            using (F.IconSmall.Push())
+            {
+                var isz = ImGui.CalcTextSize(pill.Icon.ToIconString());
+                dl.AddText(new Vector2(pmin.X + 8 * s, py + (ph - isz.Y) / 2), Palette.U32(pill.Color), pill.Icon.ToIconString());
+            }
+            using (F.Small.Push())
+                dl.AddText(new Vector2(pmin.X + 8 * s + iw + 5 * s, py + (ph - ImGui.GetTextLineHeight()) / 2), Palette.U32(pill.Color), pill.Text);
+            right -= pw + 10 * s;
         }
 
         var tail = item.Badge ?? item.Detail;

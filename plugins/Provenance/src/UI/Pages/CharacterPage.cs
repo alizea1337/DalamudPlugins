@@ -430,10 +430,17 @@ internal sealed class CharacterPage : Page
             foreach (var c in options)
             {
                 var owned = Plans.Owned.GetValueOrDefault(c.ItemId);
-                var place = best.IndexOf(c.ItemId);
-                var rank = place switch { 0 => "Best at your stats. ", 1 => "Second best. ", 2 => "Third best. ", _ => "" };
-                items.Add(new DropdownItem(c.Name, Sub: rank + Describe(c, choice.Hq, d), Badge: owned > 0 ? $"{owned} in your bags" : null,
-                    GameIcon: c.Icon, Hq: choice.Hq && c.CanBeHq));
+                // The three that add the most at your stats wear a gold, silver or bronze pill (word and medal, not just colour).
+                (string, Vector4, FontAwesomeIcon)? pill = best.IndexOf(c.ItemId) switch
+                {
+                    0 => ("Best", Palette.Gold, FontAwesomeIcon.Medal),
+                    1 => ("2nd best", Palette.Silver, FontAwesomeIcon.Medal),
+                    2 => ("3rd best", Palette.Bronze, FontAwesomeIcon.Medal),
+                    _ => null,
+                };
+                items.Add(new DropdownItem(c.Name, Sub: Describe(c, choice.Hq, d), Badge: owned > 0 ? $"{owned} in your bags" : null,
+                    GameIcon: c.Icon, Hq: choice.Hq && c.CanBeHq, Pill: pill,
+                    Tooltip: pill == null ? null : $"{pill.Value.Item1} at your stats: ranked by what it adds, {ClassJobs.StatName(d, 2)} counting double."));
             }
             pickerOptions[id] = options;
             pickerItems[id] = items;
