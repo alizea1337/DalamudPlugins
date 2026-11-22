@@ -426,18 +426,21 @@ internal sealed class CharacterPage : Page
         {
             var options = catalog.Consumables.Where(c => c.Kind == kind && c.Discipline == d).ToList();
             var items = new List<DropdownItem> { new("None", Sub: "No " + label.ToLowerInvariant()) };
+            var best = Ranked(kind, d).Select(r => r.C.ItemId).ToList();
             foreach (var c in options)
             {
                 var owned = Plans.Owned.GetValueOrDefault(c.ItemId);
-                items.Add(new DropdownItem(c.Name, Sub: Describe(c, choice.Hq, d), Badge: owned > 0 ? $"{owned} in your bags" : null,
+                var place = best.IndexOf(c.ItemId);
+                var rank = place switch { 0 => "Best at your stats. ", 1 => "Second best. ", 2 => "Third best. ", _ => "" };
+                items.Add(new DropdownItem(c.Name, Sub: rank + Describe(c, choice.Hq, d), Badge: owned > 0 ? $"{owned} in your bags" : null,
                     GameIcon: c.Icon, Hq: choice.Hq && c.CanBeHq));
             }
             pickerOptions[id] = options;
             pickerItems[id] = items;
         }
-        Ui.Tooltip(current == null
-            ? $"No {label.ToLowerInvariant()} is used. Pick one to see what it adds to each job's stats."
-            : Describe(current, choice.Hq, d));
+        Ui.Tooltip((current == null
+            ? $"No {label.ToLowerInvariant()} is used."
+            : $"Picked: {current.Name}: {Describe(current, choice.Hq, d)}.") + BestText(kind, d));
 
         if (current is { CanBeHq: true })
         {
@@ -453,6 +456,42 @@ internal sealed class CharacterPage : Page
         var pick = Ui.DropdownList(id, pickerItems.GetValueOrDefault(id), selected, "Nothing of this kind in the game data.", 460 * s);
         if (pick == 0) { choice.ItemId = 0; Config.Save(); }
         else if (pick > 0 && listed != null) { choice.ItemId = listed[pick - 1].ItemId; Config.Save(); }
+    }
+
+    /// <summary>
+    /// The three foods (or medicines) that add the most at the strongest crafter's (or gatherer's) gearset stats, HQ where
+    /// they come HQ: the primary and secondary stats as they are, CP (or GP) counting double, as it's what runs out first.
+    /// </summary>
+    private List<(ConsumableInfo C, int[] Bonus, int[] Stats)> Ranked(ConsumableKind kind, Discipline d)
+    {
+        var catalog = Plans.Catalog;
+        var jobs = Plans.Profile?.Jobs.Where(j => d == Discipline.Hand ? ClassJobs.IsCrafter(j.ClassJobId) : !ClassJobs.IsCrafter(j.ClassJobId) && j.ClassJobId is >= 16 and <= 18)
+            .Where(j => j.Stats.Length >= 3 && j.Stats[0] > 0).ToList();
+        if (catalog == null || jobs is not { Count: > 0 }) return new();
+        var stats = jobs.MaxBy(j => j.Stats[0] + j.Stats[1] + j.Stats[2])!.Stats;
+        return catalog.Consumables.Where(c => c.Kind == kind && c.Discipline == d)
+            .Select(c => (C: c, Bonus: c.Bonus(stats, true), Stats: stats))
+            .OrderByDescending(r => r.Bonus[0] + r.Bonus[1] + 2 * r.Bonus[2])
+            .ThenByDescending(r => r.C.ItemLevel)
+            .Take(3).ToList();
+    }
+
+    /// <summary>"Best at your stats: 1. …, 2. …, 3. …" for the picker's tooltip.</summary>
+    private string BestText(ConsumableKind kind, Discipline d)
+    {
+        var ranked = Ranked(kind, d);
+        var nl = Environment.NewLine;
+        if (ranked.Count == 0) return nl + nl + "Check your character to see which add the most at your stats.";
+        var stats = ranked[0].Stats;
+        var lines = ranked.Select((r, i) =>
+        {
+            var gains = Enumerable.Range(0, 3).Where(k => r.Bonus[k] > 0).Select(k => $"{ClassJobs.StatName(d, k)} +{r.Bonus[k]}");
+            return $"{i + 1}. {r.C.Name}{(r.C.CanBeHq ? " (HQ)" : "")}: {string.Join(", ", gains)}";
+        });
+        var points = ClassJobs.StatName(d, 2);
+        return nl + nl + $"Best at your stats ({ClassJobs.StatName(d, 0)} {stats[0]:N0}, {ClassJobs.StatName(d, 1)} {stats[1]:N0}, {points} {stats[2]:N0}):"
+               + nl + string.Join(nl, lines)
+               + nl + nl + $"Ranked by what each adds at those stats, {points} counting double (it's what runs out first).";
     }
 
     private static string Describe(ConsumableInfo c, bool hq, Discipline d)

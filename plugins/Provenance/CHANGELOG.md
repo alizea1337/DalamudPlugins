@@ -15,6 +15,9 @@
     Yes and No), so it waited, then gave up before picking a wheel.
   - The compact strip shows the Cosmic loop (mission, Cosmocredits against the goal) with Start and
     Stop, instead of the empty order.
+- Character page: the food and medicine pickers' tooltips name the three that add the most at your
+  stats (the strongest crafter's or gatherer's gearset, HQ where they come HQ), with what each adds; the
+  list marks them too. Ranked by what they add, CP (or GP) counting double.
 
 ## 0.19.4
 
