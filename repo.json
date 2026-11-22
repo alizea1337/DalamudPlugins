@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed (Cosmic Fortunes): the game could crash at the fortune wheels. Picking the second wheel sent the\n  game a click it wasn't made for. The wheel is now picked the way the game itself marks it, with no\n  click; the prizes are read only from what the window really holds (a draw can come with one wheel);\n  and Spin is pressed only once it's there and enabled. When the game offers another draw on the spot,\n  it says yes while there's enough to pay with, and no otherwise.\n- Cosmic Exploration: no more long wait before reporting a mission. After a mission's last craft the\n  game doesn't open its crafting log again, and the crafter waited eight seconds for it each time; now a\n  moment.\n- The debug log goes per run: every order run and every Cosmic loop writes a file of its own (the plugin's\n  logs folder, the last 40 runs), and the bug report carries the whole run going and the one before it\n  (up to 5,000 lines each), so an early problem in a long run, or a run that ended in a crash, comes\n  along. The order run's log goes in too, and Cosmic Fortunes notes every step (menu, wheels and prizes,\n  clicks, draws).\r\n",
+    "Changelog": "- Expeditions: placeholder pages for Tribes, Custom Deliveries, The Diadem and Ocean Fishing. They only say\n  what they're planned for; nothing on them works yet. Their sidebar rows sit a step quieter and say\n  \"Not built yet\" on hover.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.9.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.9/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.9/latest.zip",
+    "AssemblyVersion": "0.19.10.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.10/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.10/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795388089
+    "LastUpdate": 1795388575
   }
 ]
