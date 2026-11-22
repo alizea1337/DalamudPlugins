@@ -326,9 +326,13 @@ internal sealed class CosmicPlanner
     {
         var steps = new List<int>(m.Steps.Count);
         RaphaelSolution? final = null;
-        foreach (var step in m.Steps)
+        for (var i = 0; i < m.Steps.Count; i++)
         {
+            var step = m.Steps[i];
+            // The steps before the last only need to finish for the judgement (it goes by the last one's quality), so
+            // those are worked out for progress only, much faster. The craft itself still aims every step at full quality.
             var request = Request(m, step, level, stats, manipulation, consumables);
+            if (i < m.Steps.Count - 1 && m.Targets.All(t => t.ItemId != step.ItemId)) request = request with { TargetQuality = 0 };
             var task = plugin.Raphael.Solve(request);
             if (!task.IsCompleted) return null;
             if (!task.IsCompletedSuccessfully)

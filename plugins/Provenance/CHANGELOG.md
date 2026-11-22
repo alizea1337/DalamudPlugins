@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.2
+
+- Crafting rotations are kept between sessions (next to the settings): once worked out, a recipe at the
+  same stats, level and food is there at once next time, so the Cosmic plan and order estimates come
+  up much faster after the first time. A new raphael-cli starts them afresh.
+- Up to three rotations are worked out at a time (was two).
+- The Cosmic plan works out a mission's steps in between (pulp before the paper) for progress only:
+  the judgement only goes by the last craft's quality, and the craft itself still aims every step at full
+  quality.
+
 ## 0.19.1
 
 - Cosmic Exploration: the plan (and the loop, for the board's missions) gives the rotations up to a minute
