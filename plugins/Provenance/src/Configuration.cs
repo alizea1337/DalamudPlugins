@@ -388,6 +388,8 @@ public sealed class CosmicSettings
     public int CreditsTarget { get; set; } = 10000;
     /// <summary>Stop after this many minutes, whatever the goal (0: no limit).</summary>
     public int TimeLimitMinutes { get; set; }
+    /// <summary>Take nothing above class A: no EX or EX+ missions, even when they'd reach gold.</summary>
+    public bool NoExMissions { get; set; }
     public CosmicExtra Extras { get; set; } = CosmicExtra.CriticalMissions | CosmicExtra.RedAlerts | CosmicExtra.ChainedMissions | CosmicExtra.WeatherTimeMissions;
     public List<CosmicWish> Shopping { get; set; } = new();
     /// <summary>The plan's food and medicine suggestion was taken: use the crafting food and medicine while they last.</summary>

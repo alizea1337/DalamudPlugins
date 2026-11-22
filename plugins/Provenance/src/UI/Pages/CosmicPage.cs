@@ -184,6 +184,15 @@ internal sealed class CosmicPage : Page
         }
         ImGui.SetCursorScreenPos(start + new Vector2(0, y + 30 * s));
         ImGui.Dummy(new Vector2(inner, 0));
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        var noEx = S.NoExMissions;
+        if (Ui.Checkbox("Leave out EX and EX+ missions", ref noEx,
+                "Takes nothing above class A, even when EX or EX+ missions would reliably reach gold. Crafters that haven't opened class A yet take their own class as usual. "
+                + "Sinus Ardorum's two-class missions are all EX or EX+, so they're left out too."))
+        {
+            S.NoExMissions = noEx;
+            Config.Save();
+        }
         Ui.EndCard();
     }
 

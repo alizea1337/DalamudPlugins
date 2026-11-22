@@ -161,7 +161,7 @@ internal sealed class CosmicPlanner
     {
         var profile = plugin.Plans.Profile;
         var jobs = string.Join(";", s.Classes.OrderBy(c => c).Select(c => profile?.Job(c) is { } j ? $"{c}:{j.Level}:{string.Join(",", j.Stats)}" : c.ToString()));
-        return $"{planet}|{jobs}|{InUse(plugin)}|{s.Extras}|{Cosmic.Loaded}|{s.Records.Values.Sum(r => r.Total)}";
+        return $"{planet}|{jobs}|{InUse(plugin)}|{s.Extras}|{s.NoExMissions}|{Cosmic.Loaded}|{s.Records.Values.Sum(r => r.Total)}";
     }
 
     /// <summary>Cosmocredits still to earn for the goal (0 when it has no amount, or it's reached).</summary>
@@ -238,6 +238,9 @@ internal sealed class CosmicPlanner
             && (classJob == 18
                 ? gather?.Fish(m.Steps[0].IngredientId)?.Spots.Any(id => gather.Spot(id) is { Stands.Count: > 0 }) == true
                 : m.Marker != null)).ToList();
+        if (s.NoExMissions && all.Count > 0 && all.All(m => m.Rank > MissionRank.A))
+            return new CosmicClassPlan(classJob, job.Level, empty, $"{name}'s two-class missions are all EX or EX+, which are left out (\"Leave out EX and EX+ missions\").", null);
+        if (s.NoExMissions) all = all.Where(m => m.Rank <= MissionRank.A).ToList();
         var paired = all.Where(m => s.Classes.Contains(m.SecondClassJob)).ToList();
         if (paired.Count == 0)
             return new CosmicClassPlan(classJob, job.Level, empty,
@@ -287,6 +290,11 @@ internal sealed class CosmicPlanner
         foreach (var m in data.For(planet, classJob))
         {
             if (!m.IsCraft || m.ClassJob != classJob || m.Kinds != MissionKind.None) continue;
+            if (plugin.Config.Cosmic.NoExMissions && m.Rank > MissionRank.A)
+            {
+                if (!closed.Any(c => c.Mission.Rank == m.Rank)) closed.Add(new SkippedMission(m, ExLeftOut));
+                continue;
+            }
             if (!open.TryGetValue(m.Rank, out var isOpen))
             {
                 isOpen = ranksKnown
@@ -311,6 +319,9 @@ internal sealed class CosmicPlanner
     }
 
     public MissionRecord? Record(uint mission) => plugin.Config.Cosmic.Records.GetValueOrDefault(mission);
+
+    /// <summary>Why an EX or EX+ mission isn't taken while they're left out.</summary>
+    public const string ExLeftOut = "EX and EX+ missions are left out (Cosmic Exploration page)";
 
     /// <summary>What <see cref="CosmicPicker.Rank"/> says of a mission whose rotation isn't worked out yet.</summary>
     public const string StillWorking = "Still working out the best rotation";

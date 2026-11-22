@@ -461,6 +461,7 @@ internal sealed unsafe class CosmicRun
     private bool Allowed(CosmicMission m)
     {
         if (m.Is(MissionKind.Critical)) return false;
+        if (Settings.NoExMissions && m.Rank > MissionRank.A) return false;
         if (m.Is(MissionKind.TwoClass) && !(Settings.Has(CosmicExtra.TwoClassMissions) && Settings.Classes.Contains(m.SecondClassJob))) return false;
         if (m.Is(MissionKind.Master) && !Settings.Has(CosmicExtra.MasterMissions)) return false;
         if (m.Is(MissionKind.Chained) && !Settings.Has(CosmicExtra.ChainedMissions)) return false;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.3
+
+- Cosmic Exploration: new option *Leave out EX and EX+ missions* (under the crafters): the loop and the
+  plan take nothing above class A, even when EX or EX+ missions would reliably reach gold. The plan lists
+  them as left out.
+
 ## 0.19.2
 
 - Crafting rotations are kept between sessions (next to the settings): once worked out, a recipe at the
