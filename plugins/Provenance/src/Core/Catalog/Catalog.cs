@@ -150,6 +150,12 @@ public interface IGameCatalog
     /// gives this item; empty when there are none.
     /// </summary>
     IReadOnlyList<uint> ReducedFrom(uint itemId);
+
+    /// <summary>
+    /// Ways to get the item that a run doesn't take (other currencies, seals, ventures, the market board), for the
+    /// plan to name when the item is left to you. Only kept for materials and bait no run way gets.
+    /// </summary>
+    IReadOnlyList<OtherSource> OtherSources(uint itemId) => Array.Empty<OtherSource>();
 }
 
 public static class Items

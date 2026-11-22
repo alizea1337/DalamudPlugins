@@ -363,7 +363,7 @@ internal sealed partial class BrowsePage : Page
                 else
                 {
                     Ui.Chip("aetherial reduction", Palette.Warn, FontAwesomeIcon.Magic);
-                    Ui.Tooltip($"Comes from reducing collectables: {names}. They come from content a run can't go to: added to the order, it's listed under things to get yourself.");
+                    Ui.Tooltip($"Comes from reducing collectables: {names}. They come from content Provenance doesn't support yet: added to the order, it's listed under things to get yourself.");
                 }
                 break;
             }

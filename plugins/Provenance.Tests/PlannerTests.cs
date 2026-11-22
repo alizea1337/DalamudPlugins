@@ -96,7 +96,7 @@ public class PlannerTests
         catalog.SetSources(Special, new ItemSources(Obtain.GatherElsewhere, 0, Places: Place.CosmicExploration));
         var plan = Planner.Build(OrderOf((Special, 3)), catalog, new Dictionary<uint, int>(), new PlannerOptions());
         Assert.Equal(Supply.Manual, plan[Special]!.Supply);
-        Assert.Equal("Only gathered in Cosmic Exploration, which a run can't go to", plan[Special]!.ManualReason);
+        Assert.Equal("Only gathered in Cosmic Exploration, which Provenance doesn't support yet", plan[Special]!.ManualReason);
         Assert.False(plan.CanStart);
         Assert.Equal(new[] { Special }, plan.TargetsNeeding(Special));
 
@@ -106,15 +106,15 @@ public class PlannerTests
     }
 
     [Theory]
-    [InlineData(Obtain.FishElsewhere, Place.Diadem, "Only fished in the Diadem, which a run can't go to")]
-    [InlineData(Obtain.FishElsewhere, Place.OceanFishing, "Only fished in Ocean Fishing, which a run can't go to")]
-    [InlineData(Obtain.CraftElsewhere, Place.CosmicExploration, "Only crafted in Cosmic Exploration, which a run can't go to")]
+    [InlineData(Obtain.FishElsewhere, Place.Diadem, "Only fished in the Diadem, which Provenance doesn't support yet")]
+    [InlineData(Obtain.FishElsewhere, Place.OceanFishing, "Only fished in Ocean Fishing, which Provenance doesn't support yet")]
+    [InlineData(Obtain.CraftElsewhere, Place.CosmicExploration, "Only crafted in Cosmic Exploration, which Provenance doesn't support yet")]
     [InlineData(Obtain.GatherElsewhere | Obtain.FishElsewhere, Place.Diadem | Place.Other,
-        "Only gathered or fished in the Diadem, which a run can't go to")]
+        "Only gathered or fished in the Diadem, which Provenance doesn't support yet")]
     [InlineData(Obtain.GatherElsewhere, Place.Other, "Only gathered during quests or in content that's no longer in the game")]
     [InlineData(Obtain.GatherElsewhere, Place.Diadem | Place.CosmicExploration,
-        "Only gathered in the Diadem or Cosmic Exploration, which a run can't go to")]
-    [InlineData(Obtain.None, Place.CosmicExploration, "Only from Cosmic Exploration, which a run can't go to")]
+        "Only gathered in the Diadem or Cosmic Exploration, which Provenance doesn't support yet")]
+    [InlineData(Obtain.None, Place.CosmicExploration, "Only from Cosmic Exploration, which Provenance doesn't support yet")]
     public void Special_content_is_named_in_the_reason(Obtain how, Place where, string reason)
     {
         var catalog = new FakeCatalog();
@@ -223,7 +223,7 @@ public class PlannerTests
     }
 
     [Theory]
-    [InlineData(Place.None, "fish collectables")]
+    [InlineData(Place.None, "collectables a run can't get")]
     [InlineData(Place.Diadem, "the Diadem")]
     public void Reduction_a_run_cant_do_says_why(Place where, string named)
     {

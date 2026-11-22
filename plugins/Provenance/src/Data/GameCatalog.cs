@@ -89,6 +89,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.IndexNames();
         c.IndexBooks();
         c.IndexConsumables();
+        c.IndexOtherWays();
         // Tomes first: the browser rows carry the tome their nodes need.
         c.ApplyTomes();
         c.BuildBrowse();
@@ -658,7 +659,8 @@ internal sealed class GameCatalog : IGameCatalog
         // And whatever is sold for scrips the collectable appraiser pays: a run can buy it there, earning the scrips
         // with collectables when short. The planner only turns to that when nothing else supplies an item.
         var scrips = Collectables.Select(c => c.Currency).Where(c => c != 0).ToHashSet();
-        Exchanges = ExchangeIndex.Build((item, currency) => wanted.Contains(item) || scrips.Contains(currency), VendorIndex.LoadPositions());
+        npcPositions = VendorIndex.LoadPositions();
+        Exchanges = ExchangeIndex.Build((item, currency) => wanted.Contains(item) || scrips.Contains(currency), npcPositions);
         foreach (var item in Exchanges.Items.Where(i => !wanted.Contains(i)).ToList())
             if (Exchanges.For(item).Any(o => scrips.Contains(o.CurrencyItemId))) Add(item, Obtain.Exchange, Place.OpenWorld);
 
@@ -666,6 +668,61 @@ internal sealed class GameCatalog : IGameCatalog
         foreach (var action in Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>())
             if (action.RowId is >= 4574 and <= 4581 && action.UnlockLink.RowId != 0)
                 ManipulationQuest[action.ClassJob.RowId] = action.UnlockLink.RowId;
+    }
+
+    private IReadOnlyDictionary<uint, (uint Territory, System.Numerics.Vector2 Position)> npcPositions =
+        new Dictionary<uint, (uint Territory, System.Numerics.Vector2 Position)>();
+
+    private readonly Dictionary<uint, List<OtherSource>> otherSources = new();
+
+    public IReadOnlyList<OtherSource> OtherSources(uint itemId)
+        => otherSources.TryGetValue(itemId, out var l) ? l : Array.Empty<OtherSource>();
+
+    /// <summary>
+    /// Ways a run doesn't take, for the materials and bait it can't get otherwise, so their plan line can say where
+    /// they do come from: shops for other currencies (Bicolor Gemstones, tomestones, Cosmocredits…), Grand Company
+    /// seals, retainer ventures, the market board.
+    /// </summary>
+    private void IndexOtherWays()
+    {
+        const Obtain runWays = Obtain.Gather | Obtain.GatherTimed | Obtain.Fish | Obtain.Vendor | Obtain.Drop | Obtain.Reduce | Obtain.Exchange;
+        var wanted = new HashSet<uint>(recipesById.Values.SelectMany(r => r.Ingredients).Select(i => i.ItemId));
+        foreach (var fish in Gather.AllFish)
+            if (fish.Bait != 0) wanted.Add(fish.Bait);
+        wanted.RemoveWhere(i => Items.IsCrystal(i) || Sources(i).Has(runWays));
+        if (wanted.Count == 0) return;
+
+        void Note(uint item, OtherSource o)
+        {
+            if (!otherSources.TryGetValue(item, out var list)) otherSources[item] = list = new();
+            list.Add(o);
+        }
+
+        // Shops: the cheapest offer per currency. Who sells it comes from the NPCs a run knows the place of (cities
+        // and field zones); a shop elsewhere (on a planet, say) is named without them.
+        var scrips = Collectables.Select(c => c.Currency).Where(c => c != 0).ToHashSet();
+        bool Want(uint item, uint currency) => wanted.Contains(item) && !scrips.Contains(currency);
+        var where = ExchangeIndex.Build(Want, npcPositions);
+        foreach (var group in ExchangeIndex.Sales(Want).Values.SelectMany(l => l).GroupBy(s => s.Item))
+            foreach (var (item, currency, cost) in group.GroupBy(s => s.Currency).Select(g => g.MinBy(s => s.Cost)).OrderBy(s => s.Cost))
+            {
+                var offer = where.For(item).FirstOrDefault(o => o.CurrencyItemId == currency);
+                var at = offer == null ? "" : offer.PlaceName.Length > 0 ? $"{offer.Who} in {offer.PlaceName}" : offer.Who;
+                Note(item, new OtherSource(OtherWay.Shop, cost == 1 ? ItemName(currency) : ItemNamePlural(currency), ItemNamePlural(currency), cost, at));
+            }
+
+        foreach (var row in Services.Data.GetSubrowExcelSheet<GCScripShopItem>().SelectMany(r => r))
+            if (wanted.Contains(row.Item.RowId) && row.CostGCSeals > 0 && !OtherSources(row.Item.RowId).Any(o => o.Way == OtherWay.CompanySeals))
+                Note(row.Item.RowId, new OtherSource(OtherWay.CompanySeals, Cost: (int)row.CostGCSeals));
+
+        foreach (var row in Services.Data.GetExcelSheet<RetainerTaskNormal>())
+            if (wanted.Contains(row.Item.RowId) && !OtherSources(row.Item.RowId).Any(o => o.Way == OtherWay.Venture))
+                Note(row.Item.RowId, new OtherSource(OtherWay.Venture));
+
+        var items = Services.Data.GetExcelSheet<Item>();
+        foreach (var item in wanted)
+            if (items.GetRowOrDefault(item) is { IsUntradable: false } row && row.ItemSearchCategory.RowId != 0)
+                Note(item, new OtherSource(OtherWay.MarketBoard));
     }
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>

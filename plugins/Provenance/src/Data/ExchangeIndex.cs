@@ -62,23 +62,7 @@ internal sealed class ExchangeIndex
     {
         var index = new ExchangeIndex();
         var items = Services.Data.GetExcelSheet<Item>();
-        var tomes = new Dictionary<uint, uint>();
-        foreach (var row in Services.Data.GetExcelSheet<TomestonesItem>())
-            if (row.Tomestones.RowId > 0 && row.CurrencyInventorySlot > 0) tomes.TryAdd(row.Tomestones.RowId, row.Item.RowId);
-
-        // Special shop entries that sell a wanted item, with their (single) price.
-        var sales = new Dictionary<uint, List<(uint Item, uint Currency, int Cost)>>();
-        foreach (var shop in Services.Data.GetExcelSheet<SpecialShop>())
-            foreach (var entry in shop.Item)
-            {
-                var costs = entry.ItemCosts.Where(c => c.ItemCost.RowId != 0 && c.CurrencyCost > 0).ToList();
-                if (costs.Count != 1) continue; // exchanges that take several things at once are left alone
-                var currency = ConvertCurrency(shop.RowId, costs[0].ItemCost.RowId, shop.UseCurrencyType, tomes);
-                var receive = entry.ReceiveItems.Select(r => r.Item.RowId).FirstOrDefault(id => id != 0 && want(id, currency));
-                if (receive == 0) continue;
-                if (!sales.TryGetValue(shop.RowId, out var list)) sales[shop.RowId] = list = new();
-                list.Add((receive, currency, (int)costs[0].CurrencyCost));
-            }
+        var sales = Sales(want);
         if (sales.Count == 0) return index;
 
         // Inclusion shop pages and subpages that show those special shops.
@@ -147,6 +131,30 @@ internal sealed class ExchangeIndex
             }
         }
         return index;
+    }
+
+    /// <summary>
+    /// Special shop entries that sell an item <paramref name="want"/> takes, with their (single) price, per special
+    /// shop row: whoever sells them, wherever they stand.
+    /// </summary>
+    public static Dictionary<uint, List<(uint Item, uint Currency, int Cost)>> Sales(Func<uint, uint, bool> want)
+    {
+        var tomes = new Dictionary<uint, uint>();
+        foreach (var row in Services.Data.GetExcelSheet<TomestonesItem>())
+            if (row.Tomestones.RowId > 0 && row.CurrencyInventorySlot > 0) tomes.TryAdd(row.Tomestones.RowId, row.Item.RowId);
+        var sales = new Dictionary<uint, List<(uint Item, uint Currency, int Cost)>>();
+        foreach (var shop in Services.Data.GetExcelSheet<SpecialShop>())
+            foreach (var entry in shop.Item)
+            {
+                var costs = entry.ItemCosts.Where(c => c.ItemCost.RowId != 0 && c.CurrencyCost > 0).ToList();
+                if (costs.Count != 1) continue; // exchanges that take several things at once are left alone
+                var currency = ConvertCurrency(shop.RowId, costs[0].ItemCost.RowId, shop.UseCurrencyType, tomes);
+                var receive = entry.ReceiveItems.Select(r => r.Item.RowId).FirstOrDefault(id => id != 0 && want(id, currency));
+                if (receive == 0) continue;
+                if (!sales.TryGetValue(shop.RowId, out var list)) sales[shop.RowId] = list = new();
+                list.Add((receive, currency, (int)costs[0].CurrencyCost));
+            }
+        return sales;
     }
 
     /// <summary>Currency item behind a special shop's cost (scrips and tomestones are listed by index).</summary>

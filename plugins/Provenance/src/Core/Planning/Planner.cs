@@ -339,12 +339,12 @@ public static class Planner
         // Why the run can't get a bait itself: the price cap, where it is sold instead, or that it is crafted.
         string BaitReason(uint bait, ItemSources src)
         {
-            if (src.Has(Obtain.Vendor))
-                return $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}";
+            if (src.Has(Obtain.Vendor)) return Reasons.VendorCap(src.VendorPrice, options.VendorMaxPrice);
             if (options.BaitSource?.Invoke(bait) is { Length: > 0 } where) return where;
             var recipes = catalog.RecipesFor(bait);
             if (recipes.Count > 0) return $"Crafted ({recipes[0].Job.Abbreviation()}) and not sold for gil; a run buys bait but doesn't craft it";
-            return "Not sold by any gil vendor a run can reach";
+            var others = catalog.OtherSources(bait);
+            return others.Count > 0 ? Reasons.NoWay(src, others, options.VendorMaxPrice) : "Not sold by any gil vendor a run can reach";
         }
 
         bool VendorOk(ItemSources src) => VendorSells(src, options.VendorMaxPrice);
@@ -403,17 +403,7 @@ public static class Planner
             else
             {
                 line.Supply = Supply.Manual;
-                line.ManualReason = src.Has(Obtain.Vendor)
-                    ? $"Vendor price {src.VendorPrice:N0} gil is above your cap of {options.VendorMaxPrice:N0}"
-                    : src.Has(Obtain.Reduce)
-                        ? "Only from aetherial reduction of fish, and fishing for reductions is off (Settings, Fishing)"
-                    : src.Has(Obtain.ReduceElsewhere)
-                        ? (src.Places & ~Place.OpenWorld) != Place.None
-                            ? $"Only from aetherial reduction of collectables gathered in {Places.Describe(src.Places & ~Place.OpenWorld)}, which a run can't go to"
-                            : "Only from aetherial reduction of fish collectables, which a run doesn't do yet"
-                    : (src.Places & ~Place.OpenWorld) != Place.None
-                        ? ElsewhereReason(src)
-                        : "No gathering, fishing, vendor or monster source";
+                line.ManualReason = Reasons.NoWay(src, catalog.OtherSources(line.ItemId), options.VendorMaxPrice);
             }
             // Legendary nodes and some fishing holes only show up once their folklore tome is read.
             if (!tomeOk && line.Supply is Supply.GatherTimed or Supply.Fish) NeedToLearn(src.Tome, line.ItemId);
@@ -461,26 +451,6 @@ public static class Planner
             { Supply: Supply.Craft } => VendorSells(catalog.Sources(bait), vendorMaxPrice),
             _ => false,
         };
-
-    /// <summary>"Only gathered in the Diadem, which a run can't go to."</summary>
-    internal static string ElsewhereReason(ItemSources src)
-    {
-        var ways = new List<string>(3);
-        if (src.Has(Obtain.GatherElsewhere)) ways.Add("gathered");
-        if (src.Has(Obtain.FishElsewhere)) ways.Add("fished");
-        if (src.Has(Obtain.CraftElsewhere)) ways.Add("crafted");
-        var how = string.Join(" or ", ways);
-        // Quest nodes and content that's gone only count when nothing else is left.
-        var where = src.Places & ~Place.OpenWorld;
-        if (where != Place.Other) where &= ~Place.Other;
-        if (where == Place.Other)
-            return ways.Count == 0
-                ? "Only from quests or content that's no longer in the game"
-                : $"Only {how} during quests or in content that's no longer in the game";
-        return ways.Count == 0
-            ? $"Only from {Places.Describe(where)}, which a run can't go to"
-            : $"Only {how} in {Places.Describe(where)}, which a run can't go to";
-    }
 
     private enum VisitState { Open, Done }
 }

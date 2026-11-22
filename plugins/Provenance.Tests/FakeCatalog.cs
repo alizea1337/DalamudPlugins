@@ -55,6 +55,10 @@ internal sealed class FakeCatalog : IGameCatalog
 
     public void SetSources(uint id, ItemSources src) => sources[id] = src;
 
+    private readonly Dictionary<uint, List<OtherSource>> others = new();
+    public void SetOthers(uint id, params OtherSource[] ways) => others[id] = ways.ToList();
+    public IReadOnlyList<OtherSource> OtherSources(uint itemId) => others.TryGetValue(itemId, out var l) ? l : new List<OtherSource>();
+
     private void Name(uint id, string name) => names[id] = name;
     private void Gatherable(uint id) => sources[id] = new ItemSources(Obtain.Gather, 0);
 

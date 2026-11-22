@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.1
+
+- Things to get yourself now say where they really come from, and whether it's the game or Provenance
+  that can't get them:
+  - sold for another currency, with the price and who sells it ("Sold for 3 Bicolor Gemstones by the
+    gemstone trader in Old Sharlayan, and Provenance doesn't spend Bicolor Gemstones"), for Grand
+    Company seals, brought back by retainers on ventures, or sold by other players on the market board;
+  - only in the Diadem, Cosmic Exploration or Ocean Fishing: "which Provenance doesn't support yet";
+  - over the vendor price cap: where to change it (Settings, General).
+  Before, many of them only said "No gathering, fishing, vendor or monster source".
+
 ## 0.17.0
 
 - Colours (Settings, Interface): pick the accent, the background, the cards and the text. Each opens a
