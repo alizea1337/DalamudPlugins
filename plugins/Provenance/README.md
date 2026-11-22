@@ -5,7 +5,7 @@ crystals, shows where each one comes from, and then gets it all and crafts it fo
 books, vendors, monster drops, gathering, fishing and crafting in one run.
 
 Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and Plan on top, then
-Run under Status, Character under Tools, and the settings, one page each for General, Interface, Crafting,
+Run under Status, Cosmic Exploration under Expeditions, Character under Tools, and the settings, one page each for General, Interface, Crafting,
 Gathering, Fishing, Monster drops, After the order and Security. A *crafting spot* (Settings, Crafting:
 stand there and save it) is where the run goes before it crafts: a corner of your house or apartment
 (through the door), an inn room, or anywhere a teleport and a walk reach. The Interface page sets how
@@ -15,6 +15,7 @@ the window looks: *Interface scale* (75% to 150%) sizes the spacing, buttons, ic
 keeps it from sliding things around.
 
 ## What it does
+
 
 - **Import** a Teamcraft list (*Import list* on the Browse page) in any of three forms:
   - a list link (`ffxivteamcraft.com/list/…`), downloaded from Teamcraft's public database,
@@ -91,6 +92,13 @@ keeps it from sliding things around.
   or teleport to your house or apartment (Settings).
 - **Security**: advanced unstuck, refusing trade requests, and limits for a run (gil, time,
   knock-outs, free inventory slots).
+- **Cosmic Exploration** (*Expeditions*): a loop of stellar missions with your crafters, on the planet you
+  pick. It takes the best-paying mission each ticked crafter reliably golds with its gearset (silver when
+  none does), crafts it with a Raphael rotation, reports it, and goes on until the goal: a number of
+  Cosmocredits, a shopping list from the Cosmocredit trader (bought when the credits are there), or until
+  stopped, with an optional time limit. The Plan page shows which mission each crafter takes, Cosmocredits
+  an hour and how long the goal takes, and suggests food and medicine when they'd reach better missions.
+  Gathering and fishing missions come later.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
@@ -114,6 +122,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | M6 | Monster drops with a basic combo on a job you choose, chocobo companion (done) |
 | Scrips | Buying books and materials at scrip exchanges, earning scrips with collectables (done) |
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
+| Cosmic Exploration | Crafting missions (done; since 0.18), then gathering missions with critical missions and red alerts, then fishing missions, then Cosmic Fortunes, Master and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
 
 ### To do
 

@@ -17,7 +17,7 @@ namespace Provenance.UI.Pages;
 /// The order as totals: what is being made, then every material once, summed over the whole order and
 /// grouped by how it is obtained (gather, fish, buy, monsters, craft first), with have/need for each.
 /// </summary>
-internal sealed class PlanPage : Page
+internal sealed partial class PlanPage : Page
 {
     private const float RowHeight = 36f;
 
@@ -88,6 +88,12 @@ internal sealed class PlanPage : Page
         {
             Ui.Heading("Plan", Plans.LoadError is { } err ? "Game data couldn't be read: " + err : "Reading recipes from the game data…");
             return;
+        }
+        if (ShowsCosmic)
+        {
+            DrawCosmic(catalog);
+            if (Config.Order.IsEmpty) return;
+            ImGui.Dummy(new Vector2(0, 8 * Ui.S));
         }
         if (Config.Order.IsEmpty)
         {

@@ -93,6 +93,7 @@ internal sealed class GameCatalog : IGameCatalog
         // Tomes first: the browser rows carry the tome their nodes need.
         c.ApplyTomes();
         c.BuildBrowse();
+        c.Cosmic = CosmicData.Build();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
             c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
         return c;
@@ -121,6 +122,12 @@ internal sealed class GameCatalog : IGameCatalog
     public uint ItemIcon(uint itemId) => Lookup(itemId).Icon;
     public IReadOnlyList<RecipeInfo> RecipesFor(uint itemId) => recipesByItem.TryGetValue(itemId, out var l) ? l : NoRecipes;
     public RecipeInfo? Recipe(uint recipeId) => recipesById.GetValueOrDefault(recipeId);
+
+    /// <summary>Cosmic Exploration's mission recipes, which the planner never uses (they only open during their mission).</summary>
+    private readonly Dictionary<uint, RecipeInfo> cosmicRecipes = new();
+
+    /// <summary>A mission recipe, for the Cosmic loop's crafter.</summary>
+    public RecipeInfo? CosmicRecipe(uint recipeId) => cosmicRecipes.GetValueOrDefault(recipeId);
     public ItemSources Sources(uint itemId) => sources.GetValueOrDefault(itemId);
 
     public bool TryFindItem(string name, out uint itemId)
@@ -168,7 +175,11 @@ internal sealed class GameCatalog : IGameCatalog
                 if (!recipesByItem.TryGetValue(result, out var list)) recipesByItem[result] = list = new List<RecipeInfo>(1);
                 list.Add(info);
             }
-            else Add(result, Obtain.CraftElsewhere, place);
+            else
+            {
+                Add(result, Obtain.CraftElsewhere, place);
+                cosmicRecipes[r.RowId] = info;
+            }
 
             // Quest recipes only open during their quest: planned when ordered, but not listed.
             if (r.Quest.RowId == 0 && items.GetRowOrDefault(result) is { } item)
@@ -724,6 +735,9 @@ internal sealed class GameCatalog : IGameCatalog
             if (items.GetRowOrDefault(item) is { IsUntradable: false } row && row.ItemSearchCategory.RowId != 0)
                 Note(item, new OtherSource(OtherWay.MarketBoard));
     }
+
+    /// <summary>Cosmic Exploration's missions, trader stock and NPCs.</summary>
+    public CosmicData Cosmic { get; private set; } = new();
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
     public Dictionary<uint, uint> ManipulationQuest { get; } = new();

@@ -12,6 +12,8 @@ namespace Provenance.Core.Crafting;
 /// HQ ingredients going in, per ingredient of the recipe in its order (crystals left out); they start the craft
 /// with quality. Null or all 0 for none.
 /// </param>
+/// <param name="SteadyHand">Stellar Steady Hand uses a Cosmic Exploration mission lends (0: none).</param>
+/// <param name="Food">Food the rotation may count on (item id, 0: none); <paramref name="Potion"/> the same for medicine.</param>
 public sealed record RaphaelRequest(
     uint RecipeId,
     int Level,
@@ -21,12 +23,20 @@ public sealed record RaphaelRequest(
     bool Manipulation,
     bool Specialist,
     int? TargetQuality,
-    IReadOnlyList<int>? HqIngredients = null)
+    IReadOnlyList<int>? HqIngredients = null,
+    int SteadyHand = 0,
+    uint Food = 0,
+    bool FoodHq = false,
+    uint Potion = 0,
+    bool PotionHq = false)
 {
     public bool AnyHqIngredients => HqIngredients?.Any(n => n > 0) == true;
 
     public string CacheKey => $"{RecipeId}|{Level}|{Craftsmanship}|{Control}|{Cp}|{Manipulation}|{Specialist}|{TargetQuality?.ToString() ?? "max"}"
-                              + (AnyHqIngredients ? "|hq " + string.Join(",", HqIngredients!) : "");
+                              + (AnyHqIngredients ? "|hq " + string.Join(",", HqIngredients!) : "")
+                              + (SteadyHand > 0 ? "|ssh " + SteadyHand : "")
+                              + (Food != 0 ? $"|food {Food}{(FoodHq ? "hq" : "")}" : "")
+                              + (Potion != 0 ? $"|potion {Potion}{(PotionHq ? "hq" : "")}" : "");
 }
 
 /// <summary>A rotation, and the quality it ends at (counting what HQ ingredients start it with) out of the recipe's most.</summary>
@@ -53,6 +63,9 @@ public static class RaphaelCli
         // HQ ingredients start the craft with quality (raphael-cli works out how much from the recipe).
         if (r.TargetQuality != 0 && r.AnyHqIngredients)
             a.Append(" --hq-ingredients ").Append(string.Join(" ", r.HqIngredients!.Take(6).Select(n => Math.Clamp(n, 0, 255).ToString(CultureInfo.InvariantCulture))));
+        if (r.SteadyHand > 0) a.Append(CultureInfo.InvariantCulture, $" --stellar-steady-hand {Math.Min(r.SteadyHand, 3)}");
+        if (r.Food != 0) a.Append(CultureInfo.InvariantCulture, $" --food {r.Food}{(r.FoodHq ? ",HQ" : "")}");
+        if (r.Potion != 0) a.Append(CultureInfo.InvariantCulture, $" --potion {r.Potion}{(r.PotionHq ? ",HQ" : "")}");
         a.Append(" --output-variables action_ids final_quality recipe_max_quality");
         return a.ToString();
     }

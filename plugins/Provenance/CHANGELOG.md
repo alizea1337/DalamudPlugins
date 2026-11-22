@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.18.0
+
+- **Cosmic Exploration** (new sidebar section *Expeditions*): a loop that does stellar missions on the
+  planets with your crafters. Pick the planet, tick the crafters, and choose a goal: a number of
+  Cosmocredits, a shopping list from the Cosmocredit trader, or until you stop it, with an optional time
+  limit. The loop goes to the planet (from anywhere through Bestways Burrow, between planets with
+  Cruisingway), takes the best-paying mission each crafter reliably golds with its gearset, crafts it with
+  a Raphael rotation (using the mission's Stellar Steady Hand), reports it and goes on. When no mission
+  reaches gold for a crafter it takes silver ones and says so.
+- "Reliably" means the rotation reaches it without lucky procs. Until a mission has been done, gold is
+  judged from the quality the rotation reaches; after that, from what runs of it actually scored, and the
+  pace and credits per mission go by what runs of it paid and took.
+- The Plan page shows the Cosmic Exploration plan: the mission each crafter takes, Cosmocredits an hour,
+  how long the goal takes, and why the other missions aren't taken. When the crafting food and medicine
+  from Settings, Crafting would let a crafter reliably gold better missions, a card says how many it
+  takes and how much sooner the goal is reached; with them in use, it drops back to the lower missions
+  when they run out.
+- Extras the loop may take on, each explained in its tooltip: chained missions, weather and time missions
+  (only while they're on the board), Master missions on Auxesia, and buying the top crafter and gatherer
+  materia when Cosmocredits reach the cap (down to 5,000). Gathering and fishing missions, critical
+  missions and red alerts, two-class missions, Cosmic Fortunes and mech ops come in later versions; the
+  page says so where they'd be.
+- The bug report has a Cosmic Exploration section.
+
 ## 0.17.1
 
 - Things to get yourself now say where they really come from, and whether it's the game or Provenance

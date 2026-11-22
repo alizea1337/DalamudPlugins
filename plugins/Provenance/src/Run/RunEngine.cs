@@ -408,6 +408,7 @@ internal sealed class RunEngine : IDisposable
     {
         var plan = plugin.Plans.Plan;
         if (Active) return "A run is already going.";
+        if (plugin.CosmicLoop.Active) return "The Cosmic Exploration loop is going; stop it first.";
         if (plugin.Plans.Catalog == null) return "Still reading game data.";
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";

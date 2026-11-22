@@ -16,8 +16,10 @@ namespace Provenance.UI;
 /// <param name="GameIcon">A game icon before the label (an item).</param>
 /// <param name="Keywords">More text the search matches but nobody sees (a job's abbreviation).</param>
 /// <param name="Job">A ClassJob row: its glyph, in the job's colour, leads the label.</param>
+/// <param name="Disabled">Shown faded and can't be picked (the tooltip says why).</param>
+/// <param name="Tooltip">Shown while the row is hovered.</param>
 internal sealed record DropdownItem(string Label, string? Detail = null, string? Sub = null, string? Badge = null,
-    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null, uint Job = 0);
+    Vector4? Dot = null, uint GameIcon = 0, bool Hq = false, string? Keywords = null, uint Job = 0, bool Disabled = false, string? Tooltip = null);
 
 /// <summary>
 /// The select field and its list. The field is a pill with the current choice and a chevron; the list
@@ -142,8 +144,9 @@ internal static partial class Ui
     /// box; arrow keys move, Enter picks, Escape closes.
     /// </summary>
     /// <param name="selected">Index of the current choice in <paramref name="items"/>, or -1.</param>
+    /// <param name="multi">Several can be on at once: which are; a pick then toggles one and the list stays open.</param>
     /// <returns>The index of the item picked this frame, or -1.</returns>
-    public static int DropdownList(string id, IReadOnlyList<DropdownItem>? items, int selected, string empty, float minWidth = 0)
+    public static int DropdownList(string id, IReadOnlyList<DropdownItem>? items, int selected, string empty, float minWidth = 0, Func<int, bool>? multi = null)
     {
         var st = DropdownOf(id);
         if (!ImGui.IsPopupOpen(st.PopupId)) return -1;
@@ -241,7 +244,7 @@ internal static partial class Ui
                 st.Active = Math.Clamp(st.Active, 0, rows.Count - 1);
                 if (ImGui.IsKeyPressed(ImGuiKey.DownArrow)) { st.Active = Math.Min(rows.Count - 1, st.Active + 1); st.Scroll = true; }
                 if (ImGui.IsKeyPressed(ImGuiKey.UpArrow)) { st.Active = Math.Max(0, st.Active - 1); st.Scroll = true; }
-                if (ImGui.IsKeyPressed(ImGuiKey.Enter) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter)) picked = rows[st.Active];
+                if ((ImGui.IsKeyPressed(ImGuiKey.Enter) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter)) && !items[rows[st.Active]].Disabled) picked = rows[st.Active];
             }
             if (ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
 
@@ -267,14 +270,15 @@ internal static partial class Ui
                     ImGui.Dummy(new Vector2(1, listH));
                 }
                 for (var k = 0; k < rows.Count; k++)
-                    if (DropdownRow(items[rows[k]], rows[k], rows[k] == selected, k == st.Active, rowH, bodyH, smallH))
+                    if (DropdownRow(items[rows[k]], rows[k], multi?.Invoke(rows[k]) ?? rows[k] == selected, k == st.Active, rowH, bodyH, smallH)
+                        && !items[rows[k]].Disabled)
                         picked = rows[k];
                 // The mouse takes over the highlight once it moves over a row.
                 if (ImGui.GetIO().MouseDelta != Vector2.Zero && hoveredRow >= 0) st.Active = rows.IndexOf(hoveredRow);
                 hoveredRow = -1;
             }
             ImGui.EndChild();
-            if (picked >= 0) ImGui.CloseCurrentPopup();
+            if (picked >= 0 && multi == null) ImGui.CloseCurrentPopup();
             ImGui.EndPopup();
         }
         ImGui.PopStyleColor(2);
@@ -297,6 +301,7 @@ internal static partial class Ui
         var w = ImGui.GetContentRegionAvail().X;
         var clicked = ImGui.InvisibleButton("##row" + index, new Vector2(w, rowH));
         if (ImGui.IsItemHovered()) hoveredRow = index;
+        if (item.Tooltip != null) Tooltip(item.Tooltip);
 
         var dl = ImGui.GetWindowDrawList();
         if (selected || active)
@@ -344,7 +349,7 @@ internal static partial class Ui
                 dl.AddText(new Vector2(right - tailW, top + (bodyH - smallH) / 2), Palette.U32(item.Badge != null ? Palette.Accent : Palette.TextMuted), tail);
             }
         using (selected ? F.Strong.Push() : F.Body.Push())
-            dl.AddText(new Vector2(x, top), Palette.U32(Palette.Text), Fit(item.Label, right - x - (tailW > 0 ? tailW + 12 * s : 0)));
+            dl.AddText(new Vector2(x, top), Palette.U32(item.Disabled ? Palette.TextFaint : Palette.Text), Fit(item.Label, right - x - (tailW > 0 ? tailW + 12 * s : 0)));
         if (item.Sub != null)
             using (F.Small.Push())
                 dl.AddText(new Vector2(x, top + bodyH + 2 * s), Palette.U32(Palette.TextMuted), Fit(item.Sub, right - x));

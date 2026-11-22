@@ -138,6 +138,18 @@ internal static class BugReport
         if (runs.Log.Count == 0) Line("Empty.");
         foreach (var e in runs.Log.Take(40)) Line($"{e.Time:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
 
+        // ---------------------------------------------------------------- Cosmic Exploration
+        var cosmic = plugin.Config.Cosmic;
+        if (cosmic.Classes.Count > 0 || plugin.CosmicLoop.Lines.Count > 0)
+        {
+            Section("Cosmic Exploration");
+            Line($"Planet {(cosmic.Planet < 0 ? "where you are" : ((Core.Cosmic.Planet)cosmic.Planet).ToString())} (on {Integrations.Cosmic.CurrentPlanet?.ToString() ?? "none"}), "
+                 + $"classes {string.Join("/", cosmic.Classes.Select(Core.Character.ClassJobs.Abbreviation))}, goal {cosmic.Goal} {(cosmic.Goal == CosmicGoal.Cosmocredits ? cosmic.CreditsTarget.ToString() : "")}, "
+                 + $"time limit {cosmic.TimeLimitMinutes} min, extras {cosmic.Extras}, shopping {cosmic.Shopping.Count}, consumables {cosmic.UseConsumables}, missions learned {cosmic.Records.Count}");
+            Line($"Loop: {(plugin.CosmicLoop.Active ? "running" : "idle")}, {plugin.CosmicLoop.Status}; mission under way {Integrations.Cosmic.ActiveMission}, score {Integrations.Cosmic.Score}, rank {Integrations.Cosmic.Rank}");
+            foreach (var e in plugin.CosmicLoop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
+        }
+
         // ---------------------------------------------------------------- settings and plugins
         Section("Settings");
         var c = plugin.Config;

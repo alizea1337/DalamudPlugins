@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Dalamud.Game.ClientState.Conditions;
 using ECommons;
+using ECommons.Automation;
 using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
@@ -21,7 +22,10 @@ namespace Provenance.Run;
 /// <summary>One recipe to craft a number of times.</summary>
 /// <param name="Hq">Aim for high quality (ordered items the user wants HQ); otherwise the fastest rotation.</param>
 /// <param name="Quality">A quality to aim for instead (collectables); null uses <paramref name="Hq"/>.</param>
-internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq, int? Quality = null);
+/// <param name="Cosmic">A Cosmic Exploration mission recipe: made in the mission's own crafting log, from the Cosmopouch.</param>
+/// <param name="SteadyHand">Stellar Steady Hand uses the mission lends (Raphael plans with them).</param>
+/// <param name="UseConsumables">Eat and take medicine as set under Settings, Crafting (the Cosmic loop only when its suggestion was taken).</param>
+internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq, int? Quality = null, bool Cosmic = false, int SteadyHand = 0, bool UseConsumables = true);
 
 /// <summary>
 /// Crafts a queue of recipes, one synthesis at a time: right job and gearset, repair, food and
@@ -96,6 +100,8 @@ internal sealed unsafe class Crafter
     public IReadOnlyList<CraftJob> Upcoming => pending.ToList();
     /// <summary>The last rotation worked out: recipe, stats, HQ ingredients, steps and the quality it reaches (bug report).</summary>
     public string LastSolve { get; private set; } = "";
+    /// <summary>The quality the rotation in use ends at (-1: unknown), so a Cosmic mission can note what it scored with.</summary>
+    public int LastQuality { get; private set; } = -1;
     public List<(CraftJob Job, int Done, string? Skipped)> History { get; } = new();
 
     public bool Finished => step is Step.Finished or Step.Failed;
@@ -123,6 +129,13 @@ internal sealed unsafe class Crafter
         Current = null;
         Failure = null;
         pauseRequested = false;
+        // Nothing of an earlier list carries over: a rotation still being worked out, the one in use, its quality.
+        solving = null;
+        solvingFor = null;
+        settling = null;
+        macro.Clear();
+        macroHq = null;
+        LastQuality = -1;
         Go(Step.NextRecipe);
     }
 
@@ -246,7 +259,7 @@ internal sealed unsafe class Crafter
                 return;
             }
             // While deferring, take the first recipe that can be crafted now; otherwise strictly in order.
-            var next = DeferMissing ? pending.FirstOrDefault(j => MissingIngredient(j.Recipe) == null) : pending[0];
+            var next = DeferMissing ? pending.FirstOrDefault(j => Missing(j) == null) : pending[0];
             if (next == null)
             {
                 Status = "Waiting for materials";
@@ -261,7 +274,7 @@ internal sealed unsafe class Crafter
         }
 
         var catalog = plugin.Plans.Catalog!;
-        if (MissingIngredient(Current.Recipe) is { } missing)
+        if (Missing(Current) is { } missing)
         {
             var reason = $"missing {missing.Amount}× {catalog.ItemName(missing.ItemId)} in your bags";
             log($"Skipped {catalog.ItemName(Current.Recipe.ItemId)}: {reason}.", true);
@@ -295,6 +308,7 @@ internal sealed unsafe class Crafter
         if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(10);
         if (DateTime.UtcNow > deadline) { Fail("Couldn't close the crafting log."); return; }
         if (Addon("RecipeNote") is var note && note != null) note->Close(true);
+        if (Addon(CosmicNotebook) is var cosmic && cosmic != null) cosmic->Close(true);
         Wait(0.5);
     }
 
@@ -356,6 +370,7 @@ internal sealed unsafe class Crafter
 
     private void Consumables()
     {
+        if (Current is { UseConsumables: false }) { Go(Step.Solve); return; }
         var (food, medicine) = plugin.Config.Consumables.For(Discipline.Hand);
         foreach (var (choice, isMedicine) in new[] { (food, false), (medicine, true) })
         {
@@ -405,10 +420,10 @@ internal sealed unsafe class Crafter
             Services.Log.Information("Solving {Recipe} at Craftsmanship {C}, Control {Co}, CP {Cp}, level {L}", r.RecipeId, stats[0], stats[1], stats[2], GameState.JobLevel(r.Job.ClassJobId()));
             var c = plugin.Config.Crafting;
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
-            var hqIn = HqIngredients(Current);
+            var hqIn = Current.Cosmic ? null : HqIngredients(Current);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
-                manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped(),
-                Current.Quality ?? (Current.Hq ? null : 0), hqIn);
+                manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic,
+                Current.Quality ?? (Current.Hq ? null : 0), hqIn, Current.SteadyHand);
             Status = "Working out the rotation";
             raphael.ForgetFailure(request);
             macroHq = hqIn;
@@ -436,12 +451,13 @@ internal sealed unsafe class Crafter
         }
         var solution = task.Result;
         macro = solution.Actions.ToList();
+        LastQuality = solution.FinalQuality;
         var name = plugin.Plans.Catalog!.ItemName(r.ItemId);
         if (solvingFor is { } asked)
             LastSolve = $"{name} (recipe {r.RecipeId}{(Current.Hq ? ", HQ" : "")}): Craftsmanship {asked.Craftsmanship}, Control {asked.Control}, CP {asked.Cp}, level {asked.Level}, "
                         + $"HQ ingredients {(asked.AnyHqIngredients ? string.Join("/", asked.HqIngredients!) : "none")}, {solution.Actions.Count} steps, quality {solution.FinalQuality} of {solution.MaxQuality}";
         // Aiming for HQ but even the best rotation falls short: say so once, with what would help.
-        if (Current.Hq && Current.Quality == null && solution is { ReachesMax: false, MaxQuality: > 0, FinalQuality: >= 0 }
+        if (Current.Hq && Current.Quality == null && !Current.Cosmic && solution is { ReachesMax: false, MaxQuality: > 0, FinalQuality: >= 0 }
             && warnedOnce.Add($"quality {r.RecipeId} {solution.FinalQuality}"))
         {
             var allHq = macroHq != null && Current.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId)).Select(i => i.Amount).SequenceEqual(macroHq);
@@ -464,12 +480,75 @@ internal sealed unsafe class Crafter
     private void OpenRecipe()
     {
         var id = Current!.Recipe.RecipeId;
+        if (Current.Cosmic) { OpenCosmicRecipe(id); return; }
         if (SelectedRecipe() == id && Ready("RecipeNote")) { Wait(0.4); Go(Step.Ingredients, keepWait: true); return; }
         if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(10);
         if (DateTime.UtcNow > deadline) { Fail("The recipe didn't open."); return; }
         Status = "Opening the recipe";
         AgentRecipeNote.Instance()->OpenRecipeByRecipeId(id);
         Wait(1);
+    }
+
+    /// <summary>The mission's crafting log (Cosmic Exploration).</summary>
+    private const string CosmicNotebook = "WKSRecipeNotebook";
+
+    /// <summary>
+    /// A mission recipe: the game opens the mission's own crafting log for it, listing only the mission's recipes;
+    /// the right one is picked by its row (as Artisan does it).
+    /// </summary>
+    private void OpenCosmicRecipe(uint id)
+    {
+        var notebook = Addon(CosmicNotebook);
+        var ready = notebook != null && GenericHelpers.IsAddonReady(notebook);
+        if (ready && SelectedRecipe() == id) { Wait(0.4); Go(Step.Ingredients, keepWait: true); return; }
+        if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(12);
+        if (DateTime.UtcNow > deadline) { Fail("The mission's crafting log didn't open on its recipe."); return; }
+        Status = "Opening the mission's recipe";
+        if (ready && RecipeRow(id) is >= 0 and var row)
+        {
+            Callback.Fire(notebook, false, 0, row);
+            Wait(0.6);
+            return;
+        }
+        AgentRecipeNote.Instance()->OpenRecipeByRecipeId(id);
+        Wait(1);
+    }
+
+    /// <summary>The row of a recipe in the list the open crafting log shows, or -1.</summary>
+    private static int RecipeRow(uint id)
+    {
+        var note = RecipeNote.Instance();
+        if (note == null || note->RecipeList == null) return -1;
+        var list = note->RecipeList->RecipesSpan;
+        for (var i = 0; i < list.Length && i < note->RecipeList->RecipeCount; i++)
+            if (list[i].RecipeId == id) return i;
+        return -1;
+    }
+
+    /// <summary>A mission recipe's ingredients come from the Cosmopouch: HQ ones first (they start the craft with quality), then NQ.</summary>
+    private void CosmicIngredients()
+    {
+        if (!Ready(CosmicNotebook) || SelectedRecipe() != Current!.Recipe.RecipeId) { Go(Step.OpenRecipe); return; }
+        var entry = SelectedEntry();
+        if (entry == null) { Wait(0.3); return; }
+        var ingredients = entry->Ingredients;
+        var full = true;
+        for (var i = 0; i < ingredients.Length; i++)
+        {
+            ref var ing = ref ingredients[i];
+            if (ing.ItemId != 0 && ing.Amount != 0 && ing.NQCount + ing.HQCount < ing.Amount) full = false;
+        }
+        if (full) { attempts = 0; Go(Step.Synthesize); return; }
+        if (++attempts > 6)
+        {
+            // Nothing left to put in: the mission's supplies are used up.
+            Fail("The mission's supplies ran out before the craft could start.");
+            return;
+        }
+        var notebook = new AddonMaster.WKSRecipeNotebook((nint)Addon(CosmicNotebook));
+        if (attempts % 2 == 1) notebook.HQItemInput();
+        else notebook.NQItemInput();
+        Wait(0.4);
     }
 
     /// <summary>
@@ -479,8 +558,9 @@ internal sealed unsafe class Crafter
     private void Ingredients()
     {
         if (pauseRequested) { Pause(); return; }
+        if (Current!.Cosmic) { CosmicIngredients(); return; }
         if (!Ready("RecipeNote") || SelectedRecipe() != Current!.Recipe.RecipeId) { Go(Step.OpenRecipe); return; }
-        if (MissingIngredient(Current.Recipe) is { } missing)
+        if (Missing(Current) is { } missing)
         {
             var catalog = plugin.Plans.Catalog!;
             if (DeferMissing)
@@ -564,7 +644,11 @@ internal sealed unsafe class Crafter
         }
         if (deadline == default)
         {
-            if (Addon("RecipeNote") is var note && note != null) new AddonMaster.RecipeNote((nint)note).Synthesize();
+            if (Current!.Cosmic)
+            {
+                if (Addon(CosmicNotebook) is var cosmic && cosmic != null) new AddonMaster.WKSRecipeNotebook((nint)cosmic).Synthesize();
+            }
+            else if (Addon("RecipeNote") is var note && note != null) new AddonMaster.RecipeNote((nint)note).Synthesize();
             deadline = DateTime.UtcNow.AddSeconds(8);
             Wait(0.5);
             return;
@@ -608,6 +692,8 @@ internal sealed unsafe class Crafter
                 macro = new List<uint>();
             }
             fallback = true;
+            // Finished another way than planned: the quality it ends at isn't known.
+            LastQuality = -1;
             raphaelId = BasicSynthesis;
         }
 
@@ -619,6 +705,7 @@ internal sealed unsafe class Crafter
             if (DateTime.UtcNow < deadline) { Wait(0.1); return; }
             log($"Couldn't use {CurrentAction}; finishing with Basic Synthesis.", true);
             fallback = true;
+            LastQuality = -1;
             deadline = default;
             return;
         }
@@ -633,7 +720,7 @@ internal sealed unsafe class Crafter
     private void WaitResult()
     {
         if (Visible("Synthesis") || Services.Condition[ConditionFlag.ExecutingCraftingAction]) { Wait(0.2); return; }
-        if (!Ready("RecipeNote"))
+        if (!Ready(Current!.Cosmic ? CosmicNotebook : "RecipeNote"))
         {
             if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(8);
             if (DateTime.UtcNow < deadline) { Wait(0.2); return; }
@@ -692,6 +779,8 @@ internal sealed unsafe class Crafter
     }
 
     private void Wait(double seconds) => waitUntil = DateTime.UtcNow.AddSeconds(seconds);
+
+    private static Ingredient? Missing(CraftJob job) => job.Cosmic ? null : MissingIngredient(job.Recipe);
 
     private static Ingredient? MissingIngredient(RecipeInfo recipe)
     {

@@ -23,6 +23,10 @@ public sealed class Plugin : IDalamudPlugin
     internal Configuration Config { get; }
     internal PlanService Plans { get; }
     internal Raphael Raphael { get; } = new();
+    /// <summary>The Cosmic Exploration plan: per ticked crafter, the missions it reliably golds.</summary>
+    internal Data.CosmicPlanner CosmicPlanner { get; }
+    /// <summary>The Cosmic Exploration mission loop.</summary>
+    internal Run.Cosmic.CosmicRun CosmicLoop { get; }
     internal RunEngine Runs { get; }
     private readonly Run.Guard guard;
     internal MainWindow Main { get; }
@@ -42,6 +46,8 @@ public sealed class Plugin : IDalamudPlugin
 
         Plans = new PlanService(() => Config, Raphael);
         Runs = new RunEngine(this);
+        CosmicPlanner = new Data.CosmicPlanner(this);
+        CosmicLoop = new Run.Cosmic.CosmicRun(this);
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
@@ -49,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             new(null, new Page[] { new BrowsePage(this), new PlanPage(this) }),
             new("Status", new Page[] { new RunPage(this) }),
+            new("Expeditions", new Page[] { new CosmicPage(this) }),
             new("Tools", new Page[] { new CharacterPage(this) }),
             new("Settings", new Page[]
             {
@@ -152,6 +159,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             Plans.Tick();
             Runs.Tick();
+            CosmicLoop.Tick();
             guard.Tick();
         }
         catch (Exception e)
@@ -178,6 +186,8 @@ public sealed class Plugin : IDalamudPlugin
         Config.Save();
         windows.RemoveAllWindows();
         // The run owns the fishing hooks; whatever happens there, the rest still unloads.
+        try { CosmicLoop.Stop("Provenance was unloaded."); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the Cosmic loop on unload failed"); }
         try { Runs.Dispose(); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the run on unload failed"); }
         Plans.Dispose();

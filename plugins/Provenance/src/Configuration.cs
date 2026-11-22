@@ -21,6 +21,8 @@ public sealed class Configuration : IPluginConfiguration
     public ImportSettings Import { get; set; } = new();
     public BrowseSettings Browse { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
+    /// <summary>The Cosmic Exploration loop: planet, classes, goal, extras, shopping list, and what runs of each mission came to.</summary>
+    public CosmicSettings Cosmic { get; set; } = new();
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();
@@ -53,6 +55,10 @@ public sealed class Configuration : IPluginConfiguration
         c.Window ??= new();
         if (c.Window.TextScale <= 0) c.Window.TextScale = c.Window.Scale;
         c.Window.Colors ??= new();
+        c.Cosmic ??= new();
+        c.Cosmic.Classes ??= new();
+        c.Cosmic.Shopping ??= new();
+        c.Cosmic.Records ??= new();
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
@@ -333,4 +339,61 @@ public sealed class ColorSettings
         Cards = ThemeColors.DefaultCards;
         Text = ThemeColors.DefaultText;
     }
+}
+
+/// <summary>What the Cosmic Exploration loop works toward.</summary>
+public enum CosmicGoal
+{
+    /// <summary>Earn a set number of Cosmocredits.</summary>
+    Cosmocredits,
+    /// <summary>Earn what the shopping list costs, then buy it.</summary>
+    ShoppingList,
+    /// <summary>Keep going until stopped (or the time limit).</summary>
+    UntilStopped,
+}
+
+/// <summary>The extras the loop may take on, picked on the Cosmic Exploration page.</summary>
+[Flags]
+public enum CosmicExtra
+{
+    None = 0,
+    CriticalMissions = 1 << 0,
+    RedAlerts = 1 << 1,
+    ChainedMissions = 1 << 2,
+    WeatherTimeMissions = 1 << 3,
+    TwoClassMissions = 1 << 4,
+    MasterMissions = 1 << 5,
+    CosmicFortunes = 1 << 6,
+    MechOps = 1 << 7,
+    MateriaAtCap = 1 << 8,
+}
+
+/// <summary>Something on the Cosmic Exploration shopping list.</summary>
+[Serializable]
+public sealed class CosmicWish
+{
+    public uint ItemId { get; set; }
+    public int Count { get; set; } = 1;
+}
+
+[Serializable]
+public sealed class CosmicSettings
+{
+    /// <summary>The planet the loop works on (Core.Cosmic.Planet), or -1: the one you're on, else the newest unlocked.</summary>
+    public int Planet { get; set; } = -1;
+    /// <summary>ClassJob rows the loop may use.</summary>
+    public List<uint> Classes { get; set; } = new();
+    public CosmicGoal Goal { get; set; } = CosmicGoal.Cosmocredits;
+    /// <summary>For the Cosmocredits goal: stop once you have this many.</summary>
+    public int CreditsTarget { get; set; } = 10000;
+    /// <summary>Stop after this many minutes, whatever the goal (0: no limit).</summary>
+    public int TimeLimitMinutes { get; set; }
+    public CosmicExtra Extras { get; set; } = CosmicExtra.CriticalMissions | CosmicExtra.RedAlerts | CosmicExtra.ChainedMissions | CosmicExtra.WeatherTimeMissions;
+    public List<CosmicWish> Shopping { get; set; } = new();
+    /// <summary>The plan's food and medicine suggestion was taken: use the crafting food and medicine while they last.</summary>
+    public bool UseConsumables { get; set; }
+    /// <summary>What runs of each mission came to (keyed by WKSMissionUnit row).</summary>
+    public Dictionary<uint, Core.Cosmic.MissionRecord> Records { get; set; } = new();
+
+    public bool Has(CosmicExtra extra) => (Extras & extra) != 0;
 }
