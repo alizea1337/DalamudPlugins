@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Crafting rotations are kept between sessions (next to the settings): once worked out, a recipe at the\n  same stats, level and food is there at once next time, so the Cosmic plan and order estimates come\n  up much faster after the first time. A new raphael-cli starts them afresh.\n- Up to three rotations are worked out at a time (was two).\n- The Cosmic plan says when it was worked out, and *Work it out again* shows the loading screen for a\n  moment, so the click is seen even when every rotation is already known (it then comes to the same).\n  A rotation going past the most quality an item has reads \"reaches full quality\".\n- The Cosmic plan works out a mission's steps in between (pulp before the paper) for progress only:\n  the judgement only goes by the last craft's quality, and the craft itself still aims every step at full\n  quality.\r\n",
+    "Changelog": "- Cosmic Exploration: new option *Leave out EX and EX+ missions* (under the crafters): the loop and the\n  plan take nothing above class A, even when EX or EX+ missions would reliably reach gold. The plan lists\n  them as left out.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.2.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.2/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.2/latest.zip",
+    "AssemblyVersion": "0.19.3.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.3/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.3/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795384131
+    "LastUpdate": 1795384412
   }
 ]
