@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.1
+
+- Cosmic Exploration: the plan (and the loop, for the board's missions) gives the rotations up to a minute
+  to be worked out before taking the best found, instead of 30 seconds.
+
 ## 0.19.0
 
 - Fixed: the first action of a craft could be sent while the character was still sitting down to craft,

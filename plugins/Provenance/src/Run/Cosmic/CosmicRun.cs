@@ -430,7 +430,7 @@ internal sealed unsafe class CosmicRun
             m => m.Is(MissionKind.TwoClass) ? plugin.CosmicPlanner.JudgeTwoClass(m) : plugin.CosmicPlanner.Judge(m, job.Level, job.Stats, job.Manipulation, consumables),
             plugin.CosmicPlanner.Record);
         // Every offered mission judged before picking, so a better one still being worked out isn't passed over; after
-        // 30 seconds the best of those judged, and with none judged at all, more waiting (up to five minutes).
+        // a minute the best of those judged, and with none judged at all, more waiting (up to five minutes).
         var solving = ranking.Skipped.Count(x => x.Reason == CosmicPlanner.StillWorking);
         if (solving > 0)
         {

@@ -42,7 +42,7 @@ internal sealed class CosmicPlanner
     private const int JudgeMost = 24;
 
     /// <summary>The longest the plan waits for rotations; then the best found so far is taken and kept.</summary>
-    public const int ThinkSeconds = 30;
+    public const int ThinkSeconds = 60;
 
     private readonly Plugin plugin;
     private CosmicPlan? last;
