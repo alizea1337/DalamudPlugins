@@ -22,6 +22,12 @@ internal sealed unsafe class CosmicRun
 
     /// <summary>A two-class mission starts another round only with this much of its time left (gathering, then crafting).</summary>
     private const int RoundSeconds = 300;
+    /// <summary>Crafts beyond the ones the objective names, at most, while the score is short of gold.</summary>
+    private const int MaxExtraCrafts = 8;
+    private int extraCrafts;
+    /// <summary>Stellar Steady Hand uses the mission still has (it lends them for all its crafts together).</summary>
+    private int steadyHandLeft;
+
     /// <summary>At most this many rounds of a two-class mission.</summary>
     private const int MaxRounds = 2 * CosmicPlanner.TwoClassRounds;
     /// <summary>The mission's score after the last round, to see a round still adds to it.</summary>
@@ -511,6 +517,13 @@ internal sealed unsafe class CosmicRun
         if (jobs.Count == 0) { Finish($"The recipes of \"{m.Name}\" weren't found.", true); return; }
         if (!m.Is(MissionKind.TwoClass))
         {
+            extraCrafts = 0;
+            roundScore = 0;
+            steadyHandLeft = m.Action == StellarAction.SteadyHand ? m.ActionCharges : 0;
+            jobs = jobs.Select(j => j with { SteadyHand = steadyHandLeft }).ToList();
+        }
+        if (!m.Is(MissionKind.TwoClass))
+        {
             missionStarted = DateTime.UtcNow;
             creditsBefore = Integrations.Cosmic.Credits;
             reportSent = false;
@@ -540,6 +553,21 @@ internal sealed unsafe class CosmicRun
             Finish("Crafting stopped: " + why + " The mission was abandoned.", true, missionLeft: false);
             return;
         }
+        steadyHandLeft = Math.Max(0, steadyHandLeft - crafter.SteadyHandUsed);
+        // Short of gold with supplies left: one more of the final item (score adds up per item), while it still adds.
+        if (Mission is { } more && !more.Is(MissionKind.TwoClass) && Integrations.Cosmic.ActiveMission == more.Id && Integrations.Cosmic.Rank < Tier.Gold)
+        {
+            var score = Integrations.Cosmic.Score;
+            var rose = score > roundScore;
+            roundScore = score;
+            if (rose && extraCrafts < MaxExtraCrafts && TimeLeft(more) > 60 && OneMore(more) is { Count: > 0 } jobs)
+            {
+                extraCrafts++;
+                Log($"{Integrations.Cosmic.Rank} so far ({score:N0}); supplies are left, so crafting another for gold.", false);
+                crafter.Begin(jobs);
+                return;
+            }
+        }
         if (Mission is { } tc && tc.Is(MissionKind.TwoClass))
         {
             if (Integrations.Cosmic.ActiveMission != tc.Id) { Go(Step.Report, 0.5); return; }
@@ -554,6 +582,26 @@ internal sealed unsafe class CosmicRun
             }
         }
         Go(Step.Report, 1.5);
+    }
+
+    /// <summary>
+    /// The crafts for one more of a mission's final item (with the steps in between), when the Cosmopouch still holds
+    /// the supplies for it; empty otherwise (and for missions of several different items).
+    /// </summary>
+    private List<CraftJob> OneMore(CosmicMission m)
+    {
+        if (m.Final is not { } final || m.Targets.Select(t => t.ItemId).Distinct().Count() > 1 || plugin.Plans.Catalog is not { } catalog) return new List<CraftJob>();
+        var single = m with { Targets = new[] { new MissionTarget(final.ItemId, 1) } };
+        var crafts = CosmicPicker.Crafts(single);
+        var supplies = 0;
+        for (var i = 0; i < m.Steps.Count; i++)
+            if (m.Steps[i].IngredientId == m.SuppliedItem) supplies += crafts[i] * m.Steps[i].IngredientAmount;
+        if (m.SuppliedItem == 0 || GameState.PouchCount(m.SuppliedItem) < supplies) return new List<CraftJob>();
+        var jobs = new List<CraftJob>();
+        for (var i = 0; i < m.Steps.Count; i++)
+            if (crafts[i] > 0 && (catalog.CosmicRecipe(m.Steps[i].RecipeId) ?? catalog.Recipe(m.Steps[i].RecipeId)) is { } recipe)
+                jobs.Add(new CraftJob(recipe, crafts[i], true, null, Cosmic: true, SteadyHand: steadyHandLeft, UseConsumables: Settings.UseConsumables));
+        return jobs;
     }
 
     /// <summary>Seconds a mission still has (its time limit since it was taken; plenty when it has none).</summary>

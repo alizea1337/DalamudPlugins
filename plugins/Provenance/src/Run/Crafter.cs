@@ -115,6 +115,11 @@ internal sealed unsafe class Crafter
     public string LastSolve { get; private set; } = "";
     /// <summary>The quality the rotation in use ends at (-1: unknown), so a Cosmic mission can note what it scored with.</summary>
     public int LastQuality { get; private set; } = -1;
+
+    /// <summary>Stellar Steady Hand used since <see cref="Begin"/>: a mission lends its uses for all its crafts together.</summary>
+    public int SteadyHandUsed { get; private set; }
+
+    private const uint StellarSteadyHand = 46843;
     public List<(CraftJob Job, int Done, string? Skipped)> History { get; } = new();
 
     public bool Finished => step is Step.Finished or Step.Failed;
@@ -149,6 +154,7 @@ internal sealed unsafe class Crafter
         macro.Clear();
         macroHq = null;
         LastQuality = -1;
+        SteadyHandUsed = 0;
         Go(Step.NextRecipe);
     }
 
@@ -444,7 +450,7 @@ internal sealed unsafe class Crafter
             var hqIn = Current.Cosmic ? null : HqIngredients(Current);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused,
-                Current.Quality ?? (Current.Hq ? null : 0), hqIn, Current.SteadyHand);
+                Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed));
             Status = "Working out the rotation";
             raphael.ForgetFailure(request);
             macroHq = hqIn;
@@ -757,6 +763,7 @@ internal sealed unsafe class Crafter
         stepIndexBefore = stepIndex;
         actionPending = GameState.Use(type, id);
         if (actionPending) actionsUsed++;
+        if (actionPending && raphaelId == StellarSteadyHand) SteadyHandUsed++;
         if (actionPending && !fallback) actionIndex++;
         Wait(0.25);
     }
@@ -782,6 +789,7 @@ internal sealed unsafe class Crafter
         }
         var name = plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId);
         log($"Crafted {name} ({doneThisJob} of {Current.Crafts}).", false);
+        if (Current.Cosmic && macro.Contains(StellarSteadyHand)) macro.Clear();
         Crafted?.Invoke(Current.Recipe);
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);

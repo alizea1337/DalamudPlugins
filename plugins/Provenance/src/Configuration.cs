@@ -59,6 +59,12 @@ public sealed class Configuration : IPluginConfiguration
         c.Cosmic.Classes ??= new();
         c.Cosmic.Shopping ??= new();
         c.Cosmic.Records ??= new();
+        // Before 0.19.5 a mission stopped after the crafts its objective names, so what it learned undersold it.
+        if (c.Cosmic.RecordsVersion < 2)
+        {
+            c.Cosmic.Records.Clear();
+            c.Cosmic.RecordsVersion = 2;
+        }
         c.Characters ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
@@ -394,6 +400,8 @@ public sealed class CosmicSettings
     public List<CosmicWish> Shopping { get; set; } = new();
     /// <summary>The plan's food and medicine suggestion was taken: use the crafting food and medicine while they last.</summary>
     public bool UseConsumables { get; set; }
+    /// <summary>Which way <see cref="Records"/> were learned; older ones are dropped on load (they stopped after one craft).</summary>
+    public int RecordsVersion { get; set; }
     /// <summary>What runs of each mission came to (keyed by WKSMissionUnit row).</summary>
     public Dictionary<uint, Core.Cosmic.MissionRecord> Records { get; set; } = new();
 

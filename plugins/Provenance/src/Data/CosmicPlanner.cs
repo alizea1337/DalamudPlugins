@@ -355,6 +355,9 @@ internal sealed class CosmicPlanner
             // those are worked out for progress only, much faster. The craft itself still aims every step at full quality.
             var request = Request(m, step, level, stats, manipulation, consumables);
             if (i < m.Steps.Count - 1 && m.Targets.All(t => t.ItemId != step.ItemId)) request = request with { TargetQuality = 0 };
+            // The mission lends Stellar Steady Hand for all its crafts together: with more than one craft, the last ones
+            // may have none left, so they're judged without it (reliably, as always).
+            else if (request.SteadyHand > 0 && CosmicPicker.Crafts(m).Sum() > 1) request = request with { SteadyHand = 0 };
             var task = plugin.Raphael.Solve(request);
             if (!task.IsCompleted) return null;
             if (!task.IsCompletedSuccessfully)

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.5
+
+- Cosmic Exploration, from the first runs in game:
+  - Fixed: a mission lends Stellar Steady Hand for all its crafts together, but every craft's rotation
+    counted on the full uses. The second craft then had none left, its Rapid Synthesis steps failed and
+    the synthesis broke. The uses left now carry from craft to craft, and each rotation is worked out
+    with them; the plan judges a mission of several crafts without them for the last.
+  - Fixed: the loop reported after the crafts the objective names, though the score adds up per item:
+    one Botanic Garden Sheet was bronze with supplies for another left. While short of gold, with
+    supplies left and the score still rising, it now crafts another (a few at most) before reporting.
+    What earlier runs learned is cleared once, as it came from stopping too early.
+  - Fixed: Cosmic Fortunes didn't answer "Pay 1,000 … credits for a cosmic fortune?" (it's a menu with
+    Yes and No), so it waited, then gave up before picking a wheel.
+  - The compact strip shows the Cosmic loop (mission, Cosmocredits against the goal) with Start and
+    Stop, instead of the empty order.
+
 ## 0.19.4
 
 - Fixed: with the Cosmic Exploration plan on the Plan page (and no order), the action bar still belonged

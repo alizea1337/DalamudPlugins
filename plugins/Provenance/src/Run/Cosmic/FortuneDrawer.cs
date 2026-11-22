@@ -94,7 +94,16 @@ internal sealed unsafe class FortuneDrawer
     {
         if (Interact.Ready("WKSLottery") != null) { step = Step.Wheel; deadline = DateTime.UtcNow.AddSeconds(15); return; }
         // "Pay 1,000 … for a cosmic fortune?" and "Trade … for a Big Bang fortune?": yes.
-        if (Interact.Yes()) { Wait(1); return; }
+        if (Interact.Yes()) { Wait(0.8); return; }
+        if (Interact.Menu() is { } menu && menu.Any(e => e.Text.Trim().TrimEnd('.').Equals(Text(26), StringComparison.CurrentCultureIgnoreCase)))
+        {
+            // Straight to "Pay … for a cosmic fortune?" (the game asks again after a spin): that's the payment.
+            creditsBefore = GameState.CurrencyCount(planet.CreditItem());
+            ticketsBefore = GameState.BagCount(Ticket(planet));
+            step = Step.Paying;
+            deadline = DateTime.UtcNow.AddSeconds(15);
+            return;
+        }
         if (Interact.Menu() != null)
         {
             var ticket = GameState.BagCount(Ticket(planet)) > 0;
@@ -127,7 +136,9 @@ internal sealed unsafe class FortuneDrawer
     private void Paying()
     {
         if (Interact.Ready("WKSLottery") != null) { step = Step.Wheel; deadline = DateTime.UtcNow.AddSeconds(15); return; }
-        if (Interact.Yes()) { Wait(1); return; }
+        // "Pay 1,000 … credits for a cosmic fortune?" comes as a menu with Yes and No (a Yes/No window on some clients).
+        if (Interact.Menu() != null && Interact.Choose(new[] { Text(26), "Yes" })) { Wait(0.8); return; }
+        if (Interact.Yes()) { Wait(0.8); return; }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (DateTime.UtcNow > deadline) { Fail("The fortune wheels didn't show after paying."); return; }
         Wait(0.3);
@@ -211,7 +222,7 @@ internal sealed unsafe class FortuneDrawer
 
     private void Wait(double seconds) => waitUntil = DateTime.UtcNow.AddSeconds(seconds);
 
-    /// <summary>Orbitingway's menu text (row 6 Big Bang fortune, 7 cosmic fortune, 9 nothing), up to its first placeholder.</summary>
+    /// <summary>Orbitingway's menu text (row 6 Big Bang fortune, 7 cosmic fortune, 9 nothing, 26 yes), up to its first placeholder.</summary>
     private static string Text(uint row)
     {
         try
@@ -224,7 +235,7 @@ internal sealed unsafe class FortuneDrawer
         catch (Exception e)
         {
             Services.Log.Debug("Couldn't read Orbitingway's menu: {Message}", e.Message);
-            return row switch { 6 => "Big Bang fortune", 7 => "cosmic fortune", _ => "Nothing" };
+            return row switch { 6 => "Big Bang fortune", 7 => "cosmic fortune", 26 => "Yes", _ => "Nothing" };
         }
     }
 }

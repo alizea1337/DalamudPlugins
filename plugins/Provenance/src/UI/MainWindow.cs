@@ -538,10 +538,10 @@ internal sealed class MainWindow : Window
             using (Ui.F.Small.Push()) dl.AddText(new Vector2(x0, y), Palette.U32(Palette.TextMuted), progress);
         }
 
-        // Buttons: the same ones the Run page offers.
+        // Buttons: the same ones the Run page offers (the Cosmic loop's while that's what's going, or set up with no order).
         var run = pages.OfType<Pages.RunPage>().FirstOrDefault();
         if (run == null) return;
-        var actions = run.Actions.ToList();
+        var actions = CosmicCompact ? CosmicCompactActions() : run.Actions.ToList();
         var bx = pos.X + size.X - pad;
         var by = pos.Y + size.Y - pad - 34 * s;
         for (var i = actions.Count - 1; i >= 0; i--)
@@ -554,8 +554,44 @@ internal sealed class MainWindow : Window
         }
     }
 
+    /// <summary>The compact strip shows the Cosmic loop: it's going, or it's set up and there's no order run or order.</summary>
+    private bool CosmicCompact => plugin.CosmicLoop.Active
+        || plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.Order.IsEmpty && plugin.Config.Cosmic.Classes.Any(c => c is >= 8 and <= 15);
+
+    private List<Pages.FooterAction> CosmicCompactActions()
+    {
+        var loop = plugin.CosmicLoop;
+        if (loop.Active)
+            return new List<Pages.FooterAction>
+            {
+                new("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(), Tooltip: "Stops once the item being crafted is finished. A mission under way stays as it is."),
+            };
+        return new List<Pages.FooterAction>
+        {
+            new("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () =>
+            {
+                if (loop.Start() is { } why) Services.Chat.PrintError("[Provenance] Can't start Cosmic Exploration: " + why);
+            }, Tooltip: "Starts the Cosmic Exploration loop."),
+        };
+    }
+
+    private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) CosmicCompactState()
+    {
+        var loop = plugin.CosmicLoop;
+        var s = plugin.Config.Cosmic;
+        var credits = Integrations.Cosmic.Credits;
+        float? fraction = s.Goal == CosmicGoal.Cosmocredits && s.CreditsTarget > 0 ? Math.Clamp((float)credits / s.CreditsTarget, 0f, 1f) : null;
+        var goal = s.Goal == CosmicGoal.Cosmocredits ? $"{credits:N0} of {s.CreditsTarget:N0} Cosmocredits" : $"{credits:N0} Cosmocredits";
+        if (!loop.Active)
+            return (Palette.TextFaint, "Cosmic Exploration", "not running", fraction, goal);
+        var detail = loop.Mission is { } m ? m.Label : loop.Status;
+        var parts = $"{loop.Missions} {(loop.Missions == 1 ? "mission" : "missions")}, +{loop.Earned:N0}";
+        return (Palette.Accent, "Cosmic Exploration", detail, fraction, $"{goal}, {parts}");
+    }
+
     private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) CompactState()
     {
+        if (CosmicCompact) return CosmicCompactState();
         var runs = plugin.Runs;
         var catalog = plugin.Plans.Catalog;
         var plan = plugin.Plans.Plan;
