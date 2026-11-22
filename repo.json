@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Cosmic Exploration: new option *Leave out EX and EX+ missions* (under the crafters): the loop and the\n  plan take nothing above class A, even when EX or EX+ missions would reliably reach gold. The plan lists\n  them as left out.\r\n",
+    "Changelog": "- Cosmic Exploration, from the first runs in game:\n  - Fixed: a mission lends Stellar Steady Hand for all its crafts together, but every craft's rotation\n    counted on the full uses. The second craft then had none left, its Rapid Synthesis steps failed and\n    the synthesis broke. The uses left now carry from craft to craft, and each rotation is worked out\n    with them; the plan judges a mission of several crafts without them for the last.\n  - Fixed: the loop reported after the crafts the objective names, though the score adds up per item:\n    one Botanic Garden Sheet was bronze with supplies for another left. While short of gold, with\n    supplies left and the score still rising, it now crafts another (a few at most) before reporting.\n    What earlier runs learned is cleared once, as it came from stopping too early.\n  - Fixed: Cosmic Fortunes didn't answer \"Pay 1,000 … credits for a cosmic fortune?\" (it's a menu with\n    Yes and No), so it waited, then gave up before picking a wheel.\n  - The compact strip shows the Cosmic loop (mission, Cosmocredits against the goal) with Start and\n    Stop, instead of the empty order.\n- Character page: the food and medicine pickers' tooltips name the three that add the most at your\n  stats (the strongest crafter's or gatherer's gearset, HQ where they come HQ), with what each adds; the\n  list marks them too. Ranked by what they add, CP (or GP) counting double.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.3.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.3/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.3/latest.zip",
+    "AssemblyVersion": "0.19.5.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.5/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.5/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795384412
+    "LastUpdate": 1795385366
   }
 ]
