@@ -779,7 +779,8 @@ internal sealed unsafe class Crafter
         if (Visible("Synthesis") || Services.Condition[ConditionFlag.ExecutingCraftingAction]) { Wait(0.2); return; }
         if (!Ready(Current!.Cosmic ? CosmicNotebook : "RecipeNote"))
         {
-            if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(8);
+            // After a mission's last craft the game doesn't open its crafting log again: a moment is enough there.
+            if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(Current.Cosmic ? 1.5 : 8);
             if (DateTime.UtcNow < deadline) { Wait(0.2); return; }
         }
         doneThisJob++;

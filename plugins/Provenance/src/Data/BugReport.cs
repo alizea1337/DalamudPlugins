@@ -150,11 +150,18 @@ internal static class BugReport
             foreach (var e in plugin.CosmicLoop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
         }
 
-        var debug = Integrations.DebugLog.Recent(150);
-        if (debug.Count > 0)
+        // The run going (or the last one) and the one before it, whole: a problem early in a long run still shows,
+        // and after a crash the run that crashed comes along.
+        var sessions = Integrations.DebugLog.Sessions();
+        foreach (var (name, lines, total) in sessions)
         {
-            Section("Debug log (last lines, oldest first; the whole of today's is in the plugin's logs folder)");
-            foreach (var l in debug) Line(l);
+            Section($"Debug log: {name} ({(lines.Count < total ? $"the last {lines.Count} of {total} lines" : $"{total} lines")}, oldest first)");
+            foreach (var l in lines) Line(l);
+        }
+        if (sessions.Count == 0 && Integrations.DebugLog.Recent(300) is { Count: > 0 } recent)
+        {
+            Section("Debug log (no run yet; the last lines, oldest first)");
+            foreach (var l in recent) Line(l);
         }
 
         // ---------------------------------------------------------------- settings and plugins

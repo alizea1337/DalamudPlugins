@@ -1,8 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.ClientState.Objects.Enums;
-using ECommons.Automation.UIInput;
 using ECommons.UIHelpers.AddonMasterImplementations;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel;
 using Provenance.Core.Cosmic;
 using Provenance.Data;
@@ -97,6 +98,7 @@ internal sealed unsafe class FortuneDrawer
         if (Interact.Yes()) { Wait(0.8); return; }
         if (Interact.Menu() is { } menu && menu.Any(e => e.Text.Trim().TrimEnd('.').Equals(Text(26), StringComparison.CurrentCultureIgnoreCase)))
         {
+            DebugLog.Write("fortune", "the pay question is up straight away: paying");
             // Straight to "Pay … for a cosmic fortune?" (the game asks again after a spin): that's the payment.
             creditsBefore = GameState.CurrencyCount(planet.CreditItem());
             ticketsBefore = GameState.BagCount(Ticket(planet));
@@ -110,8 +112,10 @@ internal sealed unsafe class FortuneDrawer
             var credits = GameState.CurrencyCount(planet.CreditItem()) >= Price;
             creditsBefore = GameState.CurrencyCount(planet.CreditItem());
             ticketsBefore = GameState.BagCount(Ticket(planet));
+            DebugLog.Write("fortune", $"menu: [{string.Join(" | ", Interact.Menu()?.Select(e => e.Text) ?? Array.Empty<string>())}], ticket {ticket}, credits {creditsBefore}");
             if (ticket && Interact.Choose(new[] { Text(6) }) || credits && Interact.Choose(new[] { Text(7) }))
             {
+                DebugLog.Write("fortune", "picked a draw; paying next");
                 step = Step.Paying;
                 deadline = DateTime.UtcNow.AddSeconds(15);
                 Wait(1);
@@ -137,14 +141,24 @@ internal sealed unsafe class FortuneDrawer
     {
         if (Interact.Ready("WKSLottery") != null) { step = Step.Wheel; deadline = DateTime.UtcNow.AddSeconds(15); return; }
         // "Pay 1,000 … credits for a cosmic fortune?" comes as a menu with Yes and No (a Yes/No window on some clients).
-        if (Interact.Menu() != null && Interact.Choose(new[] { Text(26), "Yes" })) { Wait(0.8); return; }
+        if (Interact.Menu() != null && Interact.Choose(new[] { Text(26), "Yes" })) { DebugLog.Write("fortune", "answered yes to the price"); Wait(0.8); return; }
         if (Interact.Yes()) { Wait(0.8); return; }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (DateTime.UtcNow > deadline) { Fail("The fortune wheels didn't show after paying."); return; }
         Wait(0.3);
     }
 
-    /// <summary>Picks the wheel whose prizes are worth more (unlockables and rarer items first), then spins.</summary>
+    /// <summary>The wheel window's prize slots (item id every 7th value from here; the left wheel's first at 89, the right's at 138).</summary>
+    private const int LeftPrizes = 89, RightPrizes = 138;
+    /// <summary>A wheel button's "checked" bit: the wheel picked for the spin.</summary>
+    private const uint CheckedBit = 1u << 18;
+
+    /// <summary>
+    /// Picks the wheel whose prizes are worth more (unlockables and rarer items first), then spins. Nothing here sends
+    /// a click to a wheel: the pick is the wheel button's own checked state (as the game keeps it), set only on
+    /// buttons that are there and enabled, and the prizes are read only from values that are there and hold numbers.
+    /// A click sent to a wheel with the wrong event data took the game down before (0.19.8).
+    /// </summary>
     private void Wheel()
     {
         var addon = Interact.Ready("WKSLottery");
@@ -155,15 +169,77 @@ internal sealed unsafe class FortuneDrawer
             return;
         }
         var lottery = new AddonMaster.WKSLottery((nint)addon);
-        var left = lottery.LeftWheelItems.Sum(i => Worth(i.itemId));
-        var right = lottery.RightWheelItems.Sum(i => Worth(i.itemId));
-        if (right > left && lottery.WheelRightButton != null) (*lottery.WheelRightButton).ClickAddonButton(addon);
-        else lottery.SelectWheelLeft();
+        var leftButton = lottery.WheelLeftButton;
+        var rightButton = lottery.WheelRightButton;
+        var leftOn = Usable(leftButton);
+        var rightOn = Usable(rightButton);
+        if (!leftOn && !rightOn)
+        {
+            // Nothing to pick (a single wheel, or the window still setting up): spin once Spin comes on.
+            if (Usable(lottery.SpinWheelButton)) { DebugLog.Write("fortune", "no wheel to pick; spinning what's there"); ToSpin(); return; }
+            if (DateTime.UtcNow > deadline) Fail("The fortune wheels didn't come on.");
+            else Wait(0.3);
+            return;
+        }
+        var leftItems = Prizes(addon, LeftPrizes);
+        var rightItems = Prizes(addon, RightPrizes);
+        if (leftItems.Count == 0 && rightItems.Count == 0)
+        {
+            if (DateTime.UtcNow > deadline) Fail("The fortune wheels showed no prizes.");
+            else Wait(0.3);
+            return;
+        }
+        var left = leftItems.Sum(Worth);
+        var right = rightItems.Sum(Worth);
+        DebugLog.Write("fortune", $"wheels ({addon->AtkValuesCount} values, buttons {(leftOn ? "on" : "off")}/{(rightOn ? "on" : "off")}): "
+                                  + $"left {left} [{string.Join(", ", leftItems.Select(i => $"{i} {ItemName(i)}"))}], right {right} [{string.Join(", ", rightItems.Select(i => $"{i} {ItemName(i)}"))}]");
+        // A wheel with no prizes (a draw can come with just one) isn't one to pick.
+        var pickRight = rightOn && rightItems.Count > 0 && (leftItems.Count == 0 || !leftOn || right > left);
+        var pick = pickRight ? rightButton : leftButton;
+        var other = pickRight ? leftButton : rightButton;
+        if (Usable(pick))
+        {
+            pick->Flags |= CheckedBit;
+            if (Usable(other)) other->Flags &= ~CheckedBit;
+            DebugLog.Write("fortune", $"picked the {(pickRight ? "right" : "left")} wheel");
+        }
+        ToSpin();
+    }
+
+    private void ToSpin()
+    {
         Status = "Spinning a cosmic fortune";
         step = Step.Spinning;
-        deadline = DateTime.UtcNow.AddSeconds(30);
-        Wait(0.8);
+        spun = false;
+        deadline = DateTime.UtcNow.AddSeconds(10);
+        Wait(0.5);
     }
+
+    /// <summary>A button that's there, shown and enabled (each pointer checked before it's followed).</summary>
+    private static bool Usable(AtkComponentButton* b)
+        => b != null && b->AtkComponentBase.OwnerNode != null && b->AtkResNode != null && b->IsEnabled && b->AtkResNode->IsVisible();
+
+    /// <summary>The Spin button can take a click: usable, with the event the click goes through.</summary>
+    private static bool Clickable(AtkComponentButton* b)
+        => Usable(b) && b->AtkComponentBase.OwnerNode->AtkResNode.AtkEventManager.Event != null;
+
+    /// <summary>A wheel's prize item ids, read only from values that are there and hold numbers.</summary>
+    private static List<uint> Prizes(AtkUnitBase* addon, int first)
+    {
+        var list = new List<uint>();
+        for (var i = 0; i < 7; i++)
+        {
+            var at = first + i * 7;
+            if (at >= addon->AtkValuesCount) break;
+            var v = addon->AtkValues[at];
+            var id = v.Type switch { AtkValueType.UInt => v.UInt, AtkValueType.Int => (uint)Math.Max(0, v.Int), _ => 0u };
+            if (id != 0) list.Add(id);
+        }
+        return list;
+    }
+
+    private static string ItemName(uint id)
+        => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(id)?.Name.ExtractText() ?? "?";
 
     private bool spun;
 
@@ -172,21 +248,49 @@ internal sealed unsafe class FortuneDrawer
         var addon = Interact.Ready("WKSLottery");
         if (addon != null && !spun)
         {
-            new AddonMaster.WKSLottery((nint)addon).ConfirmButton();
+            var lottery = new AddonMaster.WKSLottery((nint)addon);
+            if (!Clickable(lottery.SpinWheelButton))
+            {
+                if (DateTime.UtcNow > deadline) Fail("The fortune wheel's Spin button didn't come on.");
+                else Wait(0.3);
+                return;
+            }
+            DebugLog.Write("fortune", "spinning");
+            lottery.ConfirmButton();
             spun = true;
+            deadline = DateTime.UtcNow.AddSeconds(30);
             Wait(1.5);
             return;
         }
-        if (Interact.Yes()) { Wait(1); return; }
+        if (Interact.Ready("SelectYesno") != null)
+        {
+            // After a spin the game can offer another draw on the spot: yes while one can be paid for, else no.
+            if (spun && !CanDraw(planet)) { DebugLog.Write("fortune", "asked for another draw: no (nothing left to pay with)"); Interact.No(); Wait(1); return; }
+            DebugLog.Write("fortune", $"yes/no: yes (spun {spun}, credits {GameState.CurrencyCount(planet.CreditItem())})");
+            Interact.Yes();
+            if (spun)
+            {
+                // Another round on the same window: count the one just drawn and pick again.
+                Draws++;
+                creditsBefore = GameState.CurrencyCount(planet.CreditItem());
+                ticketsBefore = GameState.BagCount(Ticket(planet));
+                spun = false;
+                step = Step.Wheel;
+                deadline = DateTime.UtcNow.AddSeconds(15);
+            }
+            Wait(1);
+            return;
+        }
         if (addon != null && DateTime.UtcNow < deadline) { Wait(0.5); return; }
-        // The wheel is done (the prize is in the bags): it must have cost something, else nothing was drawn.
+        // The wheel is done (the prize is in the bags): the first draw must have cost something, else nothing was drawn.
         spun = false;
-        if (GameState.CurrencyCount(planet.CreditItem()) >= creditsBefore && GameState.BagCount(Ticket(planet)) >= ticketsBefore)
+        if (Draws == 0 && GameState.CurrencyCount(planet.CreditItem()) >= creditsBefore && GameState.BagCount(Ticket(planet)) >= ticketsBefore)
         {
             Fail("The fortune didn't go through.");
             return;
         }
         Draws++;
+        DebugLog.Write("fortune", $"draw {Draws} done; credits {GameState.CurrencyCount(planet.CreditItem())} (were {creditsBefore}), tickets {GameState.BagCount(Ticket(planet))}");
         if (CanDraw(planet))
         {
             step = Step.Talk;
@@ -215,6 +319,7 @@ internal sealed unsafe class FortuneDrawer
 
     private void Fail(string why)
     {
+        DebugLog.Write("fortune", "[!] " + why);
         travel.Cancel();
         Failure = why;
         step = Step.Failed;

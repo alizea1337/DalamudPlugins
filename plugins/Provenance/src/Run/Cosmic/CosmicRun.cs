@@ -192,6 +192,9 @@ internal sealed unsafe class CosmicRun
         log.Clear();
         saidOnce.Clear();
         emptyBoards.Clear();
+        DebugLog.BeginSession("cosmic");
+        DebugLog.Write("cosmic", $"planet {planet}, classes {string.Join("/", Settings.Classes)}, goal {Settings.Goal} {Settings.CreditsTarget}, time limit {Settings.TimeLimitMinutes}, "
+                                 + $"extras {Settings.Extras}, no EX {Settings.NoExMissions}, shopping {Settings.Shopping.Count}, consumables {Settings.UseConsumables}, credits {Integrations.Cosmic.Credits}");
         Problem = null;
         Missions = Golds = 0;
         spent = 0;

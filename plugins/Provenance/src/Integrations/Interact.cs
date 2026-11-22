@@ -101,6 +101,17 @@ internal static unsafe class Interact
         return false;
     }
 
+    /// <summary>Declines a Yes/No dialog if one is open.</summary>
+    public static bool No()
+    {
+        if (Ready("SelectYesno") is var yn && yn != null)
+        {
+            new AddonMaster.SelectYesno((nint)yn).No();
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>Entries of the open SelectString or SelectIconString menu, or null when none is open.</summary>
     public static List<(string Text, Action Select)>? Menu()
     {

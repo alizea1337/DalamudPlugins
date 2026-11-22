@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.9
+
+- Fixed (Cosmic Fortunes): the game could crash at the fortune wheels. Picking the second wheel sent the
+  game a click it wasn't made for. The wheel is now picked the way the game itself marks it, with no
+  click; the prizes are read only from what the window really holds (a draw can come with one wheel);
+  and Spin is pressed only once it's there and enabled. When the game offers another draw on the spot,
+  it says yes while there's enough to pay with, and no otherwise.
+- Cosmic Exploration: no more long wait before reporting a mission. After a mission's last craft the
+  game doesn't open its crafting log again, and the crafter waited eight seconds for it each time; now a
+  moment.
+- The debug log goes per run: every order run and every Cosmic loop writes a file of its own (the plugin's
+  logs folder, the last 40 runs), and the bug report carries the whole run going and the one before it
+  (up to 5,000 lines each), so an early problem in a long run, or a run that ended in a crash, comes
+  along. The order run's log goes in too, and Cosmic Fortunes notes every step (menu, wheels and prizes,
+  clicks, draws).
+
 ## 0.19.8
 
 - Fixed (Cosmic Exploration): the second craft of a mission with Stellar Steady Hand started without a

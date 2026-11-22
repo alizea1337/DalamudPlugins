@@ -473,6 +473,8 @@ internal sealed class RunEngine : IDisposable
             Notify("Can't start: " + why, true);
             return;
         }
+        DebugLog.BeginSession("order");
+        DebugLog.Write("run", $"order \"{plugin.Config.Order.Name}\": " + string.Join(", ", plugin.Config.Order.Lines.Select(l => $"{l.Quantity}x {l.ItemId}{(l.Hq ? " HQ" : "")}")));
 
         log.Clear();
         consumed.Clear();
@@ -2556,6 +2558,7 @@ internal sealed class RunEngine : IDisposable
 
     private void Add(string text, bool problem)
     {
+        DebugLog.Write("run", (problem ? "[!] " : "") + text);
         log.Insert(0, new RunLogEntry(DateTime.Now, text, problem));
         if (log.Count > 80) log.RemoveAt(log.Count - 1);
     }
