@@ -297,6 +297,13 @@ and the Namazu's "Out of the Frypan", stay "do it yourself" too.
 "Demolition Demo" and "Substitute Tester" fire a cannon that has to be aimed at each target, which the run
 can't do yet. They're "do it yourself" for now.
 
+### Why are two emote dailies "do it yourself"?
+
+In the Moogles' "The Moogle Motivator" and the Yok Huy's "Romanced by the Stone", the emote goes to people the
+quest's data doesn't name; it only points at an area. Emotes are public, so the run only emotes at someone the quest
+names, and leaves these two to you for now. Phrases for `/say` are different: when a step points at a place, the run
+goes there and says the phrase once.
+
 ### Why are the FATE dailies left out?
 
 The nine ARR FATE dailies wait on a named FATE spawning, sometimes only after other FATEs, which can take a

@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.22.0
+
+- New: **Tribes** (Expeditions), the allied society quests. Nothing here has been tried in game yet, so please
+  send a bug report whenever something looks wrong.
+  - The page shows all 20 societies: unlocked or what's missing (the quest, who gives it and where), rank and
+    reputation, the days to the next rank and to the top, a notice when a rank quest is ready, what each rank
+    opens in the society's shop and what you already own, and the rank achievements and titles.
+  - Today's quests from each giver are worked out ahead the way the game picks them, each marked "the run does
+    it", "do it yourself" (with the reason) or "needs …" (a class level, a saved gearset, crystals, an item to
+    wear). Opening a giver's list in the game checks them, like the deliveries' check.
+  - Allowances left of the 12, and the daily reset (15:00 UTC) in your local time.
+  - The run does the crafter and gatherer societies' dailies: the Moogles, Dwarves, Loporrits, Yok Huy, Namazu,
+    Qitari, Omicrons and Mamool Ja, and the Ixal dailies that need nothing but a crafter. It finishes dailies
+    left from before the reset first, takes up to 3 from each giver within your allowances, travels (in-zone
+    portals and sub-zones included), changes class, accepts only what it planned, and does the steps: talking,
+    hand-overs, emotes, a /say phrase (said once), key items, quest mounts, carrying, entering areas. Crafting
+    quests are crafted with the fastest rotation (quality never matters); crystals come from your bags, then
+    retainers, then gathering. Gathering quests are done as Miner or Botanist at the society's own nodes, whose
+    places are learned on your PC.
+  - Goals: Rank up (fill each bar first, then spare allowances go to more dailies), Currency, and Levelling
+    (your lowest classes). A society whose bar is full waits for its rank quest (do it yourself for now; a
+    button comes later) and its allowances go elsewhere.
+  - Never done by the run, with the reason on the page: the shooting and bow minigames (the only automation
+    fakes their result), FATE dailies, the Ixal's Deliverance, and Fisher for gatherer dailies (no fishing
+    spot or bait in the game data). For now also the Dwarves' two cannon dailies and two emote dailies.
+  - When it can't go on, the run pauses with the reason and a notification, and Resume carries on once you've
+    done that step.
+  - Options: Pause for cutscenes, Leave out quests that /say in public, and "Note what the run would do while I
+    do society quests myself": while you do a society quest by hand, the debug log notes the steps and targets
+    the run would pick, which helps check it before it acts. It only watches, logs no player names, and starts
+    once you've opened the Tribes page.
+  - Today's plan shows on the Tribes page and on the Plan page when the order is empty; the compact window
+    shows the run.
+- Bug reports: retainers appear as "retainer 1, 2, ..." instead of their names, and a section that fails no
+  longer loses the rest of the report.
+- The README has sections for Custom Deliveries and Tribes, and a new FAQ answers common "why does it do this"
+  questions.
+
 ## 0.21.5
 
 - Custom Deliveries: a client's level-up rewards are now accepted, and the level-up cutscene is skipped.

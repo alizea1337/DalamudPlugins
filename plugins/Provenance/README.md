@@ -170,7 +170,9 @@ keeps it from sliding things around.
     - Fisher for the gatherer dailies: the game data has no fishing spot or bait for those quest fish, so
       gatherer dailies are taken as Miner or Botanist.
   - Not yet done by the run: the Dwarves' cannon dailies, "Demolition Demo" and "Substitute Tester", are
-    "do it yourself" for now, because the cannon has to be aimed.
+    "do it yourself" for now, because the cannon has to be aimed. So are the Moogles' "The Moogle Motivator" and
+    the Yok Huy's "Romanced by the Stone": their emote goes to people the quest doesn't name, and the run only
+    emotes at someone it's sure of.
   - Planned for later releases:
     - Rank quests, started with *Do the rank quest*, escort and follow steps included. Three of them hold a
       solo duty (the Kojin's "A Test of Courage", the Ananta's "Schism between Sisters", the Pixies' "As the
