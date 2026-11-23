@@ -12,9 +12,11 @@ namespace Provenance.Integrations;
 /// Gets the character to a spot: teleport to the zone when needed, wait for vnavmesh's map, take the
 /// city's aethernet when a shard is much closer to the target than walking, then walk.
 /// Watches for getting stuck: no progress for a few seconds means retry, then teleport to the zone's
-/// nearest aetheryte and retry, then give up with a clear message. Ticked on the framework thread.
+/// nearest aetheryte and retry, then give up with a clear message. Indoors and raised targets have their own
+/// rules (Travel.Indoors.cs): out of a building on foot first, a target under a roof by an open spot near it, and
+/// never getting off in the air beside a target. Ticked on the framework thread.
 /// </summary>
-internal sealed unsafe class Travel
+internal sealed unsafe partial class Travel
 {
     public enum State { Idle, Teleporting, ToCrystal, Aethernet, Arriving, WaitingForMap, Walking, Arrived, Failed, ToFirmament, FirmamentMenu }
 
@@ -149,6 +151,7 @@ internal sealed unsafe class Travel
         dismountTried = false;
         lastPath = null;
         pathFailNoted = false;
+        ResetIndoors(trip: true);
         Current = State.Idle;
         Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
         if (Services.ClientState.TerritoryType == territory) { Enter(State.WaitingForMap); return; }
@@ -399,37 +402,66 @@ internal sealed unsafe class Travel
         var target = seen ?? Approximate(me);
         Status = "Walking to " + what;
 
+        // Coming down onto a floor point (an open spot near a target under a roof, the floor at a raised target): that first.
+        if (descent != Descent.None && TickDescent(me)) return;
+        // A roof over the target, once its real position is in view (once per trip).
+        if (seen is { } real) LookForRoof(real);
+
         var flat = Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z));
         // Height matters once the real target (an NPC, a crystal) is in sight: above it on a roof or a mount is too far to talk.
         var rise = seen is { } at && !KeepMount ? Math.Abs(me.Y - at.Y) : 0f;
         if (flat <= range && rise <= MaxRise)
         {
+            // In the air beside it with no floor right below at its height: getting off here would drop the character beside it.
+            if (LandFirst(me, target, seen)) return;
             Vnav.Stop();
             Note($"{what}: arrived, {flat:0.0} yalms from the target");
             Current = State.Arrived;
             Status = "Arrived at " + what;
             return;
         }
-        if (flat <= range + 2f && rise > MaxRise)
+        // (Heading for the open spot near a target under a roof: the way in is on foot from there, not down through the roof.)
+        if (flat <= range + 2f && rise > MaxRise && !HeadingForLanding)
         {
             if (landingSince == default)
             {
                 landingSince = DateTime.UtcNow;
                 Note($"{what}: right above or below the target ({rise:0} yalms); getting down to it");
                 Vnav.Stop();
+                // In the air beside it, not right above: come down on the floor at it instead of getting off up here.
+                if (InAirBeside(me, target) && !indoorsOff && FloorAt(target) is { } floor)
+                {
+                    StartDescent(floor, $"in the air {flat:0.0} yalms beside the target, not right above it; coming down on the floor at it, {Where(floor)}, then walking");
+                    return;
+                }
                 Vnav.MoveTo(target, Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]);
                 walkingTo = target;
                 return;
             }
-            // Flying and still above it after a while: land (dismounting brings the mount down), then walk the rest.
+            // Flying and still above it after a while: land (dismounting brings the mount straight down), then walk the
+            // rest. Only right above the target: beside it, getting off would drop the character beside it (off a
+            // platform, into the water below); there the floor at it is come down on instead.
             if (DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(6) && Services.Condition[ConditionFlag.Mounted] && !dismountTried)
             {
-                dismountTried = true;
-                Note($"{what}: still {rise:0} yalms above or below; dismounting");
-                Vnav.Stop();
-                var am = ActionManager.Instance();
-                if (am != null) am->UseAction(ActionType.GeneralAction, Dismount);
-                return;
+                if (!InAirBeside(me, target))
+                {
+                    dismountTried = true;
+                    Note($"{what}: still {rise:0} yalms above or below; dismounting");
+                    Vnav.Stop();
+                    var am = ActionManager.Instance();
+                    if (am != null) am->UseAction(ActionType.GeneralAction, Dismount);
+                    return;
+                }
+                if (!indoorsOff && FloorAt(target) is { } floor)
+                {
+                    StartDescent(floor, $"still {rise:0} yalms up, {flat:0.0} yalms beside the target; coming down on the floor at it, {Where(floor)}, then walking");
+                    return;
+                }
+                if (!dropRefusedNoted)
+                {
+                    dropRefusedNoted = true;
+                    Note($"{what}: still {rise:0} yalms up, {flat:0.0} yalms beside the target and no floor found at it; not getting off in the air here (it would drop beside it)");
+                }
             }
             if (!Vnav.Busy && DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(2))
             {
@@ -452,13 +484,16 @@ internal sealed unsafe class Travel
             trail.Clear();
         }
 
-        // A long way in an open zone: mount up first.
+        // Indoors and under roofs: out of a building on foot first; to a target under a roof, by an open spot near it.
+        if (Indoors(me, target)) return;
+
+        // A long way in an open zone: mount up first (not while walking out of a building or the rest on foot).
         if (mountUntil != default)
         {
             if (!Services.Condition[ConditionFlag.Mounted] && DateTime.UtcNow < mountUntil) return;
             mountUntil = default;
         }
-        else if (!OnFoot && !Vnav.Busy && !Services.Condition[ConditionFlag.Mounted] && Vector3.Distance(me, target) > RideFrom && TryMount())
+        else if (!OnFoot && !StayOnFoot && !Vnav.Busy && !Services.Condition[ConditionFlag.Mounted] && Vector3.Distance(me, target) > RideFrom && TryMount())
         {
             mountUntil = DateTime.UtcNow.AddSeconds(4);
             Status = "Mounting up";
@@ -466,26 +501,29 @@ internal sealed unsafe class Travel
             return;
         }
 
-        // (Re)issue the walk when idle, or when the real target came into view somewhere else.
-        var retarget = walkingTo is { } w && Vector3.Distance(w, target) > 3;
+        // (Re)issue the walk when idle, or when the real target came into view somewhere else. Heading for the open spot
+        // near a target under a roof, that spot is where it goes.
+        var landing = LandingSpot;
+        var dest = landing ?? target;
+        var retarget = walkingTo is { } w && Vector3.Distance(w, dest) > 3;
         if (!Vnav.Busy || retarget)
         {
             if (retarget) Vnav.Stop();
-            flying = !OnFoot && (Services.Condition[ConditionFlag.InFlight] || !NoFly && CanFlyHere());
-            if (Vnav.MoveCloseTo(target, flying, Math.Max(1, range - 1)))
+            flying = !OnFoot && !StayOnFoot && (Services.Condition[ConditionFlag.InFlight] || !NoFly && CanFlyHere());
+            if (Vnav.MoveCloseTo(dest, flying, landing != null ? LandingSpotWithin : Math.Max(1, range - 1)))
             {
-                walkingTo = target;
+                walkingTo = dest;
                 pathFailNoted = false;
                 // A line per new target, not per re-issue.
-                if (lastPath is not { } lp || Vector3.Distance(lp, target) > 3)
-                    Note($"{what}: {(flying ? "flying" : "walking")} to {Where(target)}, {Vector3.Distance(me, target):0} yalms from {Where(me)}"
+                if (lastPath is not { } lp || Vector3.Distance(lp, dest) > 3)
+                    Note($"{what}: {(flying ? "flying" : StayOnFoot ? "walking on foot" : "walking")} to {(landing != null ? "the open spot near it, " : "")}{Where(dest)}, {Vector3.Distance(me, dest):0} yalms from {Where(me)}"
                          + (!flying && Services.Condition[ConditionFlag.Mounted] ? $" (mounted, flight: {FlightStatus()})" : ""));
-                lastPath = target;
+                lastPath = dest;
             }
             else if (!pathFailNoted)
             {
                 pathFailNoted = true;
-                Note($"{what}: vnavmesh found no path to {Where(target)} from {Where(me)} yet");
+                Note($"{what}: vnavmesh found no path to {Where(dest)} from {Where(me)} yet");
             }
             trail.Clear();
             return;
@@ -756,6 +794,8 @@ internal sealed unsafe class Travel
     {
         if (next != Current) Note($"{what}: {Current} -> {next}");
         if (next != State.Walking) pathFailNoted = false;
+        // Each walk starts afresh where the character is now (after a teleport, at the aetheryte).
+        if (next == State.Walking) ResetIndoors(trip: false);
         Current = next;
         deadline = DateTime.UtcNow.AddSeconds(seconds);
         nextTry = default;
