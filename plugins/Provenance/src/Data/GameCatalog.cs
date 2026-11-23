@@ -95,6 +95,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.BuildBrowse();
         c.Cosmic = CosmicData.Build();
         c.Deliveries = DeliveryData.Build();
+        c.Tribes = TribeData.Build();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
             c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
         return c;
@@ -742,6 +743,9 @@ internal sealed class GameCatalog : IGameCatalog
 
     /// <summary>Custom deliveries: clients, requests per level, rewards, the bonus rotation.</summary>
     public DeliveryData Deliveries { get; private set; } = new();
+
+    /// <summary>Allied societies: societies, givers, quests and what they ask, ranks, shops and achievements.</summary>
+    public TribeData Tribes { get; private set; } = new();
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
     public Dictionary<uint, uint> ManipulationQuest { get; } = new();

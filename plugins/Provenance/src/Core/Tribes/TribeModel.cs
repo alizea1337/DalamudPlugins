@@ -88,7 +88,10 @@ public enum StepKinds : uint
 /// <param name="ClassJob">The crafter's ClassJob row (8 Carpenter … 15 Culinarian).</param>
 /// <param name="Level">The recipe's class level (the quest syncs it to yours).</param>
 /// <param name="Crystals">Shards, crystals or clusters (items 2-19) one craft takes.</param>
-public sealed record QuestRecipe(uint RecipeId, uint ClassJob, int Level, IReadOnlyList<(uint ItemId, int Amount)> Crystals);
+/// <param name="EquipItem">An item that must be equipped to craft it (Ixal: the Ehcatl Wristgloves, 8568; 0 for others).</param>
+/// <param name="Status">A status the crafter must have (Ixal: a "Facility Access" status, 547-554; 0 for others).</param>
+public sealed record QuestRecipe(uint RecipeId, uint ClassJob, int Level, IReadOnlyList<(uint ItemId, int Amount)> Crystals,
+    uint EquipItem = 0, uint Status = 0);
 
 /// <summary>What a crafting daily makes: its product, the materials item the quest hands out (one per craft), and a recipe per crafter.</summary>
 /// <param name="CanHq">The product can come out high quality (the hand-over then asks a yes/no question).</param>
@@ -193,7 +196,22 @@ public sealed record TribeRankQuest(uint QuestId, string Name, int Rank, uint Np
     IReadOnlyList<(uint QuestId, string Name)> OneOfFirst);
 
 /// <summary>What kind of thing a shop entry gives, for the page's highlights and the "owned" check.</summary>
-public enum ShopItemKind { Other, Mount, Minion, Orchestrion, Emote, Hairstyle, Card, Barding, FramersKit, Accessory, Materia, Gear, Furnishing }
+public enum ShopItemKind
+{
+    Other,
+    Mount,
+    Minion,
+    Orchestrion,
+    /// <summary>An emote, a hairstyle or another unlock the item teaches (item action type 2633).</summary>
+    Unlock,
+    Card,
+    Barding,
+    FramersKit,
+    Accessory,
+    Materia,
+    Gear,
+    Furnishing,
+}
 
 /// <summary>An entry of a society's shop.</summary>
 /// <param name="Currency">The item it costs (1 for gil).</param>
@@ -208,8 +226,8 @@ public sealed record TribeShopItem(uint ItemId, int Count, uint Currency, int Co
     public const int AlliedRank = 9;
 
     /// <summary>A collectible the game keeps an "obtained" mark for (mounts, minions, orchestrion rolls, cards…).</summary>
-    public bool Unlockable => Kind is ShopItemKind.Mount or ShopItemKind.Minion or ShopItemKind.Orchestrion or ShopItemKind.Emote
-        or ShopItemKind.Hairstyle or ShopItemKind.Card or ShopItemKind.Barding or ShopItemKind.FramersKit or ShopItemKind.Accessory;
+    public bool Unlockable => Kind is ShopItemKind.Mount or ShopItemKind.Minion or ShopItemKind.Orchestrion or ShopItemKind.Unlock
+        or ShopItemKind.Card or ShopItemKind.Barding or ShopItemKind.FramersKit or ShopItemKind.Accessory;
 }
 
 /// <summary>A society's achievement: one per rank reached (type 15), or the expansion's intersocietal quest (type 6).</summary>
