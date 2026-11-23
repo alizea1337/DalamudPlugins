@@ -148,7 +148,8 @@ which items, Teamcraft's `libs/data/src/lib/json/reduction.json` as it is. All f
 ## ECommons
 
 <https://github.com/NightmareXIV/ECommons>, MIT License, Copyright (c) 2023 NightmareXIV. Used for
-clicking game windows (recipe log, repair, confirmations).
+clicking game windows (recipe log, repair, confirmations, a quest's hand-over and reward), and for typing an
+allied society quest's /say phrase or emote into the chat box (`Chat`).
 
 ## Nunito
 

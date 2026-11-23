@@ -238,7 +238,8 @@ public static class StepRules
         var usable = q.KeyItems.Where(k => k.Usable && s.Count(k.Id) > 0).ToList();
         foreach (var item in usable)
         {
-            var named = lines.Any(l => item.Words.Any(w => Names(l.Text, w)));
+            // Any of its names whole; its title's last word too (not the singular's or plural's: "sacks" is too common).
+            var named = lines.Any(l => item.Words.Any(w => l.Text.Contains(w, StringComparison.CurrentCultureIgnoreCase)) || Names(l.Text, item.Name));
             var onObjects = usable.Count == 1 && lines.Count > 0 && Live(q, s, m).Any(o => o.Kind == StepObjectKind.Object);
             if ((named || onObjects) && UseItem(q, s, m, item, carrying, named ? null : o => o.Kind == StepObjectKind.Object) is { } use) return use;
         }
@@ -282,7 +283,8 @@ public static class StepRules
     /// <summary>The craft step, when the current to-do line is about the quest's product (or, for older quests, the materials wait).</summary>
     public static StepPlan? Craft(QuestScript q, StepSnapshot s)
     {
-        if (q.Product == 0) return null;
+        // Accepted as a gatherer (the Namazu quests take either), the quest gathers instead.
+        if (q.Product == 0 || s.AcceptJob is >= 16 and <= 18) return null;
         var have = s.Count(q.Product);
         var line = s.Todos.FirstOrDefault(t => t.ItemId == q.Product && t.Needed > 0);
         int needed;

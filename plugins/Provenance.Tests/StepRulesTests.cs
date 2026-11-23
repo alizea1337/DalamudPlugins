@@ -176,6 +176,21 @@ public class StepRulesTests
     }
 
     [Fact]
+    public void AQuestThatCraftsOrGathersGathersWhenAcceptedAsAGatherer()
+    {
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3103, Giver = 1025602, Product = 22725, Materials = 22699,
+            GatherItems = new Dictionary<uint, uint> { [Min] = 22621, [17] = 22647 },
+            Todos = new[] { Line(1, 2, "Mine .") },
+        };
+        var s = Snap(2, todos: new[] { new TodoProgress(1, false, 0, 3, 22621) }, items: new() { [22699] = 1 }, job: Min, accept: Min);
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Gather, plan.Kind);
+        Assert.Equal(22621u, plan.Id);
+    }
+
+    [Fact]
     public void GatheredItemsGoBackToTheGiver()
     {
         var s = Snap(255, new[] { Obj(1, 1043417, 400) }, new[] { new TodoProgress(1, false, 0, 0, 0) }, new() { [38281] = 3 }, job: Min, accept: Min);
@@ -342,6 +357,20 @@ public class StepRulesTests
             KeyItems = new[] { Item(2002977, "Qitari Fertilizer") },
         };
         var s = Snap(2, new[] { Obj(1, 1027741, 3) }, items: new() { [2002977] = 1 });
+        Assert.Equal(StepKind.Talk, Decide(q, s).Kind);
+    }
+
+    [Fact]
+    public void ACommonPluralDoesntNameAnItem()
+    {
+        // The large sack's plural "large sacks" mustn't make "Deliver the clucking sack" a line about it.
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3829, Giver = Giver,
+            Todos = new[] { Line(2, 3, "Deliver the clucking sack to the poultryman.") },
+            KeyItems = new[] { new KeyItemFact(2002980, "Large Sack", 1, false, false, 3, 3, new[] { "Large Sack", "large sack", "large sacks" }) },
+        };
+        var s = Snap(3, new[] { Obj(1, 1032830, 3, name: "poultryman") }, items: new() { [2002980] = 1, [2002981] = 1 });
         Assert.Equal(StepKind.Talk, Decide(q, s).Kind);
     }
 
