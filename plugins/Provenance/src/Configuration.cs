@@ -24,6 +24,8 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>The Cosmic Exploration loop: planet, classes, goal, extras, shopping list, and what runs of each mission came to.</summary>
     public CosmicSettings Cosmic { get; set; } = new();
     public DeliverySettings Deliveries { get; set; } = new();
+    /// <summary>What was started last ("order", "cosmic", "deliveries"): the compact strip shows that one when nothing runs.</summary>
+    public string LastLoop { get; set; } = "";
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();

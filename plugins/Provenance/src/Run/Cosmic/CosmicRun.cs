@@ -192,6 +192,7 @@ internal sealed unsafe class CosmicRun
         if (Integrations.Cosmic.ActiveMission is var active and not 0 && Data.Mission(active) is { IsCraft: false } other)
             return $"The mission \"{other.Name}\" is under way and isn't a crafting one; finish or abandon it first.";
 
+        plugin.Config.LastLoop = "cosmic";
         log.Clear();
         saidOnce.Clear();
         emptyBoards.Clear();

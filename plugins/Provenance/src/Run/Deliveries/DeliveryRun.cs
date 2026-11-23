@@ -93,6 +93,9 @@ internal sealed unsafe class DeliveryRun
     public int Planned => plan.Count;
     /// <summary>Deliveries handed in this round.</summary>
     public int DeliveredThisRound => deliveredThisRound;
+    /// <summary>Skip the rank-up cutscene now: the run waits out a hand-over and isn't set to pause for cutscenes.</summary>
+    public bool SkipCutscenesNow => Working && step == Step.Tour && visit == Visit.After && !Settings.PauseForCutscenes;
+
     /// <summary>The client being visited on the tour, when there is one.</summary>
     public DeliveryClient? Visiting => step == Step.Tour && tourIndex < tour.Count ? tour[tourIndex].Delivery.Client : null;
 
@@ -114,6 +117,8 @@ internal sealed unsafe class DeliveryRun
         if (Deliver.Remaining == 0) return "No deliveries left this week.";
         if (Raphael.ExecutablePath() == null) return "Provenance's crafting solver (raphael-cli.exe) is missing next to it. Reinstalling Provenance brings it back.";
 
+        plugin.Config.LastLoop = "deliveries";
+        plugin.Config.Save();
         log.Clear();
         Problem = null;
         Delivered = 0;
@@ -460,19 +465,32 @@ internal sealed unsafe class DeliveryRun
         Wait(0.3);
     }
 
+    /// <summary>
+    /// Leaving a client the way a player does: the hand-over and the delivery window closed, then "Nothing" in the
+    /// client's menu, so the conversation ends (closing windows alone leaves the game counting you as busy for a while,
+    /// and the next teleport is refused).
+    /// </summary>
     private void TickLeave()
     {
         if (Interact.SkipTalk()) { Wait(0.3); return; }
-        var busy = DeliveryWindow.SceneBusy || Interact.Ready("SelectYesno") != null;
-        if (busy && DateTime.UtcNow < leaveBy) { Wait(0.3); return; }
-        if (!busy)
+        var timedOut = DateTime.UtcNow > leaveBy;
+        if (!timedOut && (DeliveryWindow.SceneBusy || Interact.Ready("SelectYesno") != null)) { Wait(0.3); return; }
+        if (Interact.Ready("Request") != null) { Interact.Close("Request"); Wait(0.5); return; }
+        if (Interact.Ready("SatisfactionSupply") != null) { Interact.Close("SatisfactionSupply"); Wait(0.8); return; }
+        if (Interact.Menu() is { Count: > 0 } menu)
         {
-            Interact.Close("Request");
-            Interact.Close("SatisfactionSupply");
-            Interact.Close("SelectString");
+            // The client's menu: its last entry is "Nothing."
+            menu[^1].Select();
+            Wait(0.8);
+            return;
+        }
+        if (!timedOut && (Services.Condition[ConditionFlag.OccupiedInEvent] || Services.Condition[ConditionFlag.OccupiedInQuestEvent]))
+        {
+            Wait(0.3);
+            return;
         }
         tourIndex++;
-        Wait(1);
+        Wait(0.5);
         BeginVisit();
     }
 
@@ -609,6 +627,18 @@ internal sealed unsafe class DeliveryRun
     private void TickAfter(PlannedDelivery d, int count)
     {
         var client = d.Client;
+        // The skipped cutscene asks "Skip cutscene?" (and a rank-up scene can ask a question of its own): the first answer.
+        var inCutscene = Services.Condition[ConditionFlag.OccupiedInCutSceneEvent] || Services.Condition[ConditionFlag.WatchingCutscene]
+                         || Services.Condition[ConditionFlag.WatchingCutscene78];
+        if (inCutscene && !Settings.PauseForCutscenes && Interact.Menu() is { Count: >= 2 } prompt)
+        {
+            DebugLog.Write("deliveries", $"cutscene question: [{string.Join(" / ", prompt.Select(e => e.Text.Trim()))}] -> \"{prompt[0].Text.Trim()}\"");
+            if (!cutsceneHandled) Log($"Skipped {client.Name}'s cutscene.", false);
+            cutsceneHandled = true;
+            prompt[0].Select();
+            Wait(1);
+            return;
+        }
         if (DeliveryWindow.SceneBusy) { Wait(0.2); return; }
         if (Interact.Ready("SelectYesno") != null)
         {

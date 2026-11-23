@@ -168,7 +168,7 @@ internal sealed unsafe class DeliveriesPage : Page
         { S.DeliverAnywayWhileRanking = v; Config.Save(); }
         v = S.PauseForCutscenes;
         if (Ui.Checkbox("Pause for rank-up cutscenes", ref v,
-                "Off: the cutscene plays and the run carries on after it. On: the run pauses so you can watch, and Resume carries on."))
+                "Off: the run skips a client's rank-up cutscene. On: the run pauses so you can watch it, and Resume carries on."))
         { S.PauseForCutscenes = v; Config.Save(); }
         v = S.UseConsumables;
         if (Ui.Checkbox("Food and medicine for a higher tier", ref v,

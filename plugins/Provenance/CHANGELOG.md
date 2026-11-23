@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.21.3
+
+- Custom Deliveries: rank-up cutscenes are now skipped (the game's own skip, answered with Yes), unless
+  "Pause for rank-up cutscenes" is on, which pauses so you can watch.
+- Fixed: the Firmament's aethernet shards open the aethernet list, not a menu; the run waited for a menu,
+  then tried to walk off with the list still open (and got stuck at the Mendicant's Court). It now picks
+  the destination in the list; a destination not attuned yet means walking, with the list closed first.
+- Fixed: arriving "close" to an NPC counted only the distance on the ground, so a trip could end right
+  above them (on a roof, or hovering on the mount): "Target is too far below you", and the vendor couldn't
+  be talked to. Close now has to be on the same level too; above or below, the trip goes down (or up) to
+  them, dismounting if need be.
+- Fixed: leaving a client closed the delivery window without ending the conversation, so the game kept
+  you busy for a while and the next teleport was refused ("you are busy with something else"). The run
+  now leaves like a player: closes the windows and picks "Nothing".
+- The compact window shows what you ran last (an order, Cosmic Exploration or the custom deliveries)
+  instead of always Cosmic Exploration when nothing is going; its Start starts that one.
+
 ## 0.21.2
 
 - Fixed: trips in the Firmament walked all the way (200 to 350 yalms, getting stuck on the way) instead of

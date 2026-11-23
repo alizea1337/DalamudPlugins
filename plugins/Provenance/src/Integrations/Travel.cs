@@ -61,6 +61,12 @@ internal sealed unsafe class Travel
     /// <summary>Further than this, mount up first (where the zone allows mounts).</summary>
     private const float RideFrom = 40f;
     private const uint MountRoulette = 9;
+    /// <summary>General action "Dismount" (from the air it lands first).</summary>
+    private const uint Dismount = 23;
+    /// <summary>How far above or below the target still counts as there (the game refuses to talk beyond a few yalms up or down).</summary>
+    private const float MaxRise = 3f;
+    private DateTime landingSince;
+    private bool dismountTried;
 
     private uint territory;
     private Vector2 approx;
@@ -124,6 +130,8 @@ internal sealed unsafe class Travel
         crystalTrip = null;
         viaFoundation = false;
         firmamentHop = false;
+        landingSince = default;
+        dismountTried = false;
         lastPath = null;
         pathFailNoted = false;
         Current = State.Idle;
@@ -356,17 +364,51 @@ internal sealed unsafe class Travel
     private void Walk(Vector3? position)
     {
         if (position is not { } me) return;
-        var target = exact?.Invoke() ?? Approximate(me);
+        var seen = exact?.Invoke();
+        var target = seen ?? Approximate(me);
         Status = "Walking to " + what;
 
-        if (Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z)) <= range)
+        var flat = Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z));
+        // Height matters once the real target (an NPC, a crystal) is in sight: above it on a roof or a mount is too far to talk.
+        var rise = seen is { } at ? Math.Abs(me.Y - at.Y) : 0f;
+        if (flat <= range && rise <= MaxRise)
         {
             Vnav.Stop();
-            Note($"{what}: arrived, {Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z)):0.0} yalms from the target");
+            Note($"{what}: arrived, {flat:0.0} yalms from the target");
             Current = State.Arrived;
             Status = "Arrived at " + what;
             return;
         }
+        if (flat <= range + 2f && rise > MaxRise)
+        {
+            if (landingSince == default)
+            {
+                landingSince = DateTime.UtcNow;
+                Note($"{what}: right above or below the target ({rise:0} yalms); getting down to it");
+                Vnav.Stop();
+                Vnav.MoveTo(target, Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]);
+                walkingTo = target;
+                return;
+            }
+            // Flying and still above it after a while: land (dismounting brings the mount down), then walk the rest.
+            if (DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(6) && Services.Condition[ConditionFlag.Mounted] && !dismountTried)
+            {
+                dismountTried = true;
+                Note($"{what}: still {rise:0} yalms above or below; dismounting");
+                Vnav.Stop();
+                var am = ActionManager.Instance();
+                if (am != null) am->UseAction(ActionType.GeneralAction, Dismount);
+                return;
+            }
+            if (!Vnav.Busy && DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(2))
+            {
+                Vnav.MoveTo(target, Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]);
+                walkingTo = target;
+            }
+            if (DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(30)) { Vnav.Stop(); Fail($"Couldn't get down (or up) to {what}."); }
+            return;
+        }
+        landingSince = default;
         if (DateTime.UtcNow > walkDeadline) { Vnav.Stop(); Fail($"Took too long to reach {what}."); return; }
 
         // Backing off or side-stepping to get unstuck: let it play out, then path again.
@@ -564,6 +606,25 @@ internal sealed unsafe class Travel
     {
         Status = "Taking the Firmament's aethernet";
         if (DateTime.UtcNow < nextTry) return;
+        if (Interact.Ready("TelepotTown") != null)
+        {
+            if (listSince == default) listSince = DateTime.UtcNow;
+            var pick = Teleporter.TakeAethernetPlace(firmamentTo);
+            if (pick == Teleporter.AethernetPick.Taken) { sawLoading = false; Enter(State.Arriving, 40); return; }
+            if (pick != Teleporter.AethernetPick.NotReady && DateTime.UtcNow - listSince > ListPatience)
+            {
+                Note($"{what}: the aethernet list {(pick == Teleporter.AethernetPick.Locked ? "has " + PlaceText(firmamentTo) + " locked (not attuned yet)" : "doesn't list " + PlaceText(firmamentTo))}; walking");
+                Interact.Close("TelepotTown");
+                firmamentHop = false;
+                hopTo = 0;
+                nextTry = DateTime.UtcNow.AddSeconds(1);
+                Enter(State.Walking);
+                return;
+            }
+            nextTry = DateTime.UtcNow.AddSeconds(0.5);
+            return;
+        }
+        if (Interact.IsOpen("TelepotTown")) { nextTry = DateTime.UtcNow.AddSeconds(0.3); return; }
         if (Interact.Menu() is { Count: > 0 } options)
         {
             var name = PlaceText(firmamentTo);
@@ -588,13 +649,16 @@ internal sealed unsafe class Travel
         if (DateTime.UtcNow > deadline || ++tries > 6)
         {
             Note($"{what}: the Firmament shard didn't open its menu; walking");
+            Interact.Close("TelepotTown");
+            Interact.Close("SelectString");
             firmamentHop = false;
             hopTo = 0;
             Enter(State.Walking);
             return;
         }
         if (FirmamentShardObject(firmamentFrom) is { } shard) Interact.With(shard, travels: true);
-        nextTry = DateTime.UtcNow.AddSeconds(1.5);
+        listSince = default;
+        nextTry = DateTime.UtcNow.AddSeconds(2);
     }
 
     private void StartAethernet()

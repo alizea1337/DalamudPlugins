@@ -189,6 +189,30 @@ internal static unsafe class Teleporter
         return AethernetPick.Missing;
     }
 
+    /// <summary>
+    /// Picks an aethernet destination by its place name (the Firmament's: its destinations aren't aetheryte rows, but
+    /// the list's entries carry their place name).
+    /// </summary>
+    public static AethernetPick TakeAethernetPlace(uint placeNameId)
+    {
+        var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentTelepotTown.Instance();
+        if (agent == null || agent->Data == null) return AethernetPick.NotReady;
+        var data = agent->Data;
+        if (data->AetheryteCount == 0) return AethernetPick.NotReady;
+        for (byte i = 0; i < data->AetheryteCount && i < 64; i++)
+        {
+            var e = data->Entries[i];
+            if (e.PlaceNameId != placeNameId && e.PlaceNameId2 != placeNameId) continue;
+            if (e.IsLocked || e.IsUnusable) return AethernetPick.Locked;
+            var name = Services.Data.GetExcelSheet<PlaceName>().GetRowOrDefault(placeNameId)?.Name.ExtractText() ?? placeNameId.ToString();
+            MoveIntent.Expect(30, "aethernet to " + name);
+            agent->TeleportToAetheryte(i);
+            DebugLog.Write("travel", $"aethernet to {name} (place {placeNameId}) in zone {Services.ClientState.TerritoryType}");
+            return AethernetPick.Taken;
+        }
+        return AethernetPick.Missing;
+    }
+
     /// <summary>An aetheryte row is a city's main aetheryte (not an aethernet shard).</summary>
     public static bool IsMainAetheryte(uint aetheryteId)
         => Services.Data.GetExcelSheet<Aetheryte>().GetRowOrDefault(aetheryteId) is { IsAetheryte: true };

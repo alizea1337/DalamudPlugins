@@ -476,6 +476,7 @@ internal sealed class RunEngine : IDisposable
             Notify("Can't start: " + why, true);
             return;
         }
+        plugin.Config.LastLoop = "order";
         DebugLog.BeginSession("order");
         DebugLog.Write("run", $"order \"{plugin.Config.Order.Name}\": " + string.Join(", ", plugin.Config.Order.Lines.Select(l => $"{l.Quantity}x {l.ItemId}{(l.Hq ? " HQ" : "")}")));
 

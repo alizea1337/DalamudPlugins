@@ -55,6 +55,9 @@ public sealed class Plugin : IDalamudPlugin
         CosmicLoop = new Run.Cosmic.CosmicRun(this);
         DeliveryPlanning = new Data.DeliveryPlanning(this);
         DeliveryLoop = new Run.Deliveries.DeliveryRun(this);
+        // Rank-up cutscenes of the custom deliveries: the game's own skip, triggered only while the delivery run waits
+        // out a hand-over (ECommons' AutoCutsceneSkipper, MIT; the run answers the "Skip cutscene?" question).
+        ECommons.Automation.AutoCutsceneSkipper.Init(_ => DeliveryLoop.SkipCutscenesNow);
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
