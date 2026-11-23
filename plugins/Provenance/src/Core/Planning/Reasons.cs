@@ -21,7 +21,7 @@ public static class Reasons
     {
         var elsewhere = src.Places & ~Place.OpenWorld;
         var main = src.Has(Obtain.Vendor) ? VendorCap(src.VendorPrice, vendorMaxPrice)
-            : src.Has(Obtain.Reduce) ? "Only from aetherial reduction of fish, and fishing for reductions is off (Settings, Fishing)"
+            : src.Has(Obtain.Reduce) ? "Only from aetherial reduction of fish, and fishing for reductions is off or the fish only bite in a time window or weather (Settings, Fishing)"
             : src.Has(Obtain.ReduceElsewhere)
                 ? elsewhere != Place.None
                     ? $"Only from aetherial reduction of collectables gathered in {Places.Describe(elsewhere)}, {Limit(elsewhere)}"

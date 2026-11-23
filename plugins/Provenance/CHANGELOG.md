@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.4
+
+- Aetherial reduction no longer counts on timed fish (fish that only bite in a time window or in certain
+  weather): waiting for their window held a run up for the sake of a reduction. Gathered collectables and
+  fish without a window are used as before; an item that only comes from timed fish is one to get
+  yourself, and the plan says so.
+
 ## 0.21.3
 
 - Custom Deliveries: rank-up cutscenes are now skipped (the game's own skip, answered with Yes), unless

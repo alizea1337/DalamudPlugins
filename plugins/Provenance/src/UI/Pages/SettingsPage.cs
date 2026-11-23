@@ -536,7 +536,8 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Throw away fish caught on the side", ref v, "Fish the order doesn't need are kept while fishing and thrown away once gathering is done: main bags only, never anything the order uses, never what you had before.")) { f.DiscardByCatch = v; Config.Save(); }
         v = f.FishForReduction;
         if (Ui.Checkbox("Fish for aetherial reduction", ref v, "Many items from aetherial reduction come from a fish as well as from gathered collectables. "
-                + "On: the run also fishes for them, with their bait, while no node of theirs is up. Off: only gathered collectables are reduced, and the run waits for their nodes (crafting meanwhile); "
+                + "On: the run also fishes for them, with their bait, while no node of theirs is up; fish that only bite in a time window or weather are left out. "
+                + "Off: only gathered collectables are reduced, and the run waits for their nodes (crafting meanwhile); "
                 + "an item that only comes from fish is then one to get yourself.")) { f.FishForReduction = v; Changed(); }
         Ui.EndCard();
     }

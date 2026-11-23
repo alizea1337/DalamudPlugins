@@ -868,6 +868,8 @@ internal sealed class GameCatalog : IGameCatalog
 
     public IReadOnlyList<uint> ReducedFrom(uint itemId) => reducedFrom.TryGetValue(itemId, out var l) ? l : Array.Empty<uint>();
 
+    public bool TimedFish(uint itemId) => Gather.Fish(itemId) is { Restricted: true };
+
     /// <summary>Every collectable whose aetherial reduction gives the item (fish and special content included).</summary>
     public IReadOnlyList<uint> ReductionSources(uint itemId) => reductionSources.TryGetValue(itemId, out var l) ? l : Array.Empty<uint>();
 

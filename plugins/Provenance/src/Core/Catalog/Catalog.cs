@@ -151,6 +151,9 @@ public interface IGameCatalog
     /// </summary>
     IReadOnlyList<uint> ReducedFrom(uint itemId);
 
+    /// <summary>A fish that only bites in a time window or in certain weather.</summary>
+    bool TimedFish(uint itemId) => false;
+
     /// <summary>
     /// Ways to get the item that a run doesn't take (other currencies, seals, ventures, the market board), for the
     /// plan to name when the item is left to you. Only kept for materials and bait no run way gets.

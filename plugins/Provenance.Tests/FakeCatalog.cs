@@ -86,6 +86,10 @@ internal sealed class FakeCatalog : IGameCatalog
     }
     public IReadOnlyList<uint> ReducedFrom(uint itemId) => reducedFrom.TryGetValue(itemId, out var l) ? l : new List<uint>();
 
+    private readonly HashSet<uint> timedFish = new();
+    public void SetTimedFish(params uint[] fish) { foreach (var f in fish) timedFish.Add(f); }
+    public bool TimedFish(uint itemId) => timedFish.Contains(itemId);
+
     public bool TryFindItem(string name, out uint itemId)
     {
         var hit = names.FirstOrDefault(kv => string.Equals(kv.Value, name.Trim(), System.StringComparison.OrdinalIgnoreCase));

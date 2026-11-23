@@ -394,6 +394,40 @@ public class PlannerTests
     }
 
     [Fact]
+    public void Timed_fish_are_left_out_of_reductions()
+    {
+        const uint Sand = 46246, Quartz = 46247, Palate = 46249, Maggots = 43858;
+        var catalog = new FakeCatalog();
+        catalog.SetSources(Quartz, new ItemSources(Obtain.GatherTimed, 0, Places: Place.OpenWorld));
+        catalog.SetSources(Palate, new ItemSources(Obtain.Fish, 0, Places: Place.OpenWorld));
+        catalog.SetSources(Maggots, new ItemSources(Obtain.Exchange, 0, Places: Place.OpenWorld));
+        catalog.SetReducedFrom(Sand, Quartz, Palate);
+        catalog.SetTimedFish(Palate);
+        var options = new PlannerOptions
+        {
+            FishForReduction = true,
+            FishBaits = id => id == Palate ? new[] { (Maggots, 1.5) } : Array.Empty<(uint, double)>(),
+            ScripBait = _ => true,
+            BuyExchange = (_, _) => new BookPurchase(true, "5 Orange Gatherers' Scrips each"),
+        };
+        Assert.Equal(new[] { Quartz }, Reduction.Sources(catalog, Sand, true));
+
+        // The gathered quartz still makes it; the timed fish isn't fished, so no bait for it.
+        var plan = Planner.Build(OrderOf((Sand, 20)), catalog, Nothing, options);
+        Assert.Equal(Supply.Reduce, plan[Sand]!.Supply);
+        Assert.Null(plan[Maggots]);
+
+        // Only from the timed fish: got by hand, with the reason.
+        var fishOnly = new FakeCatalog();
+        fishOnly.SetSources(Palate, new ItemSources(Obtain.Fish, 0, Places: Place.OpenWorld));
+        fishOnly.SetReducedFrom(Sand, Palate);
+        fishOnly.SetTimedFish(Palate);
+        plan = Planner.Build(OrderOf((Sand, 20)), fishOnly, Nothing, options);
+        Assert.Equal(Supply.Manual, plan[Sand]!.Supply);
+        Assert.Contains("time window or weather", plan[Sand]!.ManualReason);
+    }
+
+    [Fact]
     public void Fish_lines_bring_their_bait_bought_from_a_vendor()
     {
         var plan = Build(OrderOf((Trout, 10)), options: Fishing(new() { [Trout] = new[] { (Lugworm, 1.5) } }, spare: 20));
