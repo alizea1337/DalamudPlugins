@@ -68,7 +68,7 @@ public sealed class Plugin : IDalamudPlugin
             new("Expeditions", new Page[]
             {
                 new CosmicPage(this),
-                new PlaceholderPage(this, "Tribes", FontAwesomeIcon.Handshake, "the daily allied society (tribe) quests, from taking them to handing them in"),
+                new TribesPage(this),
                 new DeliveriesPage(this),
                 new PlaceholderPage(this, "The Diadem", FontAwesomeIcon.Cloud, "gathering in the Diadem"),
                 new PlaceholderPage(this, "Ocean Fishing", FontAwesomeIcon.Ship, "ocean fishing voyages"),
@@ -182,6 +182,7 @@ public sealed class Plugin : IDalamudPlugin
             DeliveryLoop.Tick();
             guard.Tick();
             Integrations.Deliveries.Observe(Plans.Catalog?.Deliveries);
+            Integrations.Tribes.Observe(Plans.Catalog?.Tribes);
         }
         catch (Exception e)
         {

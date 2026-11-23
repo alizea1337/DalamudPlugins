@@ -116,6 +116,22 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## BossMod (allied society daily quests)
+
+<https://github.com/awgil/ffxiv_bossmod>, BSD 3-Clause License, Copyright (c) 2022-2024, Andrew Gilewsky.
+
+Ported logic:
+
+- `src/Core/Tribes/DailyPick.cs`: the generator and the pick of the daily quests a society's quest giver
+  offers, from `BossMod/Debug/DebugQuests.cs`. Changed to work on plain data and to include the
+  "exclusive" pool (`Quest.DailyQuestPool` 3), which BossMod's copy leaves out.
+
+BSD 3-Clause License. Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the copyright notice, this list of conditions and the
+disclaimer are retained (full text: <https://github.com/awgil/ffxiv_bossmod/blob/master/LICENSE>).
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES ARE DISCLAIMED.
+
 ## Vulcan / Artisan (crafting)
 
 The crafting step follows the approach of GatherBuddy Reborn's Vulcan, whose crafting core derives
