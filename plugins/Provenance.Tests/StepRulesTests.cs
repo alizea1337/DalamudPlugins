@@ -346,6 +346,42 @@ public class StepRulesTests
     }
 
     [Fact]
+    public void APhraseForAPlaceIsSaidThereOnce()
+    {
+        // Moogles' "free kupo nuts", the Dwarves' "lali-ho": the line points at an area, nobody to say it to.
+        var area = new ScriptSpot(9000001, Zone, new Vector3(50, 0, 0), 0, true);
+        var q = new QuestScript
+        {
+            Quest = 65536 + 2295, Giver = 1017171, TargetEnd = 1017171,
+            Todos = new[] { new ScriptTodo(0, 1, 1, new[] { area }, "Enter any phrase containing “free kupo nuts”.") },
+            Say = new Dictionary<int, string> { [0] = "free kupo nuts" },
+        };
+        var s = Snap(1, Array.Empty<StepObject>(), new[] { new TodoProgress(0, false, 0, 1, 0) });
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+
+        var plan = StepRules.Decide(q, s, m, T0);
+        Assert.Equal(StepKind.Say, plan.Kind);
+        Assert.Null(plan.Target);
+        Assert.Equal(area.Position, plan.Spot);
+        m.Public.Note(plan.Key, T0);
+        var after = StepRules.Decide(q, s, m, T0.AddSeconds(20));
+        Assert.Equal(StepKind.AskUser, after.Kind);
+        Assert.Contains("at the marked place", after.What);
+    }
+
+    [Fact]
+    public void AnEmoteAtPeopleTheQuestDoesntNameIsThePlayers()
+    {
+        var quest = new TribeQuest(65536 + 2318, 8, "Moogle emote daily", TribeQuestKind.Daily, 3, 2, 1017171, 1017171,
+            TribeKind.Crafter, 50, 50, StepKinds.Emote | StepKinds.Craft, null, Array.Empty<QuestGather>(), 0,
+            Array.Empty<uint>(), (0, 0), Array.Empty<uint>(), Array.Empty<uint>(), Array.Empty<uint>());
+        var judged = QuestPolicy.Judge(quest, TribeKind.Crafter);
+        Assert.False(judged.RunCanDo);
+        Assert.Contains("emote", judged.Reason);
+    }
+
+    [Fact]
     public void ASayTriedBeforeAStopIsntSentByANewStepper()
     {
         var store = new PublicAttemptStore();

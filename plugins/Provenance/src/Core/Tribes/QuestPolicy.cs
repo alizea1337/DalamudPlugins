@@ -66,6 +66,13 @@ public static class QuestPolicy
     /// <summary>The two Dwarves dailies that fire the Rolling Tankard's cannon.</summary>
     public static readonly IReadOnlySet<ushort> CannonQuests = new HashSet<ushort> { 3923, 3929 };
 
+    /// <summary>
+    /// Dailies whose emote goes to people the quest's to-do lines don't name (the lines point at an area: Moogles 2318
+    /// /psych and /slap, Yok Huy 5346 /poke). The engine only emotes at someone a line names, so these stay with the
+    /// player until the watch logs show who the targets are.
+    /// </summary>
+    public static readonly IReadOnlySet<ushort> EmoteAtArea = new HashSet<ushort> { 2318, 5346 };
+
     private const string Minigame = "A shooting minigame: Provenance doesn't fake its result";
     private const string Fate = "A FATE quest: the run doesn't take part in FATEs";
 
@@ -113,6 +120,8 @@ public static class QuestPolicy
         }
         if (CannonQuests.Contains(quest.Number) && !CannonAims)
             return new QuestJudgement(PolicyRule.NeedsHint, "Fires the Rolling Tankard's cannon, which has to be aimed: Provenance can't aim it yet");
+        if (EmoteAtArea.Contains(quest.Number))
+            return new QuestJudgement(PolicyRule.NeedsHint, "An emote at people the quest doesn't name: Provenance only emotes at someone it's sure of, so do this one yourself for now");
         if (options.AcceptedAs == FisherId && quest.Has(StepKinds.Gather | StepKinds.Fish))
             return new QuestJudgement(PolicyRule.TakenAsFisher, "Taken as Fisher: the run does gatherer dailies as Miner or Botanist only");
         if (options.LeaveOutSay && quest.Has(StepKinds.Say))

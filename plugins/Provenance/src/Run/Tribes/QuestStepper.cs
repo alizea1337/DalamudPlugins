@@ -899,6 +899,7 @@ internal sealed unsafe class QuestStepper
         {
             StepKind.Talk => flat <= p.Within && Math.Abs(me.Y - a.Y) <= 3f,
             StepKind.Go => flat <= p.Within,
+            StepKind.Say when p.Target == null => flat <= p.Within,
             StepKind.UseItem when p.Use == ItemUse.Self => flat <= p.Within,
             _ => Vector3.Distance(me, a) <= p.Within,
         };

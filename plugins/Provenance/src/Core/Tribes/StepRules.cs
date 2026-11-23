@@ -468,13 +468,32 @@ public static class StepRules
         var spots = SpotObjects(new[] { line });
         var target = spots.Count == 0 ? null
             : Pick(q, s, m, o => spots.Contains(o.BaseId) && (kind != StepKind.Emote || o.Kind == StepObjectKind.Npc));
-        if (target == null)
+        StepPlan plan;
+        string where;
+        if (target != null)
+        {
+            plan = new StepPlan(kind, what) { Target = target, Territory = s.Territory, Within = PublicWithin, Text = text, Id = id, Key = PublicKey(q, s, line, kind) };
+            where = $"near {target.Name}";
+        }
+        else if (kind == StepKind.Say && line.Spots.FirstOrDefault(p => p.Area || p.Object == 0) is { } area)
+        {
+            // A phrase said at a place, not to someone (the line's spot is an area nobody stands on): go into the area and
+            // say it there, once. The live marker gives the area's real size when there is one.
+            var marker = s.Markers.FirstOrDefault(k => k.Level == area.Level);
+            plan = new StepPlan(kind, what)
+            {
+                Spot = marker?.Position ?? area.Position, Territory = marker?.Territory ?? area.Territory, Level = area.Level,
+                Within = marker is { IsArea: true } ? Math.Clamp(marker.Radius * 0.5f, 3f, 15f) : AreaSayWithin,
+                Text = text, Id = id, Key = PublicKey(q, s, line, kind),
+            };
+            where = "at the marked place";
+        }
+        else
         {
             // Nothing in view yet: go there first (the target comes into view on the way).
             if (Where(q, s, m) is { } go && go.Target == null && go.Spot != null) return go;
             return Ask($"Can't find where to {what}; do this step yourself, then resume.");
         }
-        var plan = new StepPlan(kind, what) { Target = target, Territory = s.Territory, Within = PublicWithin, Text = text, Id = id, Key = PublicKey(q, s, line, kind) };
 
         var verdict = PublicVerdict(kind, m.Public.Get(plan.Key, now), m.ProgressAt, now);
         return verdict switch
@@ -482,10 +501,13 @@ public static class StepRules
             PublicTry.Yes => plan,
             PublicTry.NotYet => new StepPlan(StepKind.Wait, $"waiting to see whether the {(kind == StepKind.Say ? "phrase" : "emote")} counted"),
             _ => Ask(kind == StepKind.Say
-                ? $"Saying “{text}” didn't move the quest on; do this step yourself (say it near {target.Name}), then resume."
-                : $"{text} didn't move the quest on; do this step yourself ({text} at {target.Name}), then resume."),
+                ? $"Saying “{text}” didn't move the quest on; do this step yourself (say it {where}), then resume."
+                : $"{text} didn't move the quest on; do this step yourself ({text} {where.Replace("near", "at")}), then resume."),
         };
     }
+
+    /// <summary>How close to an area's spot a phrase is said when the game shows no marker for the area.</summary>
+    public const float AreaSayWithin = 6f;
 
     /// <summary>
     /// What a public action is counted under: the quest, the line and the quest's state (sequence and variables), not
