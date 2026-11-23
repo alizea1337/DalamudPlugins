@@ -626,19 +626,16 @@ internal sealed unsafe class QuestStepper
         }
         cutsceneNoted = false;
 
+        // On the way, the windows are the trip's: an aetheryte's menu, the aethernet, a portal's question.
+        if (phase == Phase.Travel) return false;
+
         if (Interact.SkipTalk()) { Wait(0.2); return true; }
 
         if (QuestSteps.Question() is { } question)
         {
-            var known = QuestSteps.KnownQuestions.ToList();
-            if (travel.ExpectedQuestion is { Length: > 0 } warp) known.Add(warp);
-            if (StepRules.KnownQuestion(question, known))
+            if (StepRules.KnownQuestion(question, QuestSteps.KnownQuestions))
             {
-                if (QuestSteps.Yes())
-                {
-                    Note($"question \"{question}\" -> Yes");
-                    if (travel.AtPortal) MoveIntent.Expect(30, "a portal");
-                }
+                if (QuestSteps.Yes()) Note($"question \"{question}\" -> Yes");
                 Wait(0.8);
                 return true;
             }
