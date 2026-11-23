@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- New (Security): *Tripwire*. While a run or the Cosmic loop works, any of these stops everything at once,\n  even a craft under way, and the chat says what set it off (the debug log notes it too, with the player's\n  name and world only base64-encoded as a \"ref\", so it doesn't read at a glance but decodes for debugging). Your\n  own teleports, Provenance's own trips and your party never count.\n  - *The character is moved* (on by default): another zone, or a jump far across the zone in an instant,\n    with no teleport, aethernet, door, ferry, knock-out, duty or cutscene just before it (a game master\n    can summon a character, for example).\n  - *A game master is around* (on by default): anyone the game shows as a game master.\n  - *A player appears close by* (off): someone who didn't walk there; arrivals at an aetheryte don't count.\n  - *A hidden player is close by* (off): someone the game knows is there but doesn't draw, for 3 seconds.\n  - \"Close by\" is a distance you set (15 yalms to start). The last two are off to start because busy\n    places set them off more often (players logging in or coming back from a duty next to you, a low\n    character display limit).\r\n",
+    "Changelog": "- The debug log now follows every trip, as [travel] lines: where a trip goes and from where, each\n  teleport (aetheryte, zone, cost) and aethernet hop, each walk or flight leg, mounting up, arriving,\n  getting stuck and each step to get unstuck, the Cosmic planet trips (Bestways Burrow, Cruisingway) and\n  the trip back after an order step by step, and when Provenance expects a move of its own (what the\n  Tripwire goes by). A teleport the game won't do yet is noted once, not on every retry. So when the\n  Tripwire or a trip goes wrong, the bug report shows what happened just before.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.19.11.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.11/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.11/latest.zip",
+    "AssemblyVersion": "0.19.12.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.12/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.19.12/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795427148
+    "LastUpdate": 1795427590
   }
 ]
