@@ -183,6 +183,7 @@ public sealed class Plugin : IDalamudPlugin
             guard.Tick();
             Integrations.Deliveries.Observe(Plans.Catalog?.Deliveries);
             Integrations.Tribes.Observe(Plans.Catalog?.Tribes);
+            Integrations.QuestWatch.Observe(this);
         }
         catch (Exception e)
         {
@@ -217,6 +218,8 @@ public sealed class Plugin : IDalamudPlugin
         Plans.Dispose();
         UI.JobIcons.Dispose();
         fonts.Dispose();
+        try { Integrations.QuestWatch.Dispose(); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the quest watch failed"); }
         ECommons.ECommonsMain.Dispose();
     }
 }
