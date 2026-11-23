@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.22.3
+
+- Tribes: talk windows inside an event scene weren't clicked through (the quest mounts' actions play one, like
+  the cloud mallow's Seed at Zenith), so the run stood there until you clicked. They're clicked now, unless
+  the run is set to pause for cutscenes.
+- Tribes: key items weren't handed over (the Moogles' Training Supplies for the mentee moogles). The run
+  looked for the wrong item among the offered ones, closed the window and went on to the next NPC, where the
+  window then never filled. Key items are handed over like other items now, and a hand-over window gets a
+  moment to settle before anything is pressed.
+- Tribes: after crafting, the run still talked to the NPC with the materials three times when the made items
+  go to someone else before the report (Mogwon instead of Moguppo). On a crafting step the game's data names
+  whoever the work goes to first and where the materials come from second, and the run goes by that now: the
+  materials first when there's nothing to craft from, then only whoever the work goes to.
+- Tribes: getting off the mount next to an NPC could take 20 seconds. From the air the game lands on the
+  first press and gets off on the second; the run started a new trip in between, which took off again. It now
+  waits for the landing and presses again, and nothing else meanwhile.
+- Tribes: on a quest mount, the run no longer flies back to whoever gave the mount between two targets (they
+  stay marked on the map, and were sometimes the nearest marker).
+- Every run: "stuck" was counted while vnavmesh was still working out a long path (the character stands still
+  meanwhile), so a trip backed off, side-stepped, teleported or gave up for nothing. The stuck check now
+  waits until the path is there.
+
 ## 0.22.2
 
 - Tribes: after crafting a quest's items, the run kept talking to the NPC who hands out the materials (he still

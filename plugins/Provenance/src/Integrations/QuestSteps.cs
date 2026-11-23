@@ -801,12 +801,21 @@ internal static unsafe class QuestSteps
     /// <summary>
     /// One step of the hand-over window (<c>Request</c>) for a quest: hand over once every slot is filled; otherwise
     /// open the next slot's picker and pick its item, normal quality first (high quality when the slot wants it, or
-    /// when that's all there is; the game then asks, and the question is on the known list). <paramref name="slot"/>
-    /// is the next slot to fill, kept by the caller.
+    /// when that's all there is; the game then asks, and the question is on the known list). Key items are handed over
+    /// the same way. <paramref name="slot"/> is the next slot to fill, kept by the caller.
     /// </summary>
-    public static TradeStep Trade(ref int slot, out string detail)
+    /// <param name="settled">
+    /// The window has been open for a moment. Before that nothing is pressed: in its first frames its Hand Over button
+    /// can still read as enabled with nothing in the slots.
+    /// </param>
+    /// <param name="forceOpen">
+    /// Open the slot's picker even though the game still has a slot selected: a picker closed without a pick (an item
+    /// not found) leaves the selection behind, and the next window would wait on it for good.
+    /// </param>
+    public static TradeStep Trade(ref int slot, bool settled, bool forceOpen, out string detail)
     {
         detail = "";
+        if (!settled) return TradeStep.Wait;
         if (DeliveryWindow.CanHandOver)
         {
             DeliveryWindow.HandOver();
@@ -822,19 +831,23 @@ internal static unsafe class QuestSteps
             var at = trade->SelectedTurnInSlot;
             if (at < 0 || at >= requests.Count) { Interact.Close("ContextIconMenu"); return TradeStep.Wait; }
             var want = requests.Items[at];
+            var wanted = StepRules.BaseItem(want.ItemId);
             var pick = -1;
             var pickHq = true;
+            var offered = new List<uint>();
             for (var i = 0; i < trade->SelectedTurnInSlotItemOptions && i < 140; i++)
             {
                 var item = trade->SelectedTurnInSlotItemOptionValues[i].Value;
-                if (item == null || item->GetBaseItemId() != want.ItemId % 1_000_000) continue;
+                if (item == null) continue;
+                offered.Add(item->ItemId);
+                if (item->GetBaseItemId() != wanted && StepRules.BaseItem(item->ItemId) != wanted) continue;
                 var hq = item->IsHighQuality();
                 if (want.WantHQ && !hq) continue;
                 if (pick < 0 || (pickHq && !hq)) { pick = i; pickHq = hq; }
             }
             if (pick < 0)
             {
-                detail = $"no {ItemName(want.ItemId)} to hand over for slot {at + 1}";
+                detail = $"no {ItemName(want.ItemId)} ({want.ItemId}{(want.WantHQ ? ", high quality" : "")}) to hand over for slot {at + 1}; the picker offers [{string.Join(",", offered)}]";
                 Interact.Close("ContextIconMenu");
                 return TradeStep.Missing;
             }
@@ -843,7 +856,7 @@ internal static unsafe class QuestSteps
             slot = at + 1;
             return TradeStep.Picked;
         }
-        if (Interact.Ready("Request") is var request && request != null && trade->SelectedTurnInSlot < 0)
+        if (Interact.Ready("Request") is var request && request != null && (trade->SelectedTurnInSlot < 0 || forceOpen))
         {
             if (slot >= requests.Count) return TradeStep.Wait;
             Callback.Fire(request, false, 2, slot, 0, 0);

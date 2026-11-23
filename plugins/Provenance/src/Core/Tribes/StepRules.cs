@@ -371,10 +371,16 @@ public static class StepRules
             if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects) is { } use) return use;
         }
 
-        // The report, once the crafting or gathering is done: to whoever the quest is reported to, and nobody else. The
-        // NPC who handed the materials out keeps the quest's icon (he hands out spares), but talking to him again only
-        // says to go and deliver the work.
-        if (s.Sequence == 255 && Supplied(q, s)) return Report(q, s, m) with { OnFoot = carrying };
+        // Once the crafting or gathering is done: to whoever the items go to, and nobody else: whoever the quest is
+        // reported to at its report, else the first place of the crafting line. The NPC who handed the materials out
+        // keeps the quest's icon (he hands out spares), but talking to him again only says to go and deliver the work.
+        if (Supplied(q, s))
+        {
+            if (s.Sequence == 255) return Report(q, s, m) with { OnFoot = carrying };
+            if (Deliver(q, s, m) is { } deliver) return deliver with { OnFoot = carrying };
+        }
+        // Nothing made yet and nothing to make it from: whoever hands the materials out, before the one the work goes to.
+        else if (Source(q, s, m, craftShort) is { } source) return source with { OnFoot = carrying };
 
         if (Pick(q, s, m) is { } target)
         {
@@ -418,8 +424,11 @@ public static class StepRules
         }
         if (s.Sequence == 255)
             return new StepPlan(StepKind.Dismount, "the quest mount has nothing more to do (the quest can't be reported while riding it)");
-        // Nothing to use the action on in view: the marked area (or the spot of the line).
-        if (Where(q, s, m) is { } go)
+        // Nothing to use the action on in view: the marked area (or the spot of the line). Not the places of earlier
+        // lines while another is left: whoever put you on the mount stays marked (the line's second place: the mount
+        // can be had again there), and riding back there only to look around loses a long way.
+        var behind = q.Todos.Where(t => t.Sequence < s.Sequence).SelectMany(t => t.Spots).Select(p => p.Level).ToHashSet();
+        if ((Where(q, s, m, behind) ?? Where(q, s, m)) is { } go)
             return go with { NoFly = noFly, What = mount.Action == 0 ? "ride into the marked area" : go.What };
         return Ask("On the quest mount with nothing left in view to use it on and nowhere marked; do this step yourself, then resume.");
     }
@@ -575,6 +584,67 @@ public static class StepRules
         return line != null ? line.Have >= line.Needed : s.Count(item) > 0;
     }
 
+    /// <summary>
+    /// The to-do line of the quest's crafting ("Synthesize ...") when the quest is at it: a line that places exactly
+    /// two NPCs or objects. The first is whoever the made items go to, the second where the materials come from (a
+    /// crate, a machine, the NPC handing them out). The game data has it so for every crafting daily of the societies;
+    /// the line's text can't be gone by (it differs by language, and newer quests leave the item's name out of it).
+    /// </summary>
+    public static ScriptTodo? CraftLine(QuestScript q, StepSnapshot s)
+        => q.Product == 0 ? null
+            : q.TodosAt(s.Sequence).FirstOrDefault(t => t.Spots.Count == 2 && t.Spots.All(p => p.Object != 0 && !p.Area) && t.Spots[0].Object != t.Spots[1].Object);
+
+    /// <summary>
+    /// Before the report, the made (or gathered) items go to the crafting line's first place: talk to them when in view
+    /// (not tried without effect), else go to where they stand. Null when the quest isn't at such a line, or that was
+    /// tried: the general rules decide then.
+    /// </summary>
+    private static StepPlan? Deliver(QuestScript q, StepSnapshot s, StepMemory m)
+    {
+        if (CraftLine(q, s) is not { } line) return null;
+        var to = line.Spots[0];
+        var lines = LineKey(q, s);
+        var npc = s.Objects
+            .Where(o => o.BaseId == to.Object && o.Kind != StepObjectKind.Other && o.Targetable && !m.Tried.Contains(o.Key) && !m.IsDecoy(lines, o.Key))
+            .OrderBy(o => o.Icon != 0 ? 0 : 1)
+            .ThenBy(o => Vector3.DistanceSquared(o.Position, s.Player))
+            .FirstOrDefault();
+        if (npc != null) return Talk(npc, "hand in what was made (the crafting or gathering is done)");
+        if (!m.Looked.Contains(to.Level))
+            return new StepPlan(StepKind.Go, "where the made items go") { Spot = to.Position, Territory = to.Territory, Within = 6f, Level = to.Level };
+        return null;
+    }
+
+    /// <summary>
+    /// At the crafting line with nothing to craft from (no materials; nothing made yet, or not enough): the line's
+    /// second place hands the materials out, so that comes before whoever the work goes to. Crafters only (accepted as
+    /// a gatherer, the quest gathers). Null when it doesn't apply or was tried: the general rules decide then.
+    /// </summary>
+    private static StepPlan? Source(QuestScript q, StepSnapshot s, StepMemory m, bool craftShort)
+    {
+        if (q.Materials == 0 || s.AcceptJob is >= 16 and <= 18 || s.Count(q.Materials) > 0) return null;
+        if (!craftShort && s.Count(q.Product) > 0) return null;
+        if (CraftLine(q, s) is not { } line) return null;
+        var from = line.Spots[1];
+        var lines = LineKey(q, s);
+        var npc = s.Objects
+            .Where(o => o.BaseId == from.Object && o.Kind != StepObjectKind.Other && o.Targetable && (o.Active || o.Icon != 0)
+                        && !m.Tried.Contains(o.Key) && !m.IsDecoy(lines, o.Key))
+            .OrderBy(o => o.Icon != 0 ? 0 : 1)
+            .ThenBy(o => Vector3.DistanceSquared(o.Position, s.Player))
+            .FirstOrDefault();
+        if (npc != null) return Talk(npc, "get the materials for the quest's item");
+        if (!m.Looked.Contains(from.Level))
+            return new StepPlan(StepKind.Go, "where the materials are handed out") { Spot = from.Position, Territory = from.Territory, Within = 6f, Level = from.Level };
+        return null;
+    }
+
+    /// <summary>
+    /// An item id without its quality mark (high quality adds 1,000,000). Key items (2,000,000 and up) have none: theirs
+    /// is the id as it is, so a key item asked for in a hand-over is found among the offered ones.
+    /// </summary>
+    public static uint BaseItem(uint id) => id >= 2_000_000 ? id : id % 1_000_000;
+
     /// <summary>Who the quest is reported to: its <c>TargetEnd</c> (the giver for every society daily).</summary>
     public static uint TurnIn(QuestScript q) => q.TargetEnd != 0 ? q.TargetEnd : q.Giver;
 
@@ -668,10 +738,11 @@ public static class StepRules
     /// the current lines' spots; each once until something changes. A marker over one of the quest's objects is gone
     /// to as that object's spot.
     /// </summary>
-    public static StepPlan? Where(QuestScript q, StepSnapshot s, StepMemory m)
+    /// <param name="skip">Places (Level rows, as markers and spots carry them) not to go to.</param>
+    public static StepPlan? Where(QuestScript q, StepSnapshot s, StepMemory m, IReadOnlySet<uint>? skip = null)
     {
         var markers = s.Markers
-            .Where(k => !m.Looked.Contains(MarkerKey(k)))
+            .Where(k => !m.Looked.Contains(MarkerKey(k)) && skip?.Contains(MarkerKey(k)) != true)
             .OrderBy(k => k.Territory == s.Territory ? 0 : 1)
             .ThenBy(k => k.Territory == s.Territory ? Vector3.DistanceSquared(k.Position, s.Player) : 0)
             .ToList();
@@ -683,7 +754,7 @@ public static class StepRules
             };
         var spot = OpenLines(q, s)
             .SelectMany(t => t.Spots)
-            .Where(p => !m.Looked.Contains(p.Level) && p.Object != q.Giver)
+            .Where(p => !m.Looked.Contains(p.Level) && p.Object != q.Giver && skip?.Contains(p.Level) != true)
             .OrderBy(p => p.Territory == s.Territory ? 0 : 1)
             .ThenBy(p => p.Territory == s.Territory ? Vector3.DistanceSquared(p.Position, s.Player) : 0)
             .FirstOrDefault();

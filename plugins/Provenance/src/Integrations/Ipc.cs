@@ -83,6 +83,9 @@ internal static class Vnav
     /// <summary>True while a path is being computed or walked.</summary>
     public static bool Busy => Ipc.Func("vnavmesh.SimpleMove.PathfindInProgress", false) || Ipc.Func("vnavmesh.Path.IsRunning", false);
 
+    /// <summary>True while a path is still being worked out: the character stands still meanwhile (a long flight can take several seconds).</summary>
+    public static bool Pathfinding => Ipc.Func("vnavmesh.SimpleMove.PathfindInProgress", false);
+
     public static bool MoveTo(Vector3 destination, bool fly)
         => Ipc.Func("vnavmesh.SimpleMove.PathfindAndMoveTo", destination, fly, false);
 

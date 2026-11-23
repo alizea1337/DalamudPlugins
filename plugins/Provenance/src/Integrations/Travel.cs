@@ -82,6 +82,9 @@ internal sealed unsafe partial class Travel
     private int stuckCount;
     private Vector3? walkingTo;
     private readonly Queue<(DateTime At, Vector3 Pos)> trail = new();
+    /// <summary>Since when vnavmesh has been working out the current path (standing still then isn't being stuck), and for how long that holds.</summary>
+    private DateTime pathfindSince;
+    private static readonly TimeSpan PathfindPatience = TimeSpan.FromSeconds(40);
     /// <summary>Areas without an aetheryte: teleport to the city's crystal, then take the aethernet.</summary>
     private Travel? crystalTrip;
     /// <summary>Aethernet hop under way: the crystal to use and the shard to go to.</summary>
@@ -538,8 +541,21 @@ internal sealed unsafe partial class Travel
         }
         if (flying) Status = "Flying to " + what;
 
-        // Stuck: barely moved in the last few seconds while a path is running.
+        // Working out the path isn't being stuck: vnavmesh takes several seconds over a long flight, and the character
+        // stands still meanwhile. The clock starts once the path is there (a path that never comes counts after a while).
         var now = DateTime.UtcNow;
+        if (Vnav.Pathfinding)
+        {
+            if (pathfindSince == default) pathfindSince = now;
+            if (now - pathfindSince < PathfindPatience)
+            {
+                trail.Clear();
+                return;
+            }
+        }
+        else pathfindSince = default;
+
+        // Stuck: barely moved in the last few seconds while a path is running.
         trail.Enqueue((now, me));
         while (trail.Count > 0 && now - trail.Peek().At > StuckAfter) trail.Dequeue();
         if (trail.Count < 2 || now - trail.Peek().At < StuckAfter - TimeSpan.FromSeconds(1)) return;

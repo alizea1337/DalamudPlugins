@@ -64,7 +64,7 @@ internal sealed record GatherNeed(uint ItemId, int Remaining, uint PointBase, ui
 /// </remarks>
 internal sealed unsafe class QuestStepper
 {
-    private enum Phase { Decide, Travel, Settle, SwitchJob, Dismount }
+    private enum Phase { Decide, Travel, Settle, SwitchJob, Dismount, GetOff }
 
     /// <summary>After an action, how long to wait for it to count before trying again.</summary>
     private static readonly TimeSpan SettleTalk = TimeSpan.FromSeconds(4);
@@ -76,6 +76,16 @@ internal sealed unsafe class QuestStepper
     private static readonly TimeSpan TradePatience = TimeSpan.FromSeconds(15);
     /// <summary>Times a hand-over slot's item picker is asked for before the window is given up on.</summary>
     private const int TradeOpens = 3;
+    /// <summary>The hand-over window is left alone this long after it opens (its button isn't to be trusted in its first frames).</summary>
+    private static readonly TimeSpan TradeSettle = TimeSpan.FromSeconds(0.6);
+    /// <summary>A slot's item picker that didn't come up is asked for again after this long.</summary>
+    private static readonly TimeSpan TradeReopen = TimeSpan.FromSeconds(1);
+    /// <summary>
+    /// Getting off one's own mount: the button again this often (from the air the game lands on the first press and gets
+    /// off on the next), and for this long before the player is asked.
+    /// </summary>
+    private static readonly TimeSpan GetOffEvery = TimeSpan.FromSeconds(1.6);
+    private static readonly TimeSpan GetOffPatience = TimeSpan.FromSeconds(14);
     /// <summary>Picks of a reward that leave Complete off before the reward window is the player's, and the wait between them.</summary>
     private const int RewardPickTries = 3;
     private static readonly TimeSpan RewardPickEvery = TimeSpan.FromSeconds(1.5);
@@ -106,7 +116,11 @@ internal sealed unsafe class QuestStepper
     private int tradeSlot;
     private int tradeOpenSlot;
     private int tradeOpened;
+    private DateTime tradeOpenedAt;
     private DateTime tradeSince;
+    private DateTime getOffSince;
+    private DateTime nextGetOff;
+    private int getOffPresses;
     private DateTime resultSince;
     private bool resultNoted;
     /// <summary>In the reward window: picks sent, when the next may go, the reward picked, and whether the options were logged.</summary>
@@ -116,6 +130,7 @@ internal sealed unsafe class QuestStepper
     private bool rewardListed;
     private bool cutscenePaused;
     private bool cutsceneNoted;
+    private bool cutsceneTalkNoted;
     /// <summary>While crafting or gathering: the item, and how many of it the bags should hold when it's enough.</summary>
     private uint needItem;
     private int needTarget;
@@ -324,6 +339,7 @@ internal sealed unsafe class QuestStepper
             case Phase.Settle: TickSettle(snap, now); return;
             case Phase.SwitchJob: TickSwitchJob(snap); return;
             case Phase.Dismount: TickDismount(snap); return;
+            case Phase.GetOff: TickGetOff(snap, now); return;
             default: Decide(snap, now); return;
         }
     }
@@ -432,7 +448,10 @@ internal sealed unsafe class QuestStepper
         travel.NoFly = p.NoFly;
         travel.KeepMount = script!.Mount is { } m && snap.Mounted && snap.Mount == m.Mount;
         var target = p.Target;
-        travel.GoTo(Describe(p), zone, to, p.Within, target == null ? null : () => Live(target)?.Position);
+        // For a step done at someone (talk, emote, item), the trip ends a little inside the reach: ending right on its
+        // edge, a target that shifts a hair (a hovering moogle) is out of reach again, and the trip starts over.
+        var within = target != null && p.Kind is StepKind.Talk or StepKind.Emote or StepKind.UseItem ? Math.Max(1.5f, p.Within - 0.5f) : p.Within;
+        travel.GoTo(Describe(p), zone, to, within, target == null ? null : () => Live(target)?.Position);
         Status = Capital(Describe(p));
         phase = Phase.Travel;
         nextLook = DateTime.UtcNow.AddSeconds(2);
@@ -495,9 +514,11 @@ internal sealed unsafe class QuestStepper
         var onOwnMount = snap.Mounted && !(script!.Mount is { } qm && snap.Mount == qm.Mount);
         if (onOwnMount && p.Kind is StepKind.Talk or StepKind.Emote or StepKind.UseItem)
         {
-            QuestSteps.GetOff();
-            phase = Phase.Decide;
-            Wait(1.5);
+            phase = Phase.GetOff;
+            getOffSince = now;
+            nextGetOff = default;
+            getOffPresses = 0;
+            Status = "Getting off the mount";
             return;
         }
 
@@ -639,6 +660,34 @@ internal sealed unsafe class QuestStepper
         Wait(2);
     }
 
+    /// <summary>
+    /// Off one's own mount for a step done on foot (talking, an emote, a key item). From the air the game lands on the
+    /// first press of Dismount and gets off on the next, a second or two apart; nothing else is started meanwhile (a new
+    /// trip would take off again, and the landing would start over). Then the step is decided afresh.
+    /// </summary>
+    private void TickGetOff(StepSnapshot snap, DateTime now)
+    {
+        if (!snap.Mounted)
+        {
+            Note($"off the mount ({getOffPresses} {(getOffPresses == 1 ? "press" : "presses")}, {(now - getOffSince).TotalSeconds:0.0} s)");
+            phase = Phase.Decide;
+            Wait(0.5);
+            return;
+        }
+        if (now - getOffSince > GetOffPatience)
+        {
+            Note($"[!] still mounted after {getOffPresses} presses of Dismount ({(snap.Flying ? "in the air" : "on the ground")})");
+            AskUser("Couldn't get off the mount here; get off it yourself, then resume.");
+            return;
+        }
+        if (now < nextGetOff) return;
+        nextGetOff = now + GetOffEvery;
+        var sent = QuestSteps.GetOff();
+        getOffPresses++;
+        if (getOffPresses == 1 || !sent)
+            Note($"getting off the mount ({(snap.Flying ? "in the air: the game lands first" : "on the ground")}), press {getOffPresses}{(sent ? "" : ": refused for now")}");
+    }
+
     /// <summary>Off the quest mount at the report (the rules ask the player before then); a teleport drops it when getting off doesn't, once per quest.</summary>
     private void TickDismount(StepSnapshot snap)
     {
@@ -723,6 +772,18 @@ internal sealed unsafe class QuestStepper
                 AskUser("The quest's cutscene asks you to choose; choose yourself, then resume.");
                 return true;
             }
+            // An event scene the game counts as a cutscene (the quest mount's action plays one) can't be skipped: its
+            // talk is clicked through, as outside one. (A real cutscene is skipped before its talk matters.)
+            if (Interact.SkipTalk())
+            {
+                if (!cutsceneTalkNoted)
+                {
+                    cutsceneTalkNoted = true;
+                    Note("cutscene: clicking its talk through");
+                }
+                Wait(0.2);
+                return true;
+            }
             if (QuestSteps.Menu() is { } prompt && !DeliveryWindow.SceneBusy
                 && StepRules.ChooseEntry(prompt.Prompt, prompt.Entries, script!, memory, QuestSteps.SkipQuestions) == 0
                 && QuestSteps.SkipQuestions.Any(q => StepRules.Normal(q).Equals(StepRules.Normal(prompt.Prompt), StringComparison.CurrentCultureIgnoreCase)))
@@ -735,6 +796,7 @@ internal sealed unsafe class QuestStepper
             return true;
         }
         cutsceneNoted = false;
+        cutsceneTalkNoted = false;
 
         if (phase == Phase.Travel)
         {
@@ -865,7 +927,11 @@ internal sealed unsafe class QuestStepper
                 CloseTrade("[!] hand-over window didn't take the items in time; closing it");
                 return true;
             }
-            var step = QuestSteps.Trade(ref tradeSlot, out var detail);
+            // Nothing is pressed in the window's first moments; a picker that didn't come up (or a selection left behind
+            // by one closed without a pick) is asked for again.
+            var settled = now - tradeSince >= TradeSettle;
+            var reopen = tradeOpened == 0 || now - tradeOpenedAt >= TradeReopen;
+            var step = QuestSteps.Trade(ref tradeSlot, settled, reopen, out var detail);
             switch (step)
             {
                 case QuestSteps.TradeStep.HandedOver:
@@ -875,6 +941,7 @@ internal sealed unsafe class QuestStepper
                     Wait(1);
                     return true;
                 case QuestSteps.TradeStep.Opened:
+                    tradeOpenedAt = now;
                     if (tradeSlot == tradeOpenSlot) tradeOpened++;
                     else
                     {

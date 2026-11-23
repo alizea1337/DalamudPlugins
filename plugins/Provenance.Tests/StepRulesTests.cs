@@ -211,7 +211,8 @@ public class StepRulesTests
     {
         Quest = 65536 + 1523, Name = "A High Wind in Ishgard", Giver = IxalGiver, TargetEnd = IxalGiver, GiverSpot = IxalGiverSpot,
         Product = 8123, Materials = 8081, CraftStatus = Facility,
-        Todos = new[] { new ScriptTodo(3, 255, 1, new[] { NorbettauxSpot, IxalGiverSpot }, "Synthesize isolator components and deliver them to Jezul Ahuatan.") },
+        // The crafting line as the game data has it: first whoever the work goes to, then where the materials come from.
+        Todos = new[] { new ScriptTodo(3, 255, 1, new[] { IxalGiverSpot, NorbettauxSpot }, "Synthesize isolator components and deliver them to Jezul Ahuatan.") },
     };
 
     private static StepSnapshot HighWindSnap(uint made, int products, int materials, IEnumerable<StepObject>? objects = null, IEnumerable<StepMarker>? markers = null, bool access = true)
@@ -298,6 +299,121 @@ public class StepRulesTests
         };
         Assert.True(StepRules.Supplied(q, s));
         Assert.Equal(StepKind.Go, Decide(q, s).Kind);
+    }
+
+    // ------------------------------------------------------------------ the crafting line before the report
+
+    // Quest 2290 "With a Little Help" (Moogles): Mogwon hands the materials out in sequence 1; the crafting line
+    // (sequence 2) places Moguppo, whom the work goes to, first and Mogwon second, as the game data has it.
+    private const uint Mogwon = 1017351, Moguppo = 1017352;
+
+    private static QuestScript LittleHelp() => new()
+    {
+        Quest = 65536 + 2290, Name = "With a Little Help", Giver = 1017171, TargetEnd = 1017171, GiverSpot = Npc(1017171, 500, 6254017),
+        Product = 15725, Materials = 15751,
+        Todos = new[]
+        {
+            Line(0, 1, "Speak with Mogwon in Asah.", Npc(Mogwon, 2, 6289633)),
+            Line(1, 2, "Synthesize training supplies.", Npc(Moguppo, 20, 6289641), Npc(Mogwon, 2, 6289633)),
+            new ScriptTodo(2, 3, 3, new[] { Npc(1017353, 40, 6289657), Npc(1017354, 110, 6289663), Npc(1017355, 160, 6289664) }, "Deliver the training supplies to the mentee moogles."),
+            Line(3, 255, "Report to Mogek the Marvelous.", Npc(1017171, 500, 6254017)),
+        },
+    };
+
+    [Fact]
+    public void AfterCraftingBeforeTheReportTheWorkGoesToTheLinesFirstPlaceNotTheMaterialsNpc()
+    {
+        // The live log: 3 of 3 made next to Mogwon (2 yalms away, still marked: he was talked to three times); Moguppo,
+        // whom they go to, stands 18 yalms off.
+        var s = Snap(2, new[] { Obj(1, Mogwon, 2), Obj(2, Moguppo, 20) }, new[] { new TodoProgress(1, false, 3, 3, 0) }, new() { [15725] = 3 });
+        var plan = Decide(LittleHelp(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Moguppo, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void AfterCraftingTheWayGoesToWhereTheWorkGoesWhenTheyArentInView()
+    {
+        var s = Snap(2, new[] { Obj(1, Mogwon, 2) }, new[] { new TodoProgress(1, false, 3, 3, 0) }, new() { [15725] = 3 });
+        var plan = Decide(LittleHelp(), s);
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Equal(6289641u, plan.Level);
+    }
+
+    [Fact]
+    public void WithNothingToCraftFromTheMaterialsComeFirst()
+    {
+        // At the crafting line with neither materials nor anything made: whoever hands them out, though the other is nearer.
+        var s = Snap(2, new[] { Obj(1, Mogwon, 30), Obj(2, Moguppo, 3) }, new[] { new TodoProgress(1, false, 0, 3, 0) });
+        var plan = Decide(LittleHelp(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Mogwon, plan.Target!.BaseId);
+        Assert.Contains("materials", plan.What);
+    }
+
+    [Fact]
+    public void ShortOfMaterialsMidwayGoesBackToWhoeverHandsThemOut()
+    {
+        // A newer quest counts the product on its line: one made of three, nothing left to make more from.
+        var s = Snap(2, new[] { Obj(1, Mogwon, 30), Obj(2, Moguppo, 3) }, new[] { new TodoProgress(1, false, 1, 3, 15725) }, new() { [15725] = 1 });
+        var plan = Decide(LittleHelp(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Mogwon, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void TheGeneralRulesTakeOverOnceTheLinesFirstPlaceWasTriedWithoutEffect()
+    {
+        var q = LittleHelp();
+        var moguppo = Obj(2, Moguppo, 20);
+        var s = Snap(2, new[] { Obj(1, Mogwon, 2), moguppo }, new[] { new TodoProgress(1, false, 3, 3, 0) }, new() { [15725] = 3 });
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        m.Tried.Add(moguppo.Key);
+        m.Looked.Add(6289641);
+        Assert.Equal(Mogwon, StepRules.Decide(q, s, m, T0).Target!.BaseId);
+    }
+
+    [Fact]
+    public void AcceptedAsAGathererTheGatheredItemsGoToTheLinesFirstPlaceToo()
+    {
+        // The Namazu quests take either class: the crate holds the crafter's materials and is nobody to a gatherer.
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3103, Name = "The Importance of Being Yes, Yes", Giver = 1025602, TargetEnd = 1025602, GiverSpot = Npc(1025602, 500, 7380346),
+            Product = 22725, Materials = 22699, GatherItems = new Dictionary<uint, uint> { [16] = 22621, [17] = 22647 },
+            Todos = new[]
+            {
+                Line(0, 1, "Speak with the earnest Namazu.", Npc(1025800, 6, 700)),
+                Line(1, 2, "Synthesize .", Npc(1025800, 6, 700), Npc(1025770, 1, 701)),
+                Line(2, 255, "Report to Seigetsu the Enlightened.", Npc(1025602, 500, 7380346)),
+            },
+        };
+        var s = Snap(2, new[] { Obj(1, 1025770, 1, name: "cumbersome crate"), Obj(2, 1025800, 6) }, new[] { new TodoProgress(1, false, 3, 3, 22621) },
+            new() { [22621] = 3 }, job: Min, accept: Min);
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(1025800u, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void OnlyALineWithTwoPlacesIsTheCraftingLine()
+    {
+        var q = LittleHelp();
+        Assert.Null(StepRules.CraftLine(q, Snap(1)));
+        Assert.NotNull(StepRules.CraftLine(q, Snap(2)));
+        Assert.Null(StepRules.CraftLine(q, Snap(3)));
+        // A quest that crafts nothing has none.
+        Assert.Null(StepRules.CraftLine(Quest(Line(0, 1, "Deliver.", Npc(5, 1), Npc(6, 2))), Snap(1)));
+    }
+
+    [Fact]
+    public void KeyItemsKeepTheirIdWholeAndHighQualityLosesItsMark()
+    {
+        // 2001982 is the key item "Training Supplies" the mentee moogles ask for: the hand-over compared it as 1982.
+        Assert.Equal(2001982u, StepRules.BaseItem(2001982));
+        Assert.Equal(15725u, StepRules.BaseItem(1015725));
+        Assert.Equal(15725u, StepRules.BaseItem(15725));
     }
 
     [Fact]
@@ -836,6 +952,48 @@ public class StepRulesTests
         var plan = Decide(MountQuest(), Snap(2, markers: markers, mounted: true, mount: 227));
         Assert.Equal(StepKind.Go, plan.Kind);
         Assert.True(plan.NoFly);
+    }
+
+    [Fact]
+    public void RidingDoesntGoBackToWhoeverGaveTheMountWhileAnotherPlaceIsMarked()
+    {
+        // Quest 2297 "A Little Pick-me-up" (the live log): the moofy moogle who gives the cloud mallow stays marked (the
+        // lines' second place), nearer than the area to ride to; the run flew 418 yalms back to him to look around.
+        var moofy = new ScriptSpot(6288268, Zone, new Vector3(-332, 59, 323), 1017322, false);
+        var q = new QuestScript
+        {
+            Quest = 65536 + 2297, Giver = 1017171, TargetEnd = 1017171, Mount = new MountFact(89, 6294, 0, 6, false, true),
+            Todos = new[]
+            {
+                new ScriptTodo(0, 1, 1, new[] { moofy }, "Speak with the moofy moogle."),
+                new ScriptTodo(1, 2, 1, new[] { new ScriptSpot(6323508, Zone, new Vector3(-741, 74, 397), 0, true), moofy }, "Ride the cloud mallow and use its Seed ability at Zenith."),
+                new ScriptTodo(2, 3, 1, new[] { new ScriptSpot(6323513, Zone, new Vector3(-72, 75, -273), 0, true), moofy }, "Ride the cloud mallow and use its Seed ability at the Rookery."),
+            },
+        };
+        var markers = new[]
+        {
+            new StepMarker(Zone, new Vector3(-332, 59, 323), 1, 71023, 6288268, 0),
+            new StepMarker(Zone, new Vector3(-72, 75, -273), 50, 60491, 6323513, 0),
+        };
+        var s = new StepSnapshot
+        {
+            Quest = q.Quest, Accepted = true, Sequence = 3, AcceptJob = Crp, Job = Crp, Territory = Zone, Player = new Vector3(-737, 84, 426),
+            Markers = markers, Mounted = true, Mount = 89,
+        };
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Equal(6323513u, plan.Level);
+
+        // With nowhere else marked, his place is still gone to (better than asking).
+        var only = new StepSnapshot
+        {
+            Quest = q.Quest, Accepted = true, Sequence = 3, AcceptJob = Crp, Job = Crp, Territory = Zone, Player = new Vector3(-737, 84, 426),
+            Markers = new[] { markers[0] }, Mounted = true, Mount = 89,
+        };
+        var m = new StepMemory();
+        m.Observe(only.Signature(), T0);
+        m.Looked.Add(6323513);
+        Assert.Equal(6288268u, StepRules.Decide(q, only, m, T0).Level);
     }
 
     // ------------------------------------------------------------------ targets and places
