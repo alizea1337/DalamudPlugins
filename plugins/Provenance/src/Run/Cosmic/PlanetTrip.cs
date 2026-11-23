@@ -20,6 +20,7 @@ internal sealed unsafe class PlanetTrip
 
     private readonly Travel travel = new();
     private Step step = Step.Idle;
+    private Step noted = Step.Idle;
     private Planet target;
     private DateTime waitUntil;
     private DateTime deadline;
@@ -35,6 +36,8 @@ internal sealed unsafe class PlanetTrip
         target = planet;
         Failure = null;
         tries = 0;
+        noted = Step.Idle;
+        DebugLog.Write("travel", $"planet trip to {planet.Name()} from {(Integrations.Cosmic.CurrentPlanet is { } from ? from.Name() : "zone " + Services.ClientState.TerritoryType)}");
         if (Integrations.Cosmic.CurrentPlanet == planet) { step = Step.Done; return; }
         if (Integrations.Cosmic.CurrentPlanet is { } here) { ToCruiser(here); return; }
         var crystal = Teleporter.Position(CosmicData.BestwaysBurrow);
@@ -51,6 +54,21 @@ internal sealed unsafe class PlanetTrip
     }
 
     public void Tick()
+    {
+        NoteStep();
+        TickStep();
+        NoteStep();
+    }
+
+    /// <summary>Each step change goes into the debug log, with the status it shows.</summary>
+    private void NoteStep()
+    {
+        if (step == noted) return;
+        DebugLog.Write("travel", $"planet trip to {target.Name()}: {noted} -> {step}{(Status.Length > 0 ? " (" + Status + ")" : "")}");
+        noted = step;
+    }
+
+    private void TickStep()
     {
         if (Finished || step == Step.Idle || DateTime.UtcNow < waitUntil) return;
         switch (step)
@@ -162,6 +180,7 @@ internal sealed unsafe class PlanetTrip
 
     private void Fail(string why)
     {
+        DebugLog.Write("travel", $"[!] planet trip to {target.Name()}: {why}");
         travel.Cancel();
         Failure = why;
         step = Step.Failed;

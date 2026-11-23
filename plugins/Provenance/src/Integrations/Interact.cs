@@ -67,7 +67,7 @@ internal static unsafe class Interact
     /// <param name="travels">Talking to it can take the character elsewhere (an aetheryte, a door, an innkeeper, a ferry NPC).</param>
     public static bool With(IGameObject o, bool travels = false)
     {
-        if (travels) MoveIntent.Expect(30);
+        if (travels) MoveIntent.Expect(30, "talking to " + o.Name.TextValue);
         var ts = TargetSystem.Instance();
         if (ts == null) return false;
         ts->Target = (GameObjectStruct*)o.Address;

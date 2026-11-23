@@ -181,8 +181,9 @@ internal static unsafe class Teleporter
         {
             if (data->Entries[i].AetheryteId != shardId) continue;
             if (data->Entries[i].IsLocked) return AethernetPick.Locked;
-            MoveIntent.Expect(30);
+            MoveIntent.Expect(30, "aethernet to " + AethernetName(shardId));
             agent->TeleportToAetheryte(i);
+            DebugLog.Write("travel", $"aethernet to {AethernetName(shardId)} (shard {shardId}) in zone {Services.ClientState.TerritoryType}");
             return AethernetPick.Taken;
         }
         return AethernetPick.Missing;
@@ -276,10 +277,28 @@ internal static unsafe class Teleporter
     /// <summary>Starts the Teleport cast. Returns why it couldn't, or null when the cast started.</summary>
     public static string? Teleport(Destination d)
     {
-        if (Blocked() is { } why) return why;
+        if (Blocked() is { } why) { NoteRefusal(d, why); return why; }
         var telepo = Telepo.Instance();
-        if (telepo == null) return "the teleport menu isn't available";
-        MoveIntent.Expect(40);
-        return telepo->Teleport(d.AetheryteId, d.SubIndex) ? null : "the game refused the teleport";
+        if (telepo == null) { NoteRefusal(d, "the teleport menu isn't available"); return "the teleport menu isn't available"; }
+        MoveIntent.Expect(40, "teleport to " + (d.Estate ?? d.Name));
+        if (telepo->Teleport(d.AetheryteId, d.SubIndex))
+        {
+            DebugLog.Write("travel", $"teleport to {d.Estate ?? d.Name} (aetheryte {d.AetheryteId}, zone {d.TerritoryId}, {d.GilCost} gil) from zone {Services.ClientState.TerritoryType}");
+            return null;
+        }
+        NoteRefusal(d, "the game refused the teleport");
+        return "the game refused the teleport";
+    }
+
+    private static (uint Aetheryte, string Why) lastRefusal;
+    private static DateTime lastRefusalAt;
+
+    /// <summary>A teleport that can't happen yet goes into the debug log once, not on every retry.</summary>
+    private static void NoteRefusal(Destination d, string why)
+    {
+        if (lastRefusal == (d.AetheryteId, why) && DateTime.UtcNow - lastRefusalAt < TimeSpan.FromSeconds(15)) return;
+        lastRefusal = (d.AetheryteId, why);
+        lastRefusalAt = DateTime.UtcNow;
+        DebugLog.Write("travel", $"teleport to {d.Estate ?? d.Name} not possible yet: {why}");
     }
 }

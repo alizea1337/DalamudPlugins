@@ -30,6 +30,7 @@ internal sealed unsafe class Homecoming
     private readonly Action<string, bool> log;
     private readonly Travel travel = new();
     private Step step = Step.Idle;
+    private Step noted = Step.Idle;
     private Then then;
     private GameCatalog.Inn? inn;
     private Teleporter.Destination? home;
@@ -73,6 +74,8 @@ internal sealed unsafe class Homecoming
     public bool Begin(AfterOrderSettings settings, (uint Territory, Vector3 Position)? start)
     {
         Reset();
+        noted = Step.Idle;
+        DebugLog.Write("travel", $"trip back after the order: {settings.Place}");
         var catalog = plugin.Plans.Catalog!;
         var territories = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>();
         switch (settings.Place)
@@ -126,6 +129,8 @@ internal sealed unsafe class Homecoming
     public bool BeginSpot(CraftingSpotSettings s, float within = 1.5f)
     {
         Reset();
+        noted = Step.Idle;
+        DebugLog.Write("travel", $"trip to the crafting spot ({s.Kind}), within {within:0.#} yalms");
         if (!s.IsSet || CraftingSpots.IsAt(s)) return false;
         spot = s;
         spotWithin = within;
@@ -204,6 +209,21 @@ internal sealed unsafe class Homecoming
     }
 
     public void Tick()
+    {
+        NoteStep();
+        TickStep();
+        NoteStep();
+    }
+
+    /// <summary>Each step change goes into the debug log, with the status it shows.</summary>
+    private void NoteStep()
+    {
+        if (step == noted) return;
+        DebugLog.Write("travel", $"trip back: {noted} -> {step}{(Status.Length > 0 ? " (" + Status + ")" : "")}");
+        noted = step;
+    }
+
+    private void TickStep()
     {
         if (Finished || step == Step.Idle || DateTime.UtcNow < waitUntil) return;
         switch (step)
@@ -359,6 +379,7 @@ internal sealed unsafe class Homecoming
 
     private void Fail(string message)
     {
+        DebugLog.Write("travel", "[!] trip back: " + message);
         Failure = message;
         Status = message;
         step = Step.Failed;

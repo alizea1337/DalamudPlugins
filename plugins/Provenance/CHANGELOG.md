@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.12
+
+- The debug log now follows every trip, as [travel] lines: where a trip goes and from where, each
+  teleport (aetheryte, zone, cost) and aethernet hop, each walk or flight leg, mounting up, arriving,
+  getting stuck and each step to get unstuck, the Cosmic planet trips (Bestways Burrow, Cruisingway) and
+  the trip back after an order step by step, and when Provenance expects a move of its own (what the
+  Tripwire goes by). A teleport the game won't do yet is noted once, not on every retry. So when the
+  Tripwire or a trip goes wrong, the bug report shows what happened just before.
+
 ## 0.19.11
 
 - New (Security): *Tripwire*. While a run or the Cosmic loop works, any of these stops everything at once,

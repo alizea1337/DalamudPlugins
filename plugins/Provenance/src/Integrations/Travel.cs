@@ -65,6 +65,11 @@ internal sealed unsafe class Travel
     private DateTime unstuckUntil;
     private static readonly Random Rng = new();
 
+    /// <summary>The last walk or flight target written to the debug log (a new line only for a new target).</summary>
+    private Vector3? lastPath;
+    /// <summary>"No path yet" is written once per walk, not every frame vnavmesh says no.</summary>
+    private bool pathFailNoted;
+
     public State Current { get; private set; } = State.Idle;
     public string Status { get; private set; } = "";
     public string? Failure { get; private set; }
@@ -88,6 +93,10 @@ internal sealed unsafe class Travel
         hopped = false;
         aethernetOnly = false;
         crystalTrip = null;
+        lastPath = null;
+        pathFailNoted = false;
+        Current = State.Idle;
+        Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
         if (Services.ClientState.TerritoryType == territory) { Enter(State.WaitingForMap); return; }
         if (Teleporter.NearestTo(territory, null) != null) { Enter(State.Teleporting); return; }
         if (Teleporter.AethernetRoute(territory) is not { } r) { Fail($"No unlocked aetheryte or aethernet shard leads to {Place(territory)}."); return; }
@@ -101,6 +110,7 @@ internal sealed unsafe class Travel
     {
         hopFrom = from;
         hopTo = to;
+        Note($"{what}: taking the aethernet from {Teleporter.AethernetName(from)} to {Teleporter.AethernetName(to)}");
         var crystal = Teleporter.Position(from) ?? Vector3.Zero;
         crystalTrip = new Travel { hopped = true };
         crystalTrip.GoTo("the aethernet", crystalTerritory, new Vector2(crystal.X, crystal.Z),
@@ -112,6 +122,7 @@ internal sealed unsafe class Travel
 
     public void Cancel()
     {
+        if (Current is not (State.Idle or State.Arrived or State.Failed)) Note($"{what}: cancelled while {Current}");
         if (Current == State.Walking) Vnav.Stop();
         crystalTrip?.Cancel();
         Current = State.Idle;
@@ -204,6 +215,7 @@ internal sealed unsafe class Travel
                 if (!sawLoading && !Services.Condition[ConditionFlag.Casting] && DateTime.UtcNow > deadline - TimeSpan.FromSeconds(30))
                 {
                     // Nothing happened (cast interrupted, window closed); try again.
+                    Note($"{what}: no loading screen came (cast interrupted or window closed); trying again");
                     if (hopTo != 0) StartAethernet();
                     else Enter(State.Teleporting, 20);
                     return;
@@ -243,6 +255,7 @@ internal sealed unsafe class Travel
         if (Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z)) <= range)
         {
             Vnav.Stop();
+            Note($"{what}: arrived, {Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z)):0.0} yalms from the target");
             Current = State.Arrived;
             Status = "Arrived at " + what;
             return;
@@ -269,6 +282,7 @@ internal sealed unsafe class Travel
         {
             mountUntil = DateTime.UtcNow.AddSeconds(4);
             Status = "Mounting up";
+            Note($"{what}: mounting up, {Vector3.Distance(me, target):0} yalms to go");
             return;
         }
 
@@ -278,7 +292,20 @@ internal sealed unsafe class Travel
         {
             if (retarget) Vnav.Stop();
             flying = CanFlyHere();
-            if (Vnav.MoveCloseTo(target, flying, Math.Max(1, range - 1))) walkingTo = target;
+            if (Vnav.MoveCloseTo(target, flying, Math.Max(1, range - 1)))
+            {
+                walkingTo = target;
+                pathFailNoted = false;
+                // A line per new target, not per re-issue.
+                if (lastPath is not { } lp || Vector3.Distance(lp, target) > 3)
+                    Note($"{what}: {(flying ? "flying" : "walking")} to {Where(target)}, {Vector3.Distance(me, target):0} yalms from {Where(me)}");
+                lastPath = target;
+            }
+            else if (!pathFailNoted)
+            {
+                pathFailNoted = true;
+                Note($"{what}: vnavmesh found no path to {Where(target)} from {Where(me)} yet");
+            }
             trail.Clear();
             return;
         }
@@ -296,6 +323,7 @@ internal sealed unsafe class Travel
         Vnav.Stop();
         walkingTo = null;
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
+        Note($"{what}: stuck ({stuckCount}) at {Where(me)}, {Vector3.Distance(me, target):0} yalms to go");
         if (AdvancedUnstuck && Unstuck(me, target)) return;
         if (stuckCount == 2 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
@@ -316,10 +344,12 @@ internal sealed unsafe class Travel
         {
             case 1:
                 Status = "Stuck; finding another way";
+                Note($"{what}: unstuck, finding another way");
                 return true; // the next tick paths again
             case 2:
             {
                 Status = "Stuck; jumping and backing off";
+                Note($"{what}: unstuck, jumping and backing off");
                 var am = ActionManager.Instance();
                 if (am != null && !Services.Condition[ConditionFlag.Mounted]) am->UseAction(ActionType.GeneralAction, Jump);
                 var away = Vector3.Normalize(new Vector3(me.X - target.X, 0, me.Z - target.Z));
@@ -333,6 +363,7 @@ internal sealed unsafe class Travel
             case 3:
             {
                 Status = "Stuck; side-stepping";
+                Note($"{what}: unstuck, side-stepping");
                 var angle = Rng.NextDouble() * Math.PI * 2;
                 var side = me + new Vector3((float)Math.Cos(angle), 0, (float)Math.Sin(angle)) * 12f;
                 if (Vnav.NearestPoint(side, 6, 10) is { } spot) Vnav.MoveTo(spot, flying);
@@ -405,6 +436,8 @@ internal sealed unsafe class Travel
 
     private void Enter(State next, double seconds = 20)
     {
+        if (next != Current) Note($"{what}: {Current} -> {next}");
+        if (next != State.Walking) pathFailNoted = false;
         Current = next;
         deadline = DateTime.UtcNow.AddSeconds(seconds);
         nextTry = default;
@@ -412,10 +445,15 @@ internal sealed unsafe class Travel
 
     private void Fail(string message)
     {
+        Note($"[!] {what}: {message}");
         Failure = message;
         Status = message;
         Current = State.Failed;
     }
+
+    private static void Note(string text) => DebugLog.Write("travel", text);
+
+    private static string Where(Vector3 p) => $"{p.X:0},{p.Y:0},{p.Z:0}";
 
     private static string Place(uint territoryId)
         => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(territoryId)?.PlaceName.ValueNullable?.Name.ExtractText() ?? "that area";
