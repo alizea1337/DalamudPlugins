@@ -371,6 +371,11 @@ public static class StepRules
             if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects) is { } use) return use;
         }
 
+        // The report, once the crafting or gathering is done: to whoever the quest is reported to, and nobody else. The
+        // NPC who handed the materials out keeps the quest's icon (he hands out spares), but talking to him again only
+        // says to go and deliver the work.
+        if (s.Sequence == 255 && Supplied(q, s)) return Report(q, s, m) with { OnFoot = carrying };
+
         if (Pick(q, s, m) is { } target)
         {
             // Getting the quest mount (or what's carried) back again and again: something takes it away; the player's.
@@ -553,6 +558,57 @@ public static class StepRules
             return go;
         }
         return null;
+    }
+
+    /// <summary>
+    /// The quest's crafting or gathering is done: it makes or gathers an item (for the class it was accepted as), none
+    /// of it is left to make or gather, and the to-do line about the item counts it all (or, with no line that counts
+    /// it, the items are in the bags). Short of materials isn't done: the materials NPC is still wanted then.
+    /// </summary>
+    public static bool Supplied(QuestScript q, StepSnapshot s)
+    {
+        var crafts = q.Product != 0 && s.AcceptJob is not (>= 16 and <= 18);
+        var item = crafts ? q.Product : q.GatherItems.GetValueOrDefault(s.AcceptJob);
+        if (item == 0) return false;
+        if ((crafts ? Craft(q, s) : Gather(q, s))?.Count > 0) return false;
+        var line = s.Todos.FirstOrDefault(t => t.ItemId == item && t.Needed > 0);
+        return line != null ? line.Have >= line.Needed : s.Count(item) > 0;
+    }
+
+    /// <summary>Who the quest is reported to: its <c>TargetEnd</c> (the giver for every society daily).</summary>
+    public static uint TurnIn(QuestScript q) => q.TargetEnd != 0 ? q.TargetEnd : q.Giver;
+
+    /// <summary>
+    /// Where whoever the quest is reported to stands: the giver's spot when it's the giver (the quest's
+    /// <c>IssuerLocation</c>), else a to-do line's spot that places them (the last sequence's first).
+    /// </summary>
+    public static ScriptSpot? TurnInSpot(QuestScript q)
+    {
+        var turnIn = TurnIn(q);
+        if (q.GiverSpot is { } giver && (turnIn == q.Giver || giver.Object == turnIn)) return giver;
+        return q.Todos.OrderByDescending(t => t.Sequence).SelectMany(t => t.Spots).FirstOrDefault(p => p.Object == turnIn);
+    }
+
+    /// <summary>
+    /// The report after the crafting or gathering: talk to whoever the quest is reported to when they're in view
+    /// (marked ones first, then the nearest), else go to where they stand; nobody else, and no other marker.
+    /// </summary>
+    private static StepPlan Report(QuestScript q, StepSnapshot s, StepMemory m)
+    {
+        var turnIn = TurnIn(q);
+        var lines = LineKey(q, s);
+        var npc = s.Objects
+            .Where(o => o.BaseId == turnIn && o.Kind != StepObjectKind.Other && o.Targetable && !m.Tried.Contains(o.Key) && !m.IsDecoy(lines, o.Key))
+            .OrderBy(o => o.Icon != 0 ? 0 : 1)
+            .ThenBy(o => Vector3.DistanceSquared(o.Position, s.Player))
+            .FirstOrDefault();
+        if (npc != null) return Talk(npc, "report the quest (the crafting or gathering is done)");
+        if (TurnInSpot(q) is { } spot && !m.Looked.Contains(spot.Level))
+            return new StepPlan(StepKind.Go, "where the quest is reported")
+            {
+                Spot = spot.Position, Territory = spot.Territory, Within = 6f, Level = spot.Level,
+            };
+        return Ask("Can't find who this quest is reported to (the crafting or gathering is done); report it yourself, then resume.");
     }
 
     private static StepPlan Talk(StepObject target, string what)

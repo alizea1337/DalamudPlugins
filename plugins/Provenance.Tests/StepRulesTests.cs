@@ -199,6 +199,147 @@ public class StepRulesTests
         Assert.Equal(Crp, plan.Id);
     }
 
+    // ------------------------------------------------------------------ the report after crafting or gathering
+
+    // Quest 1523 "A High Wind in Ishgard" (Ixal): the giver in North Shroud, the materials and the facility access from
+    // Norbettaux in Coerthas Central Highlands; the craft line is in the report sequence (255).
+    private const uint IxalGiver = 1009216, Norbettaux = 1009221, NorthShroud = 154, Coerthas = 155, Facility = 549;
+    private static readonly ScriptSpot IxalGiverSpot = new(4889082, NorthShroud, new Vector3(164, -23, 115), IxalGiver, false);
+    private static readonly ScriptSpot NorbettauxSpot = new(4889200, Coerthas, new Vector3(202, 302, -254), Norbettaux, false);
+
+    private static QuestScript HighWind() => new()
+    {
+        Quest = 65536 + 1523, Name = "A High Wind in Ishgard", Giver = IxalGiver, TargetEnd = IxalGiver, GiverSpot = IxalGiverSpot,
+        Product = 8123, Materials = 8081, CraftStatus = Facility,
+        Todos = new[] { new ScriptTodo(3, 255, 1, new[] { NorbettauxSpot, IxalGiverSpot }, "Synthesize isolator components and deliver them to Jezul Ahuatan.") },
+    };
+
+    private static StepSnapshot HighWindSnap(uint made, int products, int materials, IEnumerable<StepObject>? objects = null, IEnumerable<StepMarker>? markers = null, bool access = true)
+        => new()
+        {
+            Quest = 65536 + 1523, Accepted = true, Sequence = 255, AcceptJob = Crp, Job = Crp, Territory = Coerthas, Player = new Vector3(200, 302, -252),
+            Objects = objects?.ToList() ?? new List<StepObject>(), Markers = markers?.ToList() ?? new List<StepMarker>(),
+            Todos = new[] { new TodoProgress(3, false, made, 3, 8123) },
+            Items = new Dictionary<uint, int> { [8123] = products, [8081] = materials },
+            Statuses = access ? new HashSet<uint> { Facility } : new HashSet<uint>(),
+        };
+
+    private static StepObject Norbettaux_(ulong id = 1) => new(id, Norbettaux, StepObjectKind.Npc, "Norbettaux", new Vector3(202, 302, -254), 71223, true, true);
+
+    [Fact]
+    public void AfterCraftingTheReportGoesToTheGiverNotTheMaterialsNpc()
+    {
+        // The live log: 3 of 3 crafted, Norbettaux still marked two yalms away (he hands out spares), a marker over him.
+        var marker = new StepMarker(Coerthas, new Vector3(202, 302, -254), 1, 71223, 4889200, Norbettaux & 0xFFFF);
+        var plan = Decide(HighWind(), HighWindSnap(3, 3, 0, new[] { Norbettaux_() }, new[] { marker }));
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Null(plan.Target);
+        Assert.Equal(NorthShroud, plan.Territory);
+        Assert.Equal(IxalGiverSpot.Position, plan.Spot);
+        Assert.Equal(IxalGiverSpot.Level, plan.Level);
+    }
+
+    [Fact]
+    public void AfterCraftingTheGiverInViewIsTalkedToEvenWithTheMaterialsNpcCloser()
+    {
+        var giver = new StepObject(2, IxalGiver, StepObjectKind.Npc, "Jezul Ahuatan", new Vector3(260, 302, -200), 71225, true, true);
+        var plan = Decide(HighWind(), HighWindSnap(3, 3, 0, new[] { Norbettaux_(), giver }));
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(IxalGiver, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void TheFacilityAccessTalkBeforeCraftingStays()
+    {
+        var plan = Decide(HighWind(), HighWindSnap(0, 0, 3, new[] { Norbettaux_() }, access: false));
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Norbettaux, plan.Target!.BaseId);
+        Assert.Contains("facility access", plan.What);
+
+        Assert.Equal(StepKind.Craft, Decide(HighWind(), HighWindSnap(0, 0, 3, new[] { Norbettaux_() })).Kind);
+    }
+
+    [Fact]
+    public void ShortOfMaterialsInTheReportStillTalksToTheMaterialsNpc()
+    {
+        // One made, none left to make it with: the NPC who hands out more is still wanted.
+        var plan = Decide(HighWind(), HighWindSnap(1, 1, 0, new[] { Norbettaux_() }));
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Norbettaux, plan.Target!.BaseId);
+        Assert.False(StepRules.Supplied(HighWind(), HighWindSnap(1, 1, 0)));
+    }
+
+    [Fact]
+    public void TheReportAsksThePlayerOnceTheGiverWasTriedAndHisSpotLookedAt()
+    {
+        var q = HighWind();
+        var giver = new StepObject(2, IxalGiver, StepObjectKind.Npc, "Jezul Ahuatan", new Vector3(260, 302, -200), 71225, true, true);
+        var s = HighWindSnap(3, 3, 0, new[] { Norbettaux_(), giver });
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        m.Tried.Add(giver.Key);
+        Assert.Equal(StepKind.Go, StepRules.Decide(q, s, m, T0).Kind);
+        m.Looked.Add(IxalGiverSpot.Level);
+        var plan = StepRules.Decide(q, s, m, T0);
+        Assert.Equal(StepKind.AskUser, plan.Kind);
+        Assert.Contains("report", plan.What);
+    }
+
+    [Fact]
+    public void OlderCraftQuestsReportOnceTheProductsAreInTheBags()
+    {
+        // No line counts the product: the products in the bags (and no materials left) mean it's made.
+        var q = HighWind();
+        var s = new StepSnapshot
+        {
+            Quest = q.Quest, Accepted = true, Sequence = 255, AcceptJob = Crp, Job = Crp, Territory = Coerthas,
+            Objects = new[] { Norbettaux_() }, Todos = new[] { new TodoProgress(3, false, 0, 0, 0) },
+            Items = new Dictionary<uint, int> { [8123] = 3 }, Statuses = new HashSet<uint> { Facility },
+        };
+        Assert.True(StepRules.Supplied(q, s));
+        Assert.Equal(StepKind.Go, Decide(q, s).Kind);
+    }
+
+    [Fact]
+    public void AGatheringLineInTheReportSequenceReportsOnceCounted()
+    {
+        var q = new QuestScript
+        {
+            Quest = 65536 + 4607, Giver = 1043417, TargetEnd = 1043417, GiverSpot = Npc(1043417, 400, 9308276),
+            GatherItems = new Dictionary<uint, uint> { [Min] = 38281 },
+            Todos = new[] { new ScriptTodo(0, 255, 1, new[] { Npc(1044042, 50), Npc(1043417, 400, 9308276) }, "Mine  and deliver it to Stigma-4.") },
+        };
+        var s = Snap(255, new[] { Obj(1, 1044042, 50) }, new[] { new TodoProgress(0, false, 3, 3, 38281) }, new() { [38281] = 3 }, job: Min, accept: Min);
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Equal(9308276u, plan.Level);
+    }
+
+    [Fact]
+    public void TheReportGoesToTheTargetEndWhenItIsntTheGiver()
+    {
+        var end = new ScriptSpot(5000001, Zone, new Vector3(80, 0, 0), 1050000, false);
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3902, Giver = Giver, TargetEnd = 1050000, GiverSpot = Npc(Giver, 500, 8368176), Product = 31147, Materials = 31146,
+            Todos = new[] { new ScriptTodo(1, 255, 1, new[] { Npc(1034104, 21), end }, "Synthesize  and deliver it.") },
+        };
+        Assert.Equal(end, StepRules.TurnInSpot(q));
+        var s = Snap(255, new[] { Obj(1, 1034104, 21), Obj(2, Giver, 30) }, new[] { new TodoProgress(1, false, 3, 3, 31147) }, new() { [31147] = 3 });
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Equal(end.Level, plan.Level);
+    }
+
+    [Fact]
+    public void QuestsThatNeitherCraftNorGatherReportAsBefore()
+    {
+        // An errand at its report: the marked NPC still counts (the rule is only for crafting and gathering).
+        var q = Quest(Line(2, 255, "Report to Regitt."));
+        Assert.False(StepRules.Supplied(q, Snap(255)));
+        Assert.Equal(1034103u, Decide(q, Snap(255, new[] { Obj(1, 1034103, 5) })).Target!.BaseId);
+    }
+
     // ------------------------------------------------------------------ gathering and the class
 
     private static QuestScript GatherQuest() => new()
