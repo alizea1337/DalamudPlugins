@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.21.0.0</Version>
+    <Version>0.21.1.0</Version>
     <Author>alizea1337</Author>
     <Name>Provenance</Name>
     <Punchline>Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.</Punchline>

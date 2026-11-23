@@ -48,7 +48,8 @@ public sealed record DeliveryOptions(DeliveryGoal Goal, IReadOnlySet<uint> Clien
 
 /// <summary>
 /// Plans the week's deliveries: one request per client, delivered as often as the goal wants, within the 12 a week
-/// (and 6 per client). Bonus requests always come first. Pure, so it is tested without the game.
+/// (and 6 per client). Ranking up serves the clients below the top level first; bonus requests (top level only) come
+/// first among the rest, and first of all under the other goals. Pure, so it is tested without the game.
 /// </summary>
 public static class DeliveryPlanner
 {
@@ -95,10 +96,11 @@ public static class DeliveryPlanner
             picks.Add((week, best.Request, best.Ability, count));
         }
 
-        // Bonus first; then by the goal.
+        // Ranking up: the clients below the top level first (they have no bonus requests: those come at the top level
+        // only), then the top-level ones with what's left, bonus first. The other goals: bonus first.
         var ordered = picks
-            .OrderByDescending(p => p.Request.Bonus)
-            .ThenBy(p => options.Goal == DeliveryGoal.RankUp ? (p.Week.Maxed ? 1 : 0) : 0)
+            .OrderBy(p => options.Goal == DeliveryGoal.RankUp ? (p.Week.Maxed ? 1 : 0) : 0)
+            .ThenByDescending(p => p.Request.Bonus)
             .ThenBy(p => options.Goal == DeliveryGoal.RankUp && !p.Week.Maxed ? p.Week.Rank : 0)
             .ThenBy(p => options.Goal == DeliveryGoal.RankUp && !p.Week.Maxed ? p.Week.Satisfaction : 0)
             .ThenByDescending(p => Value(p.Request, Tier(p.Ability, p.Week, options), options.Goal))

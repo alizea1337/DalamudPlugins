@@ -65,6 +65,22 @@ public class DeliveryPlannerTests
     }
 
     [Fact]
+    public void RankingUpServesClientsBelowTheTopBeforeBonusRequests()
+    {
+        // Two top-level clients with bonus requests, two below the top: ranking up goes to the lower ones first.
+        var weeks = new[] { Week(2, 5, bonus: true), Week(4, 5, bonus: true), Week(5, 2, 0), Week(6, 1, 0, pay: Pay(150, 1000, satisfaction: 30)) };
+        var plan = DeliveryPlanner.Plan(weeks, _ => null, (_, _) => Can, 12, Options(DeliveryGoal.RankUp), NoScrips);
+        Assert.Equal(new uint[] { 6, 5 }, plan.Deliveries.Select(d => d.Client.Id));
+        // Level 1 needs 480 here at 30 a delivery: the week's 6. Level 2 at 80: 6 more. Nothing left for the bonus ones.
+        Assert.Equal(12, plan.Count);
+        Assert.Equal(6, plan.Deliveries[0].Count);
+        // With fewer below the top, the bonus requests take what's left, the first of them before plain ones.
+        var some = DeliveryPlanner.Plan(new[] { Week(1, 5), Week(2, 5, bonus: true), Week(6, 4, 400) }, _ => null, (_, _) => Can, 12, Options(DeliveryGoal.RankUp), NoScrips);
+        Assert.Equal(new uint[] { 6, 2, 1 }, some.Deliveries.Select(d => d.Client.Id));
+        Assert.Equal(new[] { 1, 6, 5 }, some.Deliveries.Select(d => d.Count));
+    }
+
+    [Fact]
     public void FishWaitsWhenCraftingOrGatheringWorks()
     {
         var options = Options(DeliveryGoal.Scrips) with { Kinds = new HashSet<DeliveryKind> { DeliveryKind.Craft, DeliveryKind.Gather, DeliveryKind.Fish } };

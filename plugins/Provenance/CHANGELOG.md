@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.1
+
+- Fixed (Custom Deliveries): under the Rank up goal, the plan gave the week's deliveries to the top-level
+  clients' bonus requests first, so the clients still below the top level got none. Ranking up now serves
+  the clients below the top level first (the lowest first); the deliveries left over go to the top-level
+  clients, bonus requests first. Under Scrips and Gil, bonus requests still come first.
+
 ## 0.21.0
 
 - **Custom Deliveries, step 2: the delivery run** (crafted and gathered requests; fish come later).

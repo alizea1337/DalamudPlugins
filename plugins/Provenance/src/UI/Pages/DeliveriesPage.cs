@@ -142,11 +142,11 @@ internal sealed unsafe class DeliveriesPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Wrapped(effective switch
         {
-            DeliveryGoal.RankUp => "Clients below the top level first, the lowest first, up to their next level each round. The lowest collectability "
-                                   + "tier does: satisfaction is the same at every tier.",
-            DeliveryGoal.Scrips => "The most scrips per delivery, at the best collectability tier your gear reliably reaches.",
-            _ => "The most gil per delivery, at the best collectability tier your gear reliably reaches.",
-        } + " Bonus requests always come first.", Palette.TextMuted);
+            DeliveryGoal.RankUp => "Clients below the top level first, the lowest first, up to their next level each round, at the lowest collectability "
+                                   + "tier (satisfaction is the same at every tier). Deliveries left over go to clients at the top level, bonus requests first.",
+            DeliveryGoal.Scrips => "The most scrips per delivery, at the best collectability tier your gear reliably reaches. Bonus requests come first.",
+            _ => "The most gil per delivery, at the best collectability tier your gear reliably reaches. Bonus requests come first.",
+        }, Palette.TextMuted);
         if (S.Goal == null)
         {
             Ui.Wrapped("Picked for you: Rank up while a client is below the top level, then Scrips. Choosing a goal keeps it.", Palette.TextFaint);
