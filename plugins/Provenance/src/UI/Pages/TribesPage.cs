@@ -148,9 +148,9 @@ internal sealed class TribesPage : Page
     };
 
     /// <summary>
-    /// The run's place on the page, laid out like the Custom Deliveries page: its progress and live log go first (while
-    /// it runs, or after it ran), then the goal and options, then the day's plan (shared with the Plan page). Start,
-    /// Pause and Stop go on the action bar through an <c>Actions</c> override, as <c>DeliveriesPage</c> does.
+    /// The run's place on the page, laid out like the Custom Deliveries page: what it waits for you to do (when it does),
+    /// its progress and live log (while it runs, or after it ran), then the goal and options, then the day's plan (shared
+    /// with the Plan page). Start, Pause and Stop are on the action bar (<see cref="Actions"/>).
     /// </summary>
     private void DrawRun(Snapshot snap, float w)
     {
