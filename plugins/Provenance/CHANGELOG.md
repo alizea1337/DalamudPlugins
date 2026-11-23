@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.2
+
+- Fixed: trips in the Firmament walked all the way (200 to 350 yalms, getting stuck on the way) instead of
+  taking its aethernet. The Firmament's aethernet isn't in the game's usual aetheryte data, so Provenance
+  didn't know it was there; now it does (its eight shards), and takes it when walking to the nearest shard
+  and from the one nearest the target is clearly quicker. A destination the shard doesn't offer yet (not
+  attuned) means walking, as before.
+- After "Travel to the Firmament" the trip can now take that aethernet too (it counted as a hop already).
+- The debug log says when a trip walks a long way and why (no aethernet hop is quicker there).
+
 ## 0.21.1
 
 - Fixed (Custom Deliveries): under the Rank up goal, the plan gave the week's deliveries to the top-level

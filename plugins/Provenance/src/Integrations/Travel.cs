@@ -1,4 +1,5 @@
 using System;
+using Dalamud.Game.ClientState.Objects.Enums;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -28,6 +29,27 @@ internal sealed unsafe class Travel
     private const float MainCrystalRange = 6f;
     /// <summary>On the way to the Firmament (a retry goes back to Foundation's aetheryte menu).</summary>
     private bool viaFoundation;
+
+    /// <summary>
+    /// The Firmament's aethernet: not in the game's aetheryte data; its shards open a menu of destinations named by
+    /// place. Place names and positions (X, Z) are facts as Lifestream lists them.
+    /// </summary>
+    private static readonly (uint Place, Vector2 At)[] FirmamentShards =
+    {
+        (3436, new Vector2(23.9f, 169.4f)),    // The Mendicant's Court
+        (3473, new Vector2(76.0f, 10.3f)),     // The Mattock
+        (3475, new Vector2(149.5f, 98.6f)),    // The New Nest
+        (3474, new Vector2(207.8f, -25.6f)),   // Saint Roelle's Dais
+        (3525, new Vector2(-78.8f, 76.0f)),    // Featherfall
+        (3528, new Vector2(-132.6f, -14.7f)),  // Hoarfrost Hall
+        (3646, new Vector2(-91.7f, -115.2f)),  // Western Risensong Quarter
+        (3645, new Vector2(114.3f, -107.4f)),  // Eastern Risensong Quarter
+    };
+
+    /// <summary>A hop on the Firmament's aethernet is under way (its shard menu, not the city aethernet window).</summary>
+    private bool firmamentHop;
+    private Vector2 firmamentFrom;
+    private uint firmamentTo;
     private const float ShardRange = 3.5f;
     /// <summary>The aethernet window open this long without the destination in it: give up.</summary>
     private static readonly TimeSpan ListPatience = TimeSpan.FromSeconds(6);
@@ -101,6 +123,7 @@ internal sealed unsafe class Travel
         aethernetOnly = false;
         crystalTrip = null;
         viaFoundation = false;
+        firmamentHop = false;
         lastPath = null;
         pathFailNoted = false;
         Current = State.Idle;
@@ -118,7 +141,6 @@ internal sealed unsafe class Travel
     private void StartFirmament()
     {
         viaFoundation = true;
-        hopped = true;
         var crystal = Teleporter.Position(FoundationAetheryte) ?? Vector3.Zero;
         Note($"{what}: to the Firmament through Foundation's aetheryte");
         crystalTrip = new Travel { hopped = true };
@@ -231,6 +253,10 @@ internal sealed unsafe class Travel
                 return;
             }
 
+            case State.Aethernet when firmamentHop:
+                TickFirmamentAethernet();
+                return;
+
             case State.Aethernet:
                 Status = "Taking the aethernet";
                 if (DateTime.UtcNow < nextTry) return;
@@ -303,6 +329,17 @@ internal sealed unsafe class Travel
                         hopped = true;
                         StartHop(territory, hop.From, hop.To);
                         return;
+                    }
+                    if (!hopped && player != null && territory == Firmament && FirmamentHop(player.Position) is { } fh)
+                    {
+                        hopped = true;
+                        StartFirmamentHop(fh.From, fh.To);
+                        return;
+                    }
+                    if (player != null)
+                    {
+                        var walk = Vector2.Distance(new Vector2(player.Position.X, player.Position.Z), approx);
+                        if (walk > 80) Note($"{what}: walking {walk:0} yalms ({(hopped ? "after the aethernet" : "no aethernet hop is quicker here")})");
                     }
                     Enter(State.Walking);
                     return;
@@ -483,6 +520,83 @@ internal sealed unsafe class Travel
     }
 
     /// <summary>At the crystal: talk to it and pick the stop.</summary>
+    /// <summary>
+    /// In the Firmament: the shard nearest to the character and the one nearest to the target, when walking to the
+    /// first and from the second saves a good part of the walk (same rule as the city aethernet).
+    /// </summary>
+    private (Vector2 From, uint To)? FirmamentHop(Vector3 me)
+    {
+        var here = new Vector2(me.X, me.Z);
+        var walk = Vector2.Distance(here, approx);
+        var entry = FirmamentShards.OrderBy(sh => Vector2.Distance(here, sh.At)).First();
+        var exit = FirmamentShards.OrderBy(sh => Vector2.Distance(sh.At, approx)).First();
+        if (entry.Place == exit.Place) return null;
+        var cost = Vector2.Distance(here, entry.At) + Vector2.Distance(exit.At, approx) + 60f;
+        return cost < walk * 0.7f ? (entry.At, exit.Place) : null;
+    }
+
+    private void StartFirmamentHop(Vector2 from, uint to)
+    {
+        firmamentHop = true;
+        firmamentFrom = from;
+        firmamentTo = to;
+        hopTo = to;
+        Note($"{what}: taking the Firmament's aethernet to {PlaceText(to)}");
+        crystalTrip = new Travel { hopped = true };
+        crystalTrip.GoTo("the aethernet shard", Firmament, from, 4f, () => FirmamentShardObject(from)?.Position);
+        crystalTrip.hopped = true;
+        Enter(State.ToCrystal, 120);
+    }
+
+    /// <summary>The shard object standing at a Firmament aethernet spot, once it's in view.</summary>
+    private static Dalamud.Game.ClientState.Objects.Types.IGameObject? FirmamentShardObject(Vector2 at)
+        => Services.Objects
+            .Where(o => o.IsTargetable && o.ObjectKind is ObjectKind.Aetheryte or ObjectKind.EventObj
+                        && Vector2.Distance(new Vector2(o.Position.X, o.Position.Z), at) < 8f)
+            .OrderBy(o => Vector2.Distance(new Vector2(o.Position.X, o.Position.Z), at))
+            .FirstOrDefault();
+
+    private static string PlaceText(uint place)
+        => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.PlaceName>().GetRowOrDefault(place)?.Name.ExtractText() ?? "";
+
+    /// <summary>At a Firmament shard: talk to it and pick the destination; a destination not in its menu (not attuned yet) means walking.</summary>
+    private void TickFirmamentAethernet()
+    {
+        Status = "Taking the Firmament's aethernet";
+        if (DateTime.UtcNow < nextTry) return;
+        if (Interact.Menu() is { Count: > 0 } options)
+        {
+            var name = PlaceText(firmamentTo);
+            var entry = name.Length == 0 ? -1 : options.FindIndex(e => e.Text.Contains(name, StringComparison.CurrentCultureIgnoreCase));
+            if (entry < 0)
+            {
+                Note($"{what}: the shard's menu has no {name} (not attuned yet?): {string.Join(" / ", options.Select(e => e.Text.Trim()))}; walking");
+                Interact.Close("SelectString");
+                firmamentHop = false;
+                hopTo = 0;
+                Enter(State.Walking);
+                return;
+            }
+            MoveIntent.Expect(30, "aethernet to " + name);
+            Note($"{what}: \"{options[entry].Text.Trim()}\"");
+            options[entry].Select();
+            sawLoading = false;
+            Enter(State.Arriving, 40);
+            return;
+        }
+        if (Interact.SkipTalk()) { nextTry = DateTime.UtcNow.AddSeconds(0.3); return; }
+        if (DateTime.UtcNow > deadline || ++tries > 6)
+        {
+            Note($"{what}: the Firmament shard didn't open its menu; walking");
+            firmamentHop = false;
+            hopTo = 0;
+            Enter(State.Walking);
+            return;
+        }
+        if (FirmamentShardObject(firmamentFrom) is { } shard) Interact.With(shard, travels: true);
+        nextTry = DateTime.UtcNow.AddSeconds(1.5);
+    }
+
     private void StartAethernet()
     {
         tries = 0;
