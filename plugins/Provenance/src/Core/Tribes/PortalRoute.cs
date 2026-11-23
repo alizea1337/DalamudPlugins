@@ -38,6 +38,19 @@ public static class PortalRoute
     /// <summary>A portal within the zone is taken when the way through it is at most this share of walking straight there.</summary>
     public const float ShortcutShare = 0.5f;
 
+    /// <summary>
+    /// A warp the trips may take: free (not a ferry or an airship that costs gil), open to everyone (no quest it needs:
+    /// some warps show only during a story quest, such as Kholusia's "Return to the soft-faced bloke?"), and in or out
+    /// of a zone where the run's society dailies take place. tools/QuestPortals builds the shipped table with it.
+    /// </summary>
+    /// <param name="territory">Where the warp's holder stands.</param>
+    /// <param name="to">Where the warp goes.</param>
+    /// <param name="gil">What the warp costs (<c>WarpCondition.Gil</c>).</param>
+    /// <param name="needsQuest">The warp asks for quests (<c>WarpCondition.RequiredQuest*</c>).</param>
+    /// <param name="societyZones">The zones of the dailies the run does (their givers, to-do spots and script zones).</param>
+    public static bool Usable(uint territory, uint to, int gil, bool needsQuest, IReadOnlySet<uint> societyZones)
+        => gil == 0 && !needsQuest && (societyZones.Contains(territory) || societyZones.Contains(to));
+
     /// <param name="canTeleport">The character can teleport to that zone (it has an unlocked aetheryte).</param>
     /// <param name="unusable">Portals that didn't work this trip (no question came, or the warp didn't happen).</param>
     /// <returns>The portal to take first, or null to go the ordinary way (walk, or teleport and walk).</returns>

@@ -245,13 +245,26 @@ internal static unsafe class QuestSteps
         return work == null ? 0u : work->AcceptClassJob;
     }
 
-    /// <summary>Casting, in an event or a cutscene, or between areas: the engine starts nothing now.</summary>
+    /// <summary>
+    /// Casting, in an event or a cutscene, crafting or gathering, getting on a mount, jumping, in combat, between areas,
+    /// or the game has scene tasks pending: the engine starts nothing now, and the quest's script isn't asked anything.
+    /// </summary>
     public static bool Busy
-        => Services.Condition[ConditionFlag.Casting] || Services.Condition[ConditionFlag.Casting87] || Services.Condition[ConditionFlag.OccupiedInEvent]
-           || Services.Condition[ConditionFlag.OccupiedInQuestEvent] || Services.Condition[ConditionFlag.OccupiedInCutSceneEvent]
-           || Services.Condition[ConditionFlag.BetweenAreas] || Services.Condition[ConditionFlag.BetweenAreas51]
-           || Services.Condition[ConditionFlag.WatchingCutscene] || Services.Condition[ConditionFlag.WatchingCutscene78]
-           || DeliveryWindow.SceneBusy;
+    {
+        get
+        {
+            var c = Services.Condition;
+            return c[ConditionFlag.Casting] || c[ConditionFlag.Casting87] || c[ConditionFlag.OccupiedInEvent]
+                   || c[ConditionFlag.OccupiedInQuestEvent] || c[ConditionFlag.OccupiedInCutSceneEvent]
+                   || c[ConditionFlag.BetweenAreas] || c[ConditionFlag.BetweenAreas51]
+                   || c[ConditionFlag.WatchingCutscene] || c[ConditionFlag.WatchingCutscene78]
+                   || c[ConditionFlag.Crafting] || c[ConditionFlag.PreparingToCraft] || c[ConditionFlag.ExecutingCraftingAction]
+                   || c[ConditionFlag.Gathering] || c[ConditionFlag.ExecutingGatheringAction]
+                   || c[ConditionFlag.Mounting] || c[ConditionFlag.Mounting71] || c[ConditionFlag.Jumping] || c[ConditionFlag.Jumping61]
+                   || c[ConditionFlag.InCombat]
+                   || DeliveryWindow.SceneBusy;
+        }
+    }
 
     public static bool InCutscene
         => Services.Condition[ConditionFlag.OccupiedInCutSceneEvent] || Services.Condition[ConditionFlag.WatchingCutscene]
@@ -259,6 +272,41 @@ internal static unsafe class QuestSteps
 
     /// <summary>Between areas (a zone change or a warp under way): nothing is read from the quest's script then.</summary>
     public static bool Loading => Services.Condition[ConditionFlag.BetweenAreas] || Services.Condition[ConditionFlag.BetweenAreas51];
+
+    /// <summary>After a zone change (or a warp within one), this long before the quest's script is asked anything.</summary>
+    private static readonly TimeSpan ZoneSettle = TimeSpan.FromSeconds(2);
+    private static uint zoneSeen;
+    private static DateTime zoneSince;
+
+    /// <summary>
+    /// Not between areas, and the zone hasn't changed for <see cref="ZoneSettle"/>: the quest's objects are set up
+    /// again. Called by whoever reads the script (the stepper, the watch), often enough to notice each change.
+    /// </summary>
+    public static bool Settled(DateTime now)
+    {
+        var zone = Services.ClientState.TerritoryType;
+        if (Loading || zone != zoneSeen || zoneSince == default)
+        {
+            zoneSeen = zone;
+            zoneSince = now;
+        }
+        return now - zoneSince >= ZoneSettle;
+    }
+
+    /// <summary>The quest's state as far as it reads without its script (journal step and variables), for the busy watch.</summary>
+    public static string Progress(uint questRow)
+    {
+        var qm = QuestManager.Instance();
+        if (qm == null) return "";
+        var id = (ushort)(questRow - 65536);
+        if (!qm->IsQuestAccepted(id)) return "gone";
+        var work = qm->GetQuestById(id);
+        if (work == null) return "";
+        var v = work->Variables;
+        var vars = new byte[6];
+        for (var i = 0; i < 6 && i < v.Length; i++) vars[i] = v[i];
+        return $"{work->Sequence}|{Convert.ToHexString(vars)}";
+    }
 
     /// <summary>What the game shows about the quest and the character now; null when not logged in.</summary>
     public static StepSnapshot? Snapshot(QuestScript q)
@@ -278,8 +326,14 @@ internal static unsafe class QuestSteps
         }
         var completed = qm->IsDailyQuestCompleted(id) || (!q.Repeatable && QuestManager.IsQuestComplete(id));
 
-        // The quest's script isn't asked anything during a zone change.
-        var handler = accepted && !Loading ? Handler(q.Quest) : null;
+        // The quest's script is asked only when the game is idle, a while after a zone change, and when its script is
+        // loaded: calling into it while an event, a cutscene or scene tasks run, or while the zone sets up, can crash.
+        var busy = Busy;
+        var settled = Settled(DateTime.UtcNow);
+        var handler = accepted && !busy && settled ? Handler(q.Quest) : null;
+        var loaded = handler != null && handler->LuaEventHandler.LuaState != null;
+        var read = !accepted || (!busy && settled && (handler == null || loaded));
+        if (!loaded) handler = null;
         var todos = new List<TodoProgress>();
         if (handler != null)
         {
@@ -304,6 +358,14 @@ internal static unsafe class QuestSteps
         foreach (var t in todos) Count(t.ItemId);
 
         var chara = (Character*)player.Address;
+        var statuses = new HashSet<uint>();
+        var expiring = new HashSet<uint>();
+        foreach (var st in player.StatusList)
+        {
+            if (st.StatusId == 0) continue;
+            statuses.Add(st.StatusId);
+            if (st.RemainingTime > 0 && st.RemainingTime < StepRules.StatusRenewBelow.TotalSeconds) expiring.Add(st.StatusId);
+        }
         return new StepSnapshot
         {
             Quest = q.Quest,
@@ -318,36 +380,57 @@ internal static unsafe class QuestSteps
             Mounted = Services.Condition[ConditionFlag.Mounted],
             Mount = Services.Condition[ConditionFlag.Mounted] ? chara->Mount.MountId : 0u,
             Flying = Services.Condition[ConditionFlag.InFlight],
-            Busy = Busy,
+            Busy = busy,
+            ScriptRead = read,
             Todos = todos,
             Objects = handler != null ? Objects(handler) : new List<StepObject>(),
             Markers = Markers(q.Quest),
             Items = items,
-            Statuses = player.StatusList.Select(s => s.StatusId).Where(s => s != 0).ToHashSet(),
+            Statuses = statuses,
+            Expiring = expiring,
         };
     }
 
+    /// <summary>The character has the status, and it lasts at least this long more (or doesn't run out).</summary>
+    public static bool StatusLasts(uint statusId, TimeSpan atLeast)
+    {
+        if (Services.Objects.LocalPlayer is not { } me) return false;
+        foreach (var st in me.StatusList)
+            if (st.StatusId == statusId) return st.RemainingTime <= 0 || st.RemainingTime >= atLeast.TotalSeconds;
+        return false;
+    }
+
     /// <summary>
-    /// The quest handler's objects that are loaded: what they are, where, the icon over them, whether the quest's
-    /// script counts them active, whether they can be targeted.
+    /// The quest handler's objects that are loaded: what they are, where, the icon this quest gives them (and the one
+    /// the game draws, for the log), whether the quest's script counts them active, whether they can be targeted. Only
+    /// objects still in the game's object table are asked about: a pointer the handler still holds to one that was
+    /// unloaded isn't touched.
     /// </summary>
     private static List<StepObject> Objects(QuestEventHandler* handler)
     {
         var list = new List<StepObject>();
+        var table = Services.Objects;
+        var present = new HashSet<nint>();
+        for (var i = 0; i < table.Length; i++)
+            if (table.GetObjectAddress(i) is var address && address != 0) present.Add(address);
         foreach (var p in handler->EventObjects)
         {
             var go = p.Value;
-            if (go == null) continue;
+            if (go == null || !present.Contains((nint)go)) continue;
             var kind = go->ObjectKind switch
             {
                 CsObjectKind.EventNpc or CsObjectKind.BattleNpc => StepObjectKind.Npc,
                 CsObjectKind.EventObj => StepObjectKind.Object,
                 _ => StepObjectKind.Other,
             };
-            var icon = go->NamePlateIconId;
-            if (icon == 0) icon = handler->GetNameplateIconForObject(go);
+            // The quest's own icon for it: the drawn one comes from every handler (a giver showing "dailies available").
+            var icon = handler->GetNameplateIconForObject(go);
             list.Add(new StepObject(go->GetGameObjectId(), go->BaseId, kind, go->NameString, new Vector3(go->Position.X, go->Position.Y, go->Position.Z),
-                icon, handler->IsActive(go), go->GetIsTargetable()));
+                icon, handler->IsActive(go), go->GetIsTargetable())
+            {
+                Drawn = go->NamePlateIconId,
+                Instance = go->LayoutId,
+            });
         }
         return list;
     }
@@ -392,6 +475,9 @@ internal static unsafe class QuestSteps
     /// <summary>The loaded game object for an id, when it's still there.</summary>
     public static IGameObject? Find(ulong gameObjectId) => gameObjectId == 0 ? null : Services.Objects.SearchById(gameObjectId);
 
+    /// <summary>An object's place in the zone's layout (0 when it has none); see <see cref="StepObject.Instance"/>.</summary>
+    public static uint Instance(IGameObject o) => o.Address == 0 ? 0 : ((GameObjectStruct*)o.Address)->LayoutId;
+
     /// <summary>Targets an object (as a click on it does).</summary>
     public static bool Target(IGameObject o)
     {
@@ -422,8 +508,9 @@ internal static unsafe class QuestSteps
     }
 
     /// <summary>
-    /// Uses a key item: on the target (targeted, then the item, as the key item menu does), on the ground at a spot,
-    /// or on yourself. Why the game refused comes back in <paramref name="why"/> (its action status, 0 is fine).
+    /// Uses a key item: on the target (targeted, then the item, as the key item menu does), on the ground at the target
+    /// or a spot, or on yourself; only when the game says it can be used now. Why the game refused comes back in
+    /// <paramref name="why"/> (its action status, 0 is fine). Never thrown at no place (a spot of all zeros).
     /// </summary>
     public static bool UseKeyItem(uint itemId, ItemUse use, IGameObject? target, Vector3? spot, out uint why)
     {
@@ -434,20 +521,23 @@ internal static unsafe class QuestSteps
         {
             case ItemUse.Ground:
             {
-                var at = target?.Position ?? spot ?? Vector3.Zero;
+                if ((target?.Position ?? spot) is not { } at || at == Vector3.Zero) return false;
                 why = am->GetActionStatus(ActionType.EventItem, itemId);
-                return am->UseActionLocation(ActionType.EventItem, itemId, 0xE000_0000, &at);
+                return why == 0 && am->UseActionLocation(ActionType.EventItem, itemId, 0xE000_0000, &at);
             }
             case ItemUse.Target when target != null:
             {
                 Target(target);
                 why = am->GetActionStatus(ActionType.EventItem, itemId, target.GameObjectId);
+                if (why != 0) return false;
                 var agent = AgentInventoryContext.Instance();
                 return agent != null && agent->UseItem(itemId) is 0 or 1;
             }
+            case ItemUse.Target:
+                return false;
             default:
                 why = am->GetActionStatus(ActionType.EventItem, itemId);
-                return am->UseAction(ActionType.EventItem, itemId);
+                return why == 0 && am->UseAction(ActionType.EventItem, itemId);
         }
     }
 
@@ -565,19 +655,62 @@ internal static unsafe class QuestSteps
         return j->QuestTitleText == null ? null : j->QuestTitleText->NodeText.ToString();
     }
 
-    /// <summary>Declines a quest offer that isn't the run's (a click on Decline).</summary>
+    /// <summary>Declines a quest offer that isn't the run's (a click on Decline, when it can be pressed).</summary>
     public static bool Decline()
     {
         if (Interact.Ready("JournalAccept") is var a && a == null) return false;
+        var j = (AddonJournalAccept*)a;
+        if (j->DeclineButton == null || !j->DeclineButton->IsEnabled) return false;
         new AddonMaster.JournalAccept((nint)a).Decline();
         return true;
     }
 
+    /// <summary>Whose the reward window is, as far as its texts tell.</summary>
+    public enum ResultOwner { Unknown, This, Other }
+
+    /// <summary>
+    /// Whose the open reward window is: this quest's when one of its texts is the quest's title; another quest's when
+    /// one is the title of another quest in the journal (<paramref name="shown"/>); otherwise unknown.
+    /// </summary>
+    public static ResultOwner ResultFor(QuestScript q, out string shown)
+    {
+        shown = "";
+        if (Interact.Ready("JournalResult") is var a && a == null) return ResultOwner.Unknown;
+        var texts = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+        for (var i = 0; i < a->AtkValuesCount; i++)
+        {
+            var v = a->AtkValues[i];
+            if (v.Type is AtkValueType.String or AtkValueType.ManagedString or AtkValueType.ConstString && StepRules.Normal(v.GetValueAsString()) is { Length: > 0 } t)
+                texts.Add(t);
+        }
+        for (var i = 0; i < a->UldManager.NodeListCount; i++)
+        {
+            var node = a->UldManager.NodeList[i];
+            if (node == null || node->Type != NodeType.Text) continue;
+            if (StepRules.Normal(Dalamud.Utility.Utf8StringExtensions.ExtractText(((AtkTextNode*)node)->NodeText)) is { Length: > 0 } t) texts.Add(t);
+        }
+        var mine = StepRules.Normal(q.Name);
+        if (mine.Length > 0 && texts.Contains(mine)) return ResultOwner.This;
+        var qm = QuestManager.Instance();
+        if (qm == null) return ResultOwner.Unknown;
+        var sheet = Services.Data.GetExcelSheet<Quest>();
+        foreach (ref var work in qm->NormalQuests)
+        {
+            if (work.QuestId == 0 || work.QuestId + 65536u == q.Quest) continue;
+            var name = StepRules.Normal(sheet.GetRowOrDefault(work.QuestId + 65536u)?.Name.ExtractText() ?? "");
+            if (name.Length == 0 || !texts.Contains(name)) continue;
+            shown = name;
+            return ResultOwner.Other;
+        }
+        return ResultOwner.Unknown;
+    }
+
     /// <summary>
     /// Completes the quest in the reward window: the Complete button when it can be pressed; when a reward has to be
-    /// picked first, the window's confirm with the reward (once, not while scene tasks are pending).
+    /// picked first, the window's confirm with the reward (once, not while scene tasks are pending, and only when the
+    /// window is known to be this quest's: <paramref name="ours"/>).
     /// </summary>
-    public static bool Complete(IReadOnlyList<uint> rewards, ref bool rewardSent, out string how)
+    public static bool Complete(IReadOnlyList<uint> rewards, bool ours, ref bool rewardSent, out string how)
     {
         how = "";
         if (Interact.Ready("JournalResult") is var a && a == null) return false;
@@ -588,7 +721,7 @@ internal static unsafe class QuestSteps
             how = "button";
             return true;
         }
-        if (rewards.Count == 0 || rewardSent || DeliveryWindow.SceneBusy) return false;
+        if (!ours || rewards.Count == 0 || rewardSent || DeliveryWindow.SceneBusy) return false;
         Callback.Fire(a, true, 0, (int)rewards[0]);
         rewardSent = true;
         how = $"reward {rewards[0]}";
@@ -652,10 +785,12 @@ internal static unsafe class QuestSteps
         return TradeStep.Wait;
     }
 
-    /// <summary>Closes the hand-over window (its Cancel button) when the items aren't there.</summary>
+    /// <summary>Closes the hand-over window (its Cancel button, when it can be pressed) when the items aren't there.</summary>
     public static bool CancelTrade()
     {
         if (Interact.Ready("Request") is var a && a == null) return false;
+        var r = (AddonRequest*)a;
+        if (r->CancelButton == null || !r->CancelButton->IsEnabled) return false;
         new AddonMaster.Request((nint)a).Cancel();
         return true;
     }
@@ -671,6 +806,14 @@ internal static unsafe class QuestSteps
     public static IReadOnlyList<string> SkipQuestions => skip.Value;
 
     private static readonly Lazy<IReadOnlyList<string>> skip = new(() => AddonTexts(281, 5882));
+
+    /// <summary>
+    /// A menu's own way out, in the client's language: "Nothing" (Addon 102441, the last entry of a giver's daily list;
+    /// also 622, 6350, 6750) and "Cancel" (Addon 2).
+    /// </summary>
+    public static IReadOnlyList<string> LeaveTexts => leave.Value;
+
+    private static readonly Lazy<IReadOnlyList<string>> leave = new(() => AddonTexts(102441, 622, 6350, 6750, 2));
 
     /// <summary>The accept confirmation "Commence “…”?" (Addon 102445).</summary>
     public static string CommenceQuestion => commence.Value;

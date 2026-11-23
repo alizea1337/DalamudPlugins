@@ -1,6 +1,7 @@
-// Builds the portal table Provenance ships (Resources/portals.json): the NPCs and objects in the allied societies'
-// zones that warp the character, within the zone (A-4 Research, Hoper's Hold) or into a sub-zone (Zirgorteh the
-// Open-armed, Elysion), with where each stands and where its warp lands.
+// Builds the portal table Provenance ships (Resources/portals.json): the NPCs and objects in the zones of the crafter
+// and gatherer society dailies that warp the character, within the zone (A-4 Research, Hoper's Hold) or into a
+// sub-zone (Zirgorteh the Open-armed, Elysion), with where each stands and where its warp lands. Only free warps open
+// to everyone (PortalRoute.Usable): no ferries or airships that cost gil, no warps that show only during a quest.
 //
 // The game places these with its zone layout files (bg/.../level/*.lgb). The plugin mustn't read those in game
 // (Lumina runs out of memory on the large ones), and some holders have no Level row (the A-4 Research portal), so
@@ -9,8 +10,9 @@
 // What it reads:
 // - Warp rows with a question ("Proceed to Hoper's Hold?") and a destination territory;
 // - who holds them: ENpcBase.ENpcData[], EObj.Data, directly or through ArrayEventHandler.Data[];
-// - the territories of every allied-society quest (giver, to-do spots, TERRITORYTYPE script args), and the warps'
-//   destinations from there;
+// - the territories of the crafter and gatherer society dailies (Quest.ClassJobCategory0 32, 33 or 35: giver, to-do
+//   spots, TERRITORYTYPE script args), and the warps' destinations from there;
+// - each warp's WarpCondition (its gil cost, the quests it needs);
 // - in those zones' layout files, the event NPCs and objects that are holders, and the PopRange a warp lands on
 //   (Warp.PopRange is that instance's id).
 //
@@ -22,6 +24,7 @@ using Lumina;
 using Lumina.Data.Files;
 using Lumina.Data.Parsing.Layer;
 using Lumina.Excel.Sheets;
+using Provenance.Core.Tribes;
 
 if (args.Length < 2)
 {
@@ -37,6 +40,7 @@ var npcs = game.GetExcelSheet<ENpcBase>()!;
 var territories = game.GetExcelSheet<TerritoryType>()!;
 var levels = game.GetExcelSheet<Level>()!;
 var quests = game.GetExcelSheet<Quest>()!;
+var conditions = game.GetExcelSheet<WarpCondition>()!;
 
 bool IsWarp(uint id) => id >> 16 == 2 && warps.GetRowOrDefault(id) is { } w && w.TerritoryType.RowId != 0 && !w.Question.IsEmpty;
 
@@ -63,10 +67,10 @@ foreach (var o in eobjs)
 }
 Console.WriteLine($"{npcWarps.Count} NPCs and {objWarps.Count} objects hold a warp with a question");
 
-// The allied societies' zones: where their quests start and where their to-do lines point. Then the zones their
-// portals lead to (sub-zones), for the way back out only.
+// The zones of the crafter and gatherer society dailies (the run's quests): where they start and where their to-do
+// lines point. Then the zones their portals lead to (sub-zones), for the way back out only.
 var societyZones = new HashSet<uint>();
-foreach (var q in quests.Where(q => q.BeastTribe.RowId != 0))
+foreach (var q in quests.Where(q => q.BeastTribe.RowId != 0 && q.IsRepeatable && q.ClassJobCategory0.RowId is 32 or 33 or 35))
 {
     societyZones.Add(q.IssuerLocation.ValueNullable?.Territory.RowId ?? 0);
     foreach (var todo in q.TodoParams)
@@ -78,6 +82,19 @@ foreach (var q in quests.Where(q => q.BeastTribe.RowId != 0))
 societyZones.Remove(0);
 var queue = new Queue<uint>(societyZones);
 var seen = new HashSet<uint>(societyZones);
+Console.WriteLine($"society daily zones: {string.Join(",", societyZones.OrderBy(z => z))}");
+
+// Free, open to everyone, and in or out of a society zone.
+bool Usable(uint territory, uint warp)
+{
+    var w = warps.GetRow(warp);
+    var c = conditions.GetRowOrDefault(w.WarpCondition.RowId);
+    var needsQuest = c is { } wc && new[] { wc.RequiredQuest1, wc.RequiredQuest2, wc.RequiredQuest3, wc.RequiredQuest4 }.Any(r => r.RowId != 0);
+    var usable = PortalRoute.Usable(territory, w.TerritoryType.RowId, c?.Gil ?? 0, needsQuest, societyZones);
+    if (!usable && (societyZones.Contains(territory) || societyZones.Contains(w.TerritoryType.RowId)))
+        Console.WriteLine($"left out: {territory} warp {warp} \"{w.Question.ExtractText()}\" -> {w.TerritoryType.RowId} (gil {c?.Gil ?? 0}, needs a quest {needsQuest})");
+    return usable;
+}
 
 var holders = new List<(uint Territory, uint Holder, string Kind, Vector3 At, string Layer, List<uint> Warps)>();
 var pops = new Dictionary<uint, (uint Territory, Vector3 At)>();
@@ -107,8 +124,8 @@ while (queue.Count > 0)
                 _ => ("", 0u),
             };
             var held = kind == "enpc" ? npcWarps.GetValueOrDefault(id) : kind == "eobj" ? objWarps.GetValueOrDefault(id) : null;
-            // Outside the societies' zones, only the way back into one of them.
-            if (!society) held = held?.Where(w => societyZones.Contains(warps.GetRow(w).TerritoryType.RowId)).ToList();
+            // Only the warps the trips may take: in a society zone or back into one, free, open to everyone.
+            held = held?.Where(w => Usable(t, w)).ToList();
             if (held is not { Count: > 0 }) continue;
             holders.Add((t, id, kind, at, layer.Name, held));
             if (society)

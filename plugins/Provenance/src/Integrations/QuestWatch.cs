@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.Text;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Provenance.Core.Tribes;
@@ -12,14 +13,19 @@ namespace Provenance.Integrations;
 
 /// <summary>
 /// The step engine's watch: while the player does an allied-society quest by hand and no Provenance loop is working,
-/// it writes to the debug log (area "steps") what the engine sees and would do, so a bug report shows whether the
-/// engine reads the quest right before it ever drives one. It never acts. A line is written only when something
-/// changed (the sequence, the to-do counts, the quest's objects and icons, the map markers, the decision), from a look
-/// twice a second.
+/// it writes to the debug log (area "steps", in a session of its own, "watch") what the engine sees and would do, so a
+/// bug report shows whether the engine reads the quest right before it ever drives one. It never acts. A line is written
+/// only when something changed (the sequence, the to-do counts, the quest's objects and icons, the map markers, the
+/// decision), from a look twice a second.
 /// </summary>
 /// <remarks>
+/// It runs only when the Tribes page has been opened (or its run started) and "note what the run would do" is on
+/// (<see cref="TribeSettings.Seen"/>, <see cref="TribeSettings.WatchByHand"/>), and it looks only outside duties, not
+/// between areas and not just after a zone change; the quest's script is asked nothing while the game is busy
+/// (<see cref="QuestSteps.Snapshot"/>).
+///
 /// What its lines let the in-game checks of queststeps_engine.md §9 be answered from a bug report:
-/// V1 which of a random-target quest's objects show an icon and count as active ("objects");
+/// V1 which of a random-target quest's objects show the quest's icon and count as active ("objects");
 /// V2 how the map keys a quest's markers and whether markers in other zones are listed ("marker slots", "markers");
 /// V3 whether a quest mount flies ("riding");
 /// V4 whether mounting or flying drops the carried box (status 404, "carrying");
@@ -39,6 +45,7 @@ internal static class QuestWatch
     {
         public QuestScript Script = null!;
         public readonly StepMemory Memory = new();
+        public StepSnapshot? Last;
         public string Header = "", Todos = "", Objects = "", Markers = "", Plan = "";
     }
 
@@ -46,10 +53,14 @@ internal static class QuestWatch
     private static readonly Dictionary<ushort, bool> society = new();
     private static DateTime next;
     private static bool on;
+    /// <summary>The debug log's session is the watch's own (no loop started one since it began).</summary>
+    private static bool session;
     private static bool chatAttached;
     private static string riding = "", carrying = "", menu = "", question = "", slots = "";
     private static bool rewardOpen;
-    /// <summary>A /say or an emote seen from the player: when, and the quests' signatures then (to tell whether it counted).</summary>
+    /// <summary>The player's /say or emote, seen in the chat: what it held, per watched quest; written at the next look.</summary>
+    private static (DateTime At, string What, List<(uint Quest, string Words)> Parts, Dictionary<uint, string> Before)? said;
+    /// <summary>A /say or an emote written out: when, and the quests' signatures then (to tell whether it counted).</summary>
     private static (DateTime At, string What, Dictionary<uint, string> Before)? pending;
 
     /// <summary>Every frame: looks (twice a second) while a society quest is in the journal and no Provenance loop works.</summary>
@@ -60,17 +71,38 @@ internal static class QuestWatch
             var now = DateTime.UtcNow;
             if (now < next) return;
             next = now + Every;
-            var busy = plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active || plugin.TribeLoop.Active;
-            var quests = busy || !Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null ? new List<uint>() : SocietyQuests();
+            var settings = plugin.Config.Tribes;
+            if (!settings.WatchByHand || !settings.Seen)
+            {
+                if (on) Off("turned off in the Tribes options");
+                return;
+            }
+            if (!Services.ClientState.IsLoggedIn)
+            {
+                if (on) Off("logged out");
+                return;
+            }
+            if (plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active || plugin.TribeLoop.Active)
+            {
+                // The loop writes its own session: nothing of the watch goes into it.
+                if (on) Off(null);
+                session = false;
+                return;
+            }
+            // Between areas, in a duty or just after a zone change: no look now, and the watch stays as it is.
+            if (Services.Objects.LocalPlayer == null || QuestSteps.Loading || InDuty || !QuestSteps.Settled(now)) return;
+            var quests = SocietyQuests();
             if (quests.Count == 0)
             {
-                if (on) Off(busy ? "a Provenance loop is working" : "no allied society quest in the journal");
+                if (on) Off("no allied society quest in the journal");
                 return;
             }
             if (!on)
             {
                 on = true;
                 Attach();
+                if (!session) DebugLog.BeginSession("watch");
+                session = true;
                 Write($"watch on: allied society quests in the journal [{string.Join(",", quests.Select(q => q - 65536))}]");
             }
             foreach (var gone in watched.Keys.Where(k => !quests.Contains(k)).ToList())
@@ -78,8 +110,8 @@ internal static class QuestWatch
                 Write($"{gone - 65536}: no longer in the journal (completed today: {Completed(gone)})");
                 watched.Remove(gone);
             }
-            if (QuestSteps.Loading) return;
             foreach (var q in quests) Look(q, now);
+            Said();
             Surroundings();
             Settle(now);
         }
@@ -98,14 +130,19 @@ internal static class QuestWatch
         Services.Chat.ChatMessage -= OnChat;
     }
 
-    private static void Off(string why)
+    private static bool InDuty
+        => Services.Condition[ConditionFlag.BoundByDuty] || Services.Condition[ConditionFlag.BoundByDuty56] || Services.Condition[ConditionFlag.BoundByDuty95];
+
+    /// <param name="why">Written to the log; null writes nothing (a loop's session has begun).</param>
+    private static void Off(string? why)
     {
         on = false;
         watched.Clear();
         riding = carrying = menu = question = slots = "";
         rewardOpen = false;
+        said = null;
         pending = null;
-        Write($"watch off: {why}");
+        if (why != null) Write($"watch off: {why}");
     }
 
     /// <summary>The allied-society quests in the journal (Quest sheet rows).</summary>
@@ -145,8 +182,11 @@ internal static class QuestWatch
                   + $"emotes [{string.Join(",", script.Emotes.Select(kv => $"{kv.Key}:{kv.Value.Command}"))}], carry {script.CarryStatus}; reading its objects through its event handler (IsActive, icon) twice a second");
         }
         if (QuestSteps.Snapshot(w.Script) is not { } s) return;
+        // The script wasn't asked (the game is busy): nothing to compare.
+        if (!s.ScriptRead) return;
+        w.Last = s;
         var id = row - 65536;
-        w.Memory.Observe(s.Signature(w.Script), now);
+        w.Memory.Observe(s.Signature(), now);
 
         var header = $"seq {s.Sequence} vars [{Convert.ToHexString(s.Variables)}] accepted as {s.AcceptJob}, now {s.Job}";
         if (header != w.Header) { w.Header = header; Write($"{id}: {header} in zone {s.Territory}"); }
@@ -159,12 +199,12 @@ internal static class QuestWatch
             Write($"{id}: todo {(s.Todos.Count == 0 ? "(none read)" : string.Join("; ", s.Todos.Select(t => $"#{t.Index} {(t.Checked ? "done" : "open")} args {t.Have}/{t.Needed} item {t.Item} \"{texts.GetValueOrDefault(t.Index, "")}\"")))}");
         }
 
-        var objects = string.Join("; ", s.Objects.OrderBy(o => o.BaseId).Select(o => $"{o.Kind} {o.BaseId} icon {o.Icon} {(o.Active ? "active" : "inactive")}{(o.Targetable ? "" : " untargetable")}"));
+        var objects = string.Join("; ", s.Objects.OrderBy(o => o.BaseId).Select(o => $"{o.Kind} {o.BaseId}/{o.Instance} icon {o.Icon} drawn {o.Drawn} {(o.Active ? "active" : "inactive")}{(o.Targetable ? "" : " untargetable")}"));
         if (objects != w.Objects)
         {
             w.Objects = objects;
             Write($"{id}: objects {(s.Objects.Count == 0 ? "(none loaded)" : string.Join("; ", s.Objects.OrderBy(o => o.BaseId).Select(o =>
-                $"{o.Kind} {o.BaseId} \"{o.Name}\" at {V(o.Position)} ({Vector3.Distance(o.Position, s.Player):0} y) icon {o.Icon} {(o.Active ? "active" : "inactive")}{(o.Targetable ? "" : " untargetable")}")))}");
+                $"{o.Kind} {o.BaseId}/{o.Instance} \"{o.Name}\" at {V(o.Position)} ({Vector3.Distance(o.Position, s.Player):0} y) icon {o.Icon} drawn {o.Drawn} {(o.Active ? "active" : "inactive")}{(o.Targetable ? "" : " untargetable")}")))}");
         }
 
         var markers = string.Join("; ", s.Markers.Select(k => $"zone {k.Territory} {V(k.Position)} r {k.Radius:0.#} icon {k.Icon} level {k.Level} data {k.DataId}"));
@@ -223,7 +263,8 @@ internal static class QuestWatch
 
     /// <summary>
     /// The player's own /say or emote while the watch is on: whether the line holds a watched quest's phrase (exactly,
-    /// or only ignoring case), how far the nearest of the quest's active objects is; never the line itself.
+    /// or only ignoring case) and what was targeted; never the line itself, and no other player's name. The quest is
+    /// read at the next look (<see cref="Said"/>), not from here.
     /// </summary>
     private static void OnChat(IHandleableChatMessage message)
     {
@@ -231,37 +272,56 @@ internal static class QuestWatch
         {
             if (!on || message.SourceKind != XivChatRelationKind.LocalPlayer) return;
             if (message.LogKind is not (XivChatType.Say or XivChatType.StandardEmote or XivChatType.CustomEmote)) return;
-            var me = Services.Objects.LocalPlayer?.Position ?? Vector3.Zero;
             var text = message.Message.TextValue;
-            var parts = new List<string>();
+            var parts = new List<(uint, string)>();
             foreach (var w in watched.Values)
             {
-                if (QuestSteps.Snapshot(w.Script) is not { } s) continue;
-                var nearest = StepRules.Live(w.Script, s, new StepMemory()).OrderBy(o => Vector3.Distance(o.Position, me)).FirstOrDefault();
-                var where = nearest != null ? $"{Vector3.Distance(nearest.Position, me):0.0} y from {nearest.Name} ({nearest.BaseId})" : "nothing active in view";
                 if (message.LogKind == XivChatType.Say)
                 {
                     var phrase = w.Script.Say.Values.FirstOrDefault();
                     if (phrase == null) continue;
                     var exact = text.Contains(phrase, StringComparison.Ordinal);
                     var loose = text.Contains(phrase, StringComparison.CurrentCultureIgnoreCase);
-                    parts.Add($"{w.Script.Quest - 65536}: holds the phrase {(exact ? "exactly" : loose ? "ignoring case only" : "no")}, {(text.Trim().Length > phrase.Length ? "with other words" : "alone")}, {where}");
+                    parts.Add((w.Script.Quest, $"holds the phrase {(exact ? "exactly" : loose ? "ignoring case only" : "no")}, {(text.Trim().Length > phrase.Length ? "with other words" : "alone")}"));
                 }
                 else if (w.Script.Emotes.Count > 0)
-                {
-                    var target = Services.Targets.Target is { } t ? $"{t.Name} ({t.BaseId})" : "none";
-                    parts.Add($"{w.Script.Quest - 65536}: {where}, target {target}");
-                }
+                    parts.Add((w.Script.Quest, $"target {TargetText()}"));
             }
             if (parts.Count == 0) return;
-            var what = message.LogKind == XivChatType.Say ? "said a line in /say" : "did an emote";
-            Write($"{what}: {string.Join("; ", parts)}");
-            pending = (DateTime.UtcNow, what, watched.ToDictionary(kv => kv.Key, kv => kv.Value.Memory.Signature));
+            said = (DateTime.UtcNow, message.LogKind == XivChatType.Say ? "said a line in /say" : "did an emote", parts,
+                watched.ToDictionary(kv => kv.Key, kv => kv.Value.Memory.Signature));
         }
         catch (Exception e)
         {
             Services.Log.Warning(e, "Quest watch chat");
         }
+    }
+
+    /// <summary>The player's target for the log: its kind and id, and its name only when it isn't a player.</summary>
+    private static string TargetText()
+    {
+        if (Services.Targets.Target is not { } t) return "none";
+        return t.ObjectKind == ObjectKind.Pc ? $"{t.ObjectKind} {t.BaseId}" : $"{t.ObjectKind} {t.BaseId} \"{t.Name}\"";
+    }
+
+    /// <summary>The /say or emote seen since the last look, with how far the nearest of each quest's active objects was then.</summary>
+    private static void Said()
+    {
+        if (said is not { } c) return;
+        said = null;
+        var lines = new List<string>();
+        foreach (var (quest, words) in c.Parts)
+        {
+            var where = "nothing read";
+            if (watched.TryGetValue(quest, out var w) && w.Last is { } s)
+            {
+                var nearest = StepRules.Live(w.Script, s, new StepMemory()).OrderBy(o => Vector3.Distance(o.Position, s.Player)).FirstOrDefault();
+                where = nearest != null ? $"{Vector3.Distance(nearest.Position, s.Player):0.0} y from {nearest.Name} ({nearest.BaseId})" : "nothing active in view";
+            }
+            lines.Add($"{quest - 65536}: {words}, {where}");
+        }
+        Write($"{c.What}: {string.Join("; ", lines)}");
+        pending = (c.At, c.What, c.Before);
     }
 
     /// <summary>Three seconds after the player's /say or emote: did any watched quest move on?</summary>

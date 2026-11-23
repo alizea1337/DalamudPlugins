@@ -9,6 +9,10 @@
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The plugin's own rule for which warps the trips may take. -->
+    <Compile Include="..\..\plugins\Provenance\src\Core\Tribes\PortalRoute.cs" Link="PortalRoute.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="Lumina"><HintPath>$(AppData)\XIVLauncher\addon\Hooks\dev\Lumina.dll</HintPath></Reference>
     <Reference Include="Lumina.Excel"><HintPath>$(AppData)\XIVLauncher\addon\Hooks\dev\Lumina.Excel.dll</HintPath></Reference>
   </ItemGroup>

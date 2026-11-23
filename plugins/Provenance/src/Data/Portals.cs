@@ -8,10 +8,11 @@ using Provenance.Core.Tribes;
 namespace Provenance.Data;
 
 /// <summary>
-/// The NPCs and objects that warp the character after a question, in the allied societies' zones: into sub-zones
-/// (Zirgorteh the Open-armed, Elysion) and back, and across a zone to parts only a portal reaches (A-4 Research,
-/// Hoper's Hold). From the shipped portals.json, built offline by <c>tools/QuestPortals</c> from the game's zone layout
-/// files, which the plugin doesn't read in game.
+/// The NPCs and objects that warp the character after a question, in the zones of the crafter and gatherer society
+/// dailies: into sub-zones (Zirgorteh the Open-armed, Elysion) and back, and across a zone to parts only a portal
+/// reaches (A-4 Research, Hoper's Hold). Only free warps open to everyone (<see cref="PortalRoute.Usable"/>): no ferry
+/// or airship that costs gil, no warp that shows only during a quest. From the shipped portals.json, built offline by
+/// <c>tools/QuestPortals</c> from the game's zone layout files, which the plugin doesn't read in game.
 /// </summary>
 internal static class Portals
 {

@@ -209,6 +209,9 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         Services.Framework.Update -= OnUpdate;
+        // The watch's chat listener first: nothing below may keep it attached to a plugin that's gone.
+        try { Integrations.QuestWatch.Dispose(); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the quest watch failed"); }
         Services.PluginInterface.UiBuilder.Draw -= windows.Draw;
         Services.PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         Services.PluginInterface.UiBuilder.OpenConfigUi -= OpenSettings;
@@ -228,8 +231,6 @@ public sealed class Plugin : IDalamudPlugin
         Plans.Dispose();
         UI.JobIcons.Dispose();
         fonts.Dispose();
-        try { Integrations.QuestWatch.Dispose(); }
-        catch (Exception e) { Services.Log.Error(e, "Stopping the quest watch failed"); }
         ECommons.ECommonsMain.Dispose();
     }
 }

@@ -254,6 +254,13 @@ internal sealed unsafe class Travel
                 if (DateTime.UtcNow < nextTry) return;
                 if (Interact.Menu() is { Count: > 0 } options)
                 {
+                    // A menu entry is a callback: never while the game has scene tasks pending.
+                    if (DeliveryWindow.SceneBusy)
+                    {
+                        if (DateTime.UtcNow > deadline) { Fail("Foundation's aetheryte stayed busy."); return; }
+                        nextTry = DateTime.UtcNow.AddSeconds(0.3);
+                        return;
+                    }
                     var name = FirmamentName;
                     var entry = options.FindIndex(e => e.Text.Contains(name, StringComparison.CurrentCultureIgnoreCase));
                     if (entry < 0)
@@ -305,6 +312,13 @@ internal sealed unsafe class Travel
                 listSince = default;
                 if (Interact.Menu() is { Count: > 0 } menu)
                 {
+                    // A menu entry is a callback: never while the game has scene tasks pending.
+                    if (DeliveryWindow.SceneBusy)
+                    {
+                        if (DateTime.UtcNow > deadline) { Fail($"The aethernet at {Teleporter.AethernetName(hopFrom)} stayed busy."); return; }
+                        nextTry = DateTime.UtcNow.AddSeconds(0.3);
+                        return;
+                    }
                     aethernetSaw = "a menu came up (" + string.Join(" / ", menu.Select(e => e.Text.Trim())) + "), but not the aethernet";
                     if (!ChooseAethernet(menu)) menu[0].Select();
                     nextTry = DateTime.UtcNow.AddSeconds(1);
@@ -347,14 +361,15 @@ internal sealed unsafe class Travel
                 Status = "Waiting for vnavmesh's map of this area";
                 if (Vnav.Ready)
                 {
-                    // A shard much closer to the target than walking: take the aethernet first.
-                    if (!hopped && player != null && Teleporter.AethernetHop(territory, player.Position, approx) is { } hop)
+                    // A shard much closer to the target than walking: take the aethernet first. Not while carrying
+                    // something on foot, or riding a quest mount: either is lost on the hop.
+                    if (!hopped && !OnFoot && !KeepMount && player != null && Teleporter.AethernetHop(territory, player.Position, approx) is { } hop)
                     {
                         hopped = true;
                         StartHop(territory, hop.From, hop.To);
                         return;
                     }
-                    if (!hopped && player != null && territory == Firmament && FirmamentHop(player.Position) is { } fh)
+                    if (!hopped && !OnFoot && !KeepMount && player != null && territory == Firmament && FirmamentHop(player.Position) is { } fh)
                     {
                         hopped = true;
                         StartFirmamentHop(fh.From, fh.To);
@@ -643,6 +658,16 @@ internal sealed unsafe class Travel
         if (Interact.IsOpen("TelepotTown")) { nextTry = DateTime.UtcNow.AddSeconds(0.3); return; }
         if (Interact.Menu() is { Count: > 0 } options)
         {
+            // A menu entry is a callback: never while the game has scene tasks pending (past the time limit: walk).
+            if (DeliveryWindow.SceneBusy)
+            {
+                if (DateTime.UtcNow <= deadline) { nextTry = DateTime.UtcNow.AddSeconds(0.3); return; }
+                Note($"{what}: the Firmament shard stayed busy; walking");
+                firmamentHop = false;
+                hopTo = 0;
+                Enter(State.Walking);
+                return;
+            }
             var name = PlaceText(firmamentTo);
             var entry = name.Length == 0 ? -1 : options.FindIndex(e => e.Text.Contains(name, StringComparison.CurrentCultureIgnoreCase));
             if (entry < 0)

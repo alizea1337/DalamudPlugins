@@ -92,6 +92,28 @@ public class PortalRouteTests
         Assert.Equal(2013072u, PortalRoute.First(UltimaThule, BaseOmicron, UltimaThule, leg.Portal.At, Portals, Teleports)!.Portal.Holder);
     }
 
+    private static readonly HashSet<uint> SocietyZones = new() { UltimaThule, Elysion, Mare, Urqopacha, Zirgorteh };
+
+    [Fact]
+    public void FreeWarpsInAndOutOfTheSocietyZonesAreKept()
+    {
+        Assert.True(PortalRoute.Usable(Urqopacha, Zirgorteh, 0, false, SocietyZones));
+        Assert.True(PortalRoute.Usable(Zirgorteh, Urqopacha, 0, false, SocietyZones));
+        // Into a society zone from elsewhere (the way back in).
+        Assert.True(PortalRoute.Usable(Tuliyollal, Urqopacha, 0, false, SocietyZones));
+    }
+
+    [Fact]
+    public void PaidQuestOnlyAndFarAwayWarpsAreLeftOut()
+    {
+        // A ferry or an airship costs gil: its question must never get a Yes.
+        Assert.False(PortalRoute.Usable(UltimaThule, UltimaThule, 80, false, SocietyZones));
+        // A warp that shows only during a story quest (Kholusia's "Return to the soft-faced bloke?").
+        Assert.False(PortalRoute.Usable(Mare, Mare, 0, true, SocietyZones));
+        // Nowhere near a society's dailies.
+        Assert.False(PortalRoute.Usable(129, 628, 0, false, SocietyZones));
+    }
+
     [Fact]
     public void APortalThatDidntWorkIsLeftOut()
     {

@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Provenance.Core.Tribes;
 using Provenance.Integrations;
@@ -33,8 +32,8 @@ internal sealed record StepOptions(bool PauseForCutscenes, bool LeaveOutSay);
 /// <param name="Product">The item to craft (its recipe for <paramref name="ClassJob"/>, the class the quest was accepted as).</param>
 /// <param name="Materials">The quest's materials item it's made from (0 when unknown).</param>
 /// <param name="Remaining">How many are still wanted.</param>
-/// <param name="RequiredStatus">A status the recipe needs (the Ixal facility access), 0 for none. Lost mid-run: the
-/// stepper leaves NeedsCraft to get it back.</param>
+/// <param name="RequiredStatus">A status the recipe needs (the Ixal facility access), 0 for none. Lost mid-run, or
+/// about to run out: the stepper leaves NeedsCraft to get it renewed.</param>
 /// <param name="RequiredEquip">An item to wear while crafting (the Ixal's Ehcatl wristgloves), 0 for none.</param>
 internal sealed record CraftNeed(uint Product, uint Materials, int Remaining, uint ClassJob, uint RequiredStatus, uint RequiredEquip);
 
@@ -46,18 +45,20 @@ internal sealed record CraftNeed(uint Product, uint Materials, int Remaining, ui
 internal sealed record GatherNeed(uint ItemId, int Remaining, uint PointBase, uint Territory, Vector3 Centre, float Radius, uint ClassJob);
 
 /// <summary>
-/// Runs one accepted allied-society quest from after it's accepted until it's reported: every tick it reads what the
-/// game shows, lets <see cref="StepRules"/> decide the step (talk, hand over, /say, an emote, a key item, the quest
-/// mount, an area, a portal, the report), travels there, does it once and waits to see it count. Crafting and gathering
-/// are the run's: the stepper says what's needed (<see cref="Craft"/>, <see cref="Gather"/>) and carries on when the
-/// run calls <see cref="Supplied"/>. Ticked on the framework thread.
+/// Runs one accepted allied-society quest from after it's accepted until it's reported: four times a second it reads
+/// what the game shows, lets <see cref="StepRules"/> decide the step (talk, hand over, /say, an emote, a key item, the
+/// quest mount, an area, a portal, the report), travels there, does it once and waits to see it count. Crafting and
+/// gathering are the run's: the stepper says what's needed (<see cref="Craft"/>, <see cref="Gather"/>), watches the item
+/// counts meanwhile, and carries on when the run calls <see cref="Supplied"/>. Ticked on the framework thread.
 /// </summary>
 /// <remarks>
-/// Safety, from the research: nothing that's an addon callback is sent while the game has scene tasks pending (only
-/// clicks on enabled buttons); a /say or an emote is sent once, and once more only after 15 seconds with nothing
-/// changing, then the step is the player's; Yes is answered only to questions on the game's own list (the
-/// high-quality hand-over, the trade confirmation, the warp the stepper is taking); the character doesn't move while a
-/// cast is under way; a menu is answered only when it's the quest's own question or its title.
+/// Safety, from the research: the quest's script is asked nothing while the game is busy or just after a zone change
+/// (<see cref="QuestSteps.Snapshot"/>); nothing that's an addon callback is sent while the game has scene tasks pending
+/// (only clicks on enabled buttons); a /say is sent once per step and an emote once more only after 15 seconds with
+/// nothing changing, both for the whole day (<see cref="PublicAttemptStore.Shared"/>), then the step is the player's;
+/// Yes is answered only to questions on the game's own list (the high-quality hand-over, the trade confirmation, the
+/// warp the stepper is taking); the character doesn't move while a cast is under way; a menu is answered only when it's
+/// the quest's own question or its title; every wait for the game is bounded (<see cref="BlockWatch"/>).
 /// </remarks>
 internal sealed unsafe class QuestStepper
 {
@@ -67,33 +68,48 @@ internal sealed unsafe class QuestStepper
     private static readonly TimeSpan SettleTalk = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan SettlePublic = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan LookAround = TimeSpan.FromSeconds(3);
+    /// <summary>How often the quest is looked at (its script asked): four times a second.</summary>
+    private static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(0.25);
     /// <summary>The hand-over window open this long without handing over: close it.</summary>
     private static readonly TimeSpan TradePatience = TimeSpan.FromSeconds(15);
+    /// <summary>Times a hand-over slot's item picker is asked for before the window is given up on.</summary>
+    private const int TradeOpens = 3;
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
     private readonly QuestTravel travel = new();
+    private readonly BlockWatch blocked = new();
 
     private QuestScript? script;
     private StepOptions options = new(false, false);
-    private StepMemory memory = new();
+    private StepMemory memory = new() { Public = PublicAttemptStore.Shared };
     private Phase phase;
     private StepPlan? plan;
     private string lastPlan = "";
     private DateTime waitUntil;
     private DateTime settleUntil;
     private DateTime nextLook;
+    private DateTime nextSnap;
+    private DateTime nextBlockCheck;
     private int tries;
     private bool faced;
-    private ulong lastTalked;
+    private ulong lastTalkedKey;
     private uint lastTalkedBase;
     private bool wasRiding;
+    private bool wasCarrying;
+    private bool sawEvent;
     private int tradeSlot;
+    private int tradeOpenSlot;
+    private int tradeOpened;
     private DateTime tradeSince;
     private DateTime resultSince;
+    private bool resultNoted;
     private bool rewardSent;
     private bool cutscenePaused;
     private bool cutsceneNoted;
+    /// <summary>While crafting or gathering: the item, and how many of it the bags should hold when it's enough.</summary>
+    private uint needItem;
+    private int needTarget;
 
     public QuestStepper(Plugin plugin, Action<string, bool> log)
     {
@@ -154,7 +170,10 @@ internal sealed unsafe class QuestStepper
         Note("paused");
     }
 
-    /// <summary>Carries on after a pause or after the player did a step (a waiting step is decided afresh).</summary>
+    /// <summary>
+    /// Carries on after a pause or after the player did a step (a waiting step is decided afresh; the hand-over and
+    /// reward windows and the busy watch start their clocks again).
+    /// </summary>
     public void Resume()
     {
         if (State is StepperState.Idle or StepperState.Done or StepperState.Failed) return;
@@ -168,6 +187,10 @@ internal sealed unsafe class QuestStepper
         memory.Touch(DateTime.UtcNow);
         phase = Phase.Decide;
         lastPlan = "";
+        tradeSince = default;
+        resultSince = default;
+        blocked.Reset();
+        nextSnap = default;
         Note("resumed");
     }
 
@@ -184,12 +207,26 @@ internal sealed unsafe class QuestStepper
     {
         if (State is not (StepperState.NeedsCraft or StepperState.NeedsGather)) return;
         Note($"supplied ({State})");
+        BackToWork();
+    }
+
+    /// <summary>The run won't craft now (the facility access runs out soon): decide again (renew it first).</summary>
+    public void Recheck(string why)
+    {
+        if (State is not (StepperState.NeedsCraft or StepperState.NeedsGather)) return;
+        Note($"deciding again ({State}): {why}");
+        BackToWork();
+    }
+
+    private void BackToWork()
+    {
         Craft = null;
         Gather = null;
         State = StepperState.Working;
         memory.Touch(DateTime.UtcNow);
         phase = Phase.Decide;
         lastPlan = "";
+        nextSnap = default;
     }
 
     private void Reset()
@@ -201,20 +238,28 @@ internal sealed unsafe class QuestStepper
         Gather = null;
         Paused = false;
         script = null;
-        memory = new StepMemory();
+        memory = new StepMemory { Public = PublicAttemptStore.Shared };
         phase = Phase.Decide;
         plan = null;
         lastPlan = "";
         waitUntil = default;
+        nextSnap = default;
+        nextBlockCheck = default;
+        blocked.Reset();
         tries = 0;
-        lastTalked = 0;
+        lastTalkedKey = 0;
         lastTalkedBase = 0;
         wasRiding = false;
+        wasCarrying = false;
+        sawEvent = false;
         tradeSince = default;
         resultSince = default;
+        resultNoted = false;
         rewardSent = false;
         cutscenePaused = false;
         cutsceneNoted = false;
+        needItem = 0;
+        needTarget = 0;
     }
 
     // ------------------------------------------------------------------ the tick
@@ -224,44 +269,75 @@ internal sealed unsafe class QuestStepper
         if (script == null || Paused || State is StepperState.Idle or StepperState.Done or StepperState.Failed or StepperState.WaitingForUser) return;
         if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null) return;
         var now = DateTime.UtcNow;
-        if (now < waitUntil) return;
 
+        // While the run crafts or gathers, only the item counts (and the facility access) are looked at.
         if (State is StepperState.NeedsCraft or StepperState.NeedsGather)
         {
-            if (QuestSteps.Snapshot(script) is { } s) TickNeeds(s, now);
+            if (now < nextSnap) return;
+            nextSnap = now + LookEvery;
+            TickNeeds(now);
             return;
         }
 
+        // The game busy (an event, a cutscene, a cast, scene tasks) for long with nothing about the quest changing.
+        if (now >= nextBlockCheck)
+        {
+            nextBlockCheck = now + LookEvery;
+            if (blocked.Feed(QuestSteps.Busy, QuestSteps.Progress(script.Quest), now))
+            {
+                AskUser($"The game has been busy (an event, a cutscene or a cast) for over {BlockWatch.Limit.TotalSeconds:0} seconds with nothing changing; finish it yourself, then resume.");
+                return;
+            }
+        }
+
+        if (now < waitUntil) return;
         if (HandleWindows(now)) return;
 
-        // During a zone change only the trip goes on (it watches the loading); the quest is read again after it.
-        if (QuestSteps.Loading)
-        {
-            if (phase == Phase.Travel) travel.Tick();
-            return;
-        }
+        // The trip goes on every frame (it watches the loading too); the quest is looked at four times a second.
+        if (phase == Phase.Travel && !Services.Condition[ConditionFlag.Casting] && !Services.Condition[ConditionFlag.Casting87]) travel.Tick();
+        if (QuestSteps.Loading || now < nextSnap) return;
+        nextSnap = now + LookEvery;
         if (QuestSteps.Snapshot(script) is not { } snap) return;
-        if (memory.Observe(snap.Signature(script), now))
+        if (snap.ScriptRead && memory.Observe(snap.Signature(), now))
         {
             Note($"progress: {memory.Signature}");
             if (phase == Phase.Settle) phase = Phase.Decide;
         }
-        var riding = script.Mount is { } qm && snap.Mounted && snap.Mount == qm.Mount;
-        if (riding && !wasRiding && lastTalkedBase != 0)
-        {
-            memory.MountGiver = lastTalkedBase;
-            Note($"on the quest mount {snap.Mount} (from {lastTalkedBase}); flying allowed {script.Mount!.CanFly}");
-        }
-        wasRiding = riding;
+        if (phase == Phase.Settle && InEvent) sawEvent = true;
+        NoteHolds(snap);
 
         switch (phase)
         {
             case Phase.Travel: TickTravel(snap, now); return;
-            case Phase.Settle: TickSettle(now); return;
+            case Phase.Settle: TickSettle(snap, now); return;
             case Phase.SwitchJob: TickSwitchJob(snap); return;
             case Phase.Dismount: TickDismount(snap); return;
             default: Decide(snap, now); return;
         }
+    }
+
+    /// <summary>Getting on the quest mount, or picking something up to carry: counted (the rules cap getting them back), with who gave it.</summary>
+    private void NoteHolds(StepSnapshot snap)
+    {
+        var riding = script!.Mount is { } qm && snap.Mounted && snap.Mount == qm.Mount;
+        if (riding && !wasRiding)
+        {
+            memory.Mounts++;
+            if (lastTalkedBase != 0) memory.MountGiver = lastTalkedBase;
+            Note($"on the quest mount {snap.Mount} (from {lastTalkedBase}, time {memory.Mounts}); flying allowed {script.Mount!.CanFly}");
+        }
+        else if (!riding && wasRiding) Note($"off the quest mount at sequence {snap.Sequence}");
+        wasRiding = riding;
+
+        var carrying = script.CarryStatus != 0 && snap.Statuses.Contains(script.CarryStatus);
+        if (carrying && !wasCarrying)
+        {
+            memory.Pickups++;
+            if (lastTalkedBase != 0) memory.CarryGiver = lastTalkedBase;
+            Note($"carrying (status {script.CarryStatus}, from {lastTalkedBase}, time {memory.Pickups})");
+        }
+        else if (!carrying && wasCarrying) Note($"no longer carrying at sequence {snap.Sequence}");
+        wasCarrying = carrying;
     }
 
     private void Decide(StepSnapshot snap, DateTime now)
@@ -295,6 +371,8 @@ internal sealed unsafe class QuestStepper
                 return;
             case StepKind.Craft:
                 Craft = new CraftNeed(next.Id, next.Other, next.Count, snap.AcceptJob, script!.CraftStatus, script.CraftEquip);
+                needItem = next.Id;
+                needTarget = snap.Count(next.Id) + next.Count;
                 State = StepperState.NeedsCraft;
                 Status = $"Crafting {next.Count}x {QuestSteps.ItemName(next.Id)}";
                 Note($"needs craft: {Craft}");
@@ -312,6 +390,8 @@ internal sealed unsafe class QuestStepper
                 }
                 var centre = next.Spot ?? (place is { } pl ? new Vector3(pl.Centre.X, snap.Player.Y, pl.Centre.Y) : snap.Player);
                 Gather = new GatherNeed(next.Id, next.Count, place?.Base ?? 0, snap.Territory, centre, next.Spot != null ? next.Within : place?.Radius ?? 0, snap.AcceptJob);
+                needItem = next.Id;
+                needTarget = snap.Count(next.Id) + next.Count;
                 State = StepperState.NeedsGather;
                 Status = $"Gathering {next.Count}x {QuestSteps.ItemName(next.Id)}";
                 Note($"needs gather: {Gather}");
@@ -339,19 +419,16 @@ internal sealed unsafe class QuestStepper
         travel.OnFoot = p.OnFoot;
         travel.NoFly = p.NoFly;
         travel.KeepMount = script!.Mount is { } m && snap.Mounted && snap.Mount == m.Mount;
-        var targetId = p.Target?.Id ?? 0;
-        var targetBase = p.Target?.BaseId ?? 0;
-        travel.GoTo(Describe(p), zone, to, p.Within, targetId == 0 ? null : () => Live(targetId, targetBase)?.Position);
+        var target = p.Target;
+        travel.GoTo(Describe(p), zone, to, p.Within, target == null ? null : () => Live(target)?.Position);
         Status = Capital(Describe(p));
         phase = Phase.Travel;
         nextLook = DateTime.UtcNow.AddSeconds(2);
     }
 
+    /// <summary>On the way (the trip itself is ticked every frame in <see cref="Tick"/>).</summary>
     private void TickTravel(StepSnapshot snap, DateTime now)
     {
-        // Not on the move while a cast is under way (it would be cancelled).
-        if (Services.Condition[ConditionFlag.Casting] || Services.Condition[ConditionFlag.Casting87]) return;
-        travel.Tick();
         Status = travel.Status;
         var p = plan!;
         if (p.Kind != StepKind.Go && p.Target != null && !travel.AtPortal && snap.Territory == (p.Territory != 0 ? p.Territory : snap.Territory) && InReach(p, snap.Player))
@@ -392,6 +469,7 @@ internal sealed unsafe class QuestStepper
         plan = p;
         phase = Phase.Settle;
         settleUntil = now + SettleTalk;
+        sawEvent = false;
         if (p.Kind == StepKind.Go)
         {
             Status = "Looking around " + Describe(p);
@@ -410,11 +488,11 @@ internal sealed unsafe class QuestStepper
             return;
         }
 
-        var target = p.Target != null ? Live(p.Target.Id, p.Target.BaseId) : null;
+        var target = p.Target != null ? Live(p.Target) : null;
         if (p.Target != null && target == null)
         {
             Note($"{p.Target.Name} ({p.Target.BaseId}) isn't there any more");
-            memory.Tried.Add(p.Target.Id);
+            memory.Tried.Add(p.Target.Key);
             phase = Phase.Decide;
             return;
         }
@@ -423,7 +501,7 @@ internal sealed unsafe class QuestStepper
         {
             case StepKind.Talk:
                 Status = $"Talking to {target!.Name.TextValue}";
-                lastTalked = target.GameObjectId;
+                lastTalkedKey = p.Target!.Key;
                 lastTalkedBase = target.BaseId;
                 if (!QuestSteps.Talk(target, travels: script!.Territories.Count > 0)) Note($"talking to {target.Name.TextValue} didn't start");
                 memory.Note(p.Key, now);
@@ -431,24 +509,28 @@ internal sealed unsafe class QuestStepper
                 return;
 
             case StepKind.Say:
+            {
+                // Counted before it's sent: whatever happens next, it isn't sent twice.
+                var said = memory.Public.Note(p.Key, now).Count;
                 if (!QuestSteps.Say(p.Text!)) { AskUser($"Couldn't say “{p.Text}”; say it yourself, then resume."); return; }
-                memory.Note(p.Key, now, isPublic: true);
                 settleUntil = now + SettlePublic;
                 Status = $"Said “{p.Text}”";
-                var said = memory.PublicAttempts[p.Key].Count;
-                Note($"say \"{p.Text}\" near {p.Target?.Name ?? "the spot"} ({(target != null ? Interact.Distance(target).ToString("0.0") : "?")} yalms), attempt {said} of 2");
-                Log($"Said “{p.Text}”{(target != null ? $" to {target.Name.TextValue}" : "")}{(said > 1 ? " again" : "")}.", false);
+                Note($"say \"{p.Text}\" near {p.Target?.Name ?? "the spot"} ({(target != null ? Interact.Distance(target).ToString("0.0") : "?")} yalms), attempt {said} of {StepRules.PublicTries(StepKind.Say)}, key {p.Key}");
+                Log($"Said “{p.Text}”{(target != null ? $" to {target.Name.TextValue}" : "")}.", false);
                 return;
+            }
 
             case StepKind.Emote:
-                if (target == null || !QuestSteps.Emote(target, p.Text!)) { AskUser($"Couldn't do {p.Text}; do it yourself at {p.Target?.Name}, then resume."); return; }
-                memory.Note(p.Key, now, isPublic: true);
+            {
+                if (target == null) { AskUser($"Couldn't do {p.Text}; do it yourself at {p.Target?.Name}, then resume."); return; }
+                var emoted = memory.Public.Note(p.Key, now).Count;
+                if (!QuestSteps.Emote(target, p.Text!)) { AskUser($"Couldn't do {p.Text}; do it yourself at {p.Target?.Name}, then resume."); return; }
                 settleUntil = now + SettlePublic;
                 Status = $"{p.Text} at {target.Name.TextValue}";
-                var emoted = memory.PublicAttempts[p.Key].Count;
-                Note($"emote {p.Text} ({p.Id}) at {target.Name.TextValue} ({target.BaseId}) {Interact.Distance(target):0.0} yalms away, attempt {emoted} of 2");
+                Note($"emote {p.Text} ({p.Id}) at {target.Name.TextValue} ({target.BaseId}) {Interact.Distance(target):0.0} yalms away, attempt {emoted} of {StepRules.PublicTries(StepKind.Emote)}, key {p.Key}");
                 Log($"Did {p.Text} at {target.Name.TextValue}{(emoted > 1 ? " again" : "")}.", false);
                 return;
+            }
 
             case StepKind.UseItem:
             {
@@ -495,17 +577,18 @@ internal sealed unsafe class QuestStepper
              + $"{(p.Face ? $", facing {(target != null && QuestSteps.Facing(target.Position) ? "yes" : "no")}" : "")}: {(used ? "sent" : "refused")}, status {why}, try {memory.Count(p.Key)}");
     }
 
-    private void TickSettle(DateTime now)
+    private void TickSettle(StepSnapshot snap, DateTime now)
     {
         var p = plan!;
         if (pendingFire)
         {
-            Fire(p, p.Target != null ? Live(p.Target.Id, p.Target.BaseId) : null, now);
+            Fire(p, p.Target != null ? Live(p.Target) : null, now);
             return;
         }
-        // A cast, an event or its talk is still playing out: the wait starts after it.
+        // A cast, an event or its talk is still playing out: the wait starts after it (the busy watch bounds it).
         if (QuestSteps.Busy)
         {
+            if (InEvent) sawEvent = true;
             var after = now.AddSeconds(1.5);
             if (settleUntil < after) settleUntil = after;
             return;
@@ -516,9 +599,15 @@ internal sealed unsafe class QuestStepper
             if (p.Level != 0) memory.Looked.Add(p.Level);
             Note($"looked around {Describe(p)}: nothing to do there yet");
         }
+        else if (p.Kind == StepKind.Talk && p.Target is { Kind: StepObjectKind.Object } decoy && sawEvent)
+        {
+            // An object whose scene played without moving the quest: "not this one". Not tried again on these lines.
+            memory.Decoy(StepRules.LineKey(script!, snap), decoy.Key);
+            Note($"{decoy.Name} ({decoy.BaseId}) played its scene without anything changing: a decoy on these lines");
+        }
         else if (!p.Public && p.Target != null && memory.Count(p.Key) >= StepRules.InteractTries)
         {
-            memory.Tried.Add(p.Target.Id);
+            memory.Tried.Add(p.Target.Key);
             Note($"{p.Kind} on {p.Target.Name} ({p.Target.BaseId}) {StepRules.InteractTries} times without anything changing; trying something else");
         }
         phase = Phase.Decide;
@@ -537,6 +626,7 @@ internal sealed unsafe class QuestStepper
         Wait(2);
     }
 
+    /// <summary>Off the quest mount at the report (the rules ask the player before then); a teleport drops it when getting off doesn't, once per quest.</summary>
     private void TickDismount(StepSnapshot snap)
     {
         if (!snap.Mounted) { phase = Phase.Decide; Wait(0.5); return; }
@@ -549,9 +639,11 @@ internal sealed unsafe class QuestStepper
             Wait(2);
             return;
         }
-        // The game didn't let go of the quest mount: a teleport drops it (as other tools do).
-        if (tries == 4 && Teleporter.NearestTo(snap.Territory, snap.Player) is { } dest && Teleporter.Teleport(dest) == null)
+        // The game didn't let go of the quest mount: a teleport drops it (as other tools do), once per quest.
+        if (tries == 4 && memory.DropTeleports < StepRules.MaxDropTeleports
+            && Teleporter.NearestTo(snap.Territory, snap.Player) is { } dest && Teleporter.Teleport(dest) == null)
         {
+            memory.DropTeleports++;
             Note($"the quest mount stays; teleporting to {dest.Name} to drop it");
             MoveIntent.Expect(40, "dropping the quest mount");
             Status = "Teleporting to drop the quest mount";
@@ -562,35 +654,32 @@ internal sealed unsafe class QuestStepper
         AskUser("Couldn't get off the quest mount; get off (or teleport), then resume.");
     }
 
-    /// <summary>While the run crafts or gathers: back to work once enough are in the bags, or the facility access is lost.</summary>
-    private void TickNeeds(StepSnapshot snap, DateTime now)
+    /// <summary>
+    /// While the run crafts or gathers: back to work once enough are in the bags, or when the facility access is gone
+    /// or about to run out (the run then stops after the item under way). Only item counts and statuses are read: the
+    /// quest's script isn't asked anything while crafting or gathering.
+    /// </summary>
+    private void TickNeeds(DateTime now)
     {
         memory.Touch(now);
-        if (State == StepperState.NeedsCraft)
+        var remaining = Math.Max(0, needTarget - QuestSteps.ItemCount(needItem));
+        if (remaining <= 0)
         {
-            var c = StepRules.Craft(script!, snap);
-            if (c == null || c.Count <= 0)
-            {
-                Note("enough crafted");
-                Supplied();
-                return;
-            }
-            if (Craft != null && Craft.Remaining != c.Count) Craft = Craft with { Remaining = c.Count };
-            if (script!.CraftStatus != 0 && !snap.Statuses.Contains(script.CraftStatus) && !GameState.InCraftingStance)
-            {
-                Note($"the crafting status {script.CraftStatus} is gone; getting it back");
-                Supplied();
-            }
-            return;
-        }
-        var g = StepRules.Gather(script!, snap, memory);
-        if (g == null || g.Count <= 0)
-        {
-            Note("enough gathered");
+            Note(State == StepperState.NeedsCraft ? "enough crafted" : "enough gathered");
             Supplied();
             return;
         }
-        if (Gather != null && Gather.Remaining != g.Count) Gather = Gather with { Remaining = g.Count };
+        if (State == StepperState.NeedsCraft)
+        {
+            if (Craft != null && Craft.Remaining != remaining) Craft = Craft with { Remaining = remaining };
+            if (script!.CraftStatus != 0 && !QuestSteps.StatusLasts(script.CraftStatus, StepRules.StatusRenewBelow))
+            {
+                Note($"the crafting status {script.CraftStatus} is gone or runs out within {StepRules.StatusRenewBelow.TotalSeconds:0} seconds; renewing it");
+                Supplied();
+            }
+            return;
+        }
+        if (Gather != null && Gather.Remaining != remaining) Gather = Gather with { Remaining = remaining };
     }
 
     // ------------------------------------------------------------------ windows
@@ -615,6 +704,12 @@ internal sealed unsafe class QuestStepper
                 }
                 return true;
             }
+            // A choice inside the cutscene: the player's (its entries aren't read).
+            if (Interact.IsOpen("CutSceneSelectString"))
+            {
+                AskUser("The quest's cutscene asks you to choose; choose yourself, then resume.");
+                return true;
+            }
             if (QuestSteps.Menu() is { } prompt && !DeliveryWindow.SceneBusy
                 && StepRules.ChooseEntry(prompt.Prompt, prompt.Entries, script!, memory, QuestSteps.SkipQuestions) == 0
                 && QuestSteps.SkipQuestions.Any(q => StepRules.Normal(q).Equals(StepRules.Normal(prompt.Prompt), StringComparison.CurrentCultureIgnoreCase)))
@@ -628,8 +723,18 @@ internal sealed unsafe class QuestStepper
         }
         cutsceneNoted = false;
 
-        // On the way, the windows are the trip's: an aetheryte's menu, the aethernet, a portal's question.
-        if (phase == Phase.Travel) return false;
+        if (phase == Phase.Travel)
+        {
+            // On the way the windows are the trip's (an aetheryte's menu, the aethernet, a portal's question), except a
+            // quest event that starts on the way (an event range walked into): stop and let its talk play out, then
+            // plan again.
+            if (travel.AtPortal || !(Services.Condition[ConditionFlag.OccupiedInQuestEvent] || Interact.IsOpen("Talk"))) return false;
+            Note("a quest event started on the way; stopping to let it play out");
+            travel.Cancel();
+            Vnav.Stop();
+            phase = Phase.Decide;
+            lastPlan = "";
+        }
 
         if (Interact.SkipTalk()) { Wait(0.2); return true; }
 
@@ -649,7 +754,7 @@ internal sealed unsafe class QuestStepper
         {
             // Another quest's offer (talking to a giver can bring one up): not the run's to take.
             Note("a quest offer opened; declining it");
-            QuestSteps.Decline();
+            if (!QuestSteps.Decline()) { AskUser("A quest offer came up that can't be declined now; decline it yourself, then resume."); return true; }
             Wait(1);
             return true;
         }
@@ -658,7 +763,19 @@ internal sealed unsafe class QuestStepper
         {
             if (resultSince == default) resultSince = now;
             Status = "Completing " + script!.Name;
-            if (QuestSteps.Complete(script.OptionalRewards, ref rewardSent, out var how))
+            var owner = QuestSteps.ResultFor(script, out var shown);
+            if (owner == QuestSteps.ResultOwner.Other)
+            {
+                resultSince = default;
+                AskUser($"The reward window is for another quest (“{shown}”); complete it yourself, then resume.");
+                return true;
+            }
+            if (owner == QuestSteps.ResultOwner.Unknown && !resultNoted)
+            {
+                resultNoted = true;
+                Note($"reward window: \"{script.Name}\" isn't among its texts; only its Complete button is pressed (no reward is picked)");
+            }
+            if (QuestSteps.Complete(script.OptionalRewards, owner == QuestSteps.ResultOwner.This, ref rewardSent, out var how))
             {
                 Note($"completed in the reward window ({how})");
                 Log($"Reported {script.Name}{(how.StartsWith("reward") ? $" and took {QuestSteps.ItemName(script.OptionalRewards[0])}" : "")}.", false);
@@ -678,8 +795,20 @@ internal sealed unsafe class QuestStepper
 
         if (QuestSteps.TradeOpen)
         {
-            if (tradeSince == default) { tradeSince = now; tradeSlot = 0; }
+            if (tradeSince == default)
+            {
+                tradeSince = now;
+                tradeSlot = 0;
+                tradeOpenSlot = -1;
+                tradeOpened = 0;
+            }
             Status = "Handing over";
+            // However the window behaves, it gets this long.
+            if (now - tradeSince > TradePatience)
+            {
+                CloseTrade("[!] hand-over window didn't take the items in time; closing it");
+                return true;
+            }
             var step = QuestSteps.Trade(ref tradeSlot, out var detail);
             switch (step)
             {
@@ -689,25 +818,29 @@ internal sealed unsafe class QuestStepper
                     tradeSince = default;
                     Wait(1);
                     return true;
-                case QuestSteps.TradeStep.Picked or QuestSteps.TradeStep.Opened:
+                case QuestSteps.TradeStep.Opened:
+                    if (tradeSlot == tradeOpenSlot) tradeOpened++;
+                    else
+                    {
+                        tradeOpenSlot = tradeSlot;
+                        tradeOpened = 1;
+                    }
+                    if (tradeOpened > TradeOpens)
+                    {
+                        CloseTrade($"[!] hand-over: slot {tradeSlot + 1}'s item picker didn't open after {TradeOpens} tries; closing the window");
+                        return true;
+                    }
+                    Note("hand-over: " + detail);
+                    Wait(0.5);
+                    return true;
+                case QuestSteps.TradeStep.Picked:
                     Note("hand-over: " + detail);
                     Wait(0.5);
                     return true;
                 case QuestSteps.TradeStep.Missing:
-                    Note("[!] hand-over: " + detail);
-                    QuestSteps.CancelTrade();
-                    if (lastTalked != 0) memory.Tried.Add(lastTalked);
-                    tradeSince = default;
-                    Wait(1);
+                    CloseTrade("[!] hand-over: " + detail);
                     return true;
                 default:
-                    if (now - tradeSince > TradePatience)
-                    {
-                        Note("[!] hand-over window didn't take the items; closing it");
-                        QuestSteps.CancelTrade();
-                        if (lastTalked != 0) memory.Tried.Add(lastTalked);
-                        tradeSince = default;
-                    }
                     Wait(0.3);
                     return true;
             }
@@ -716,6 +849,7 @@ internal sealed unsafe class QuestStepper
 
         if (QuestSteps.Menu() is { } menu)
         {
+            // Scene tasks pending: wait (the busy watch bounds it).
             if (DeliveryWindow.SceneBusy) { Wait(0.2); return true; }
             var pick = StepRules.ChooseEntry(menu.Prompt, menu.Entries, script!, memory, QuestSteps.SkipQuestions);
             if (pick < 0)
@@ -733,7 +867,27 @@ internal sealed unsafe class QuestStepper
         return false;
     }
 
+    /// <summary>Gives up on the hand-over: its Cancel button; whoever opened it counts as tried. The player's when it won't close.</summary>
+    private void CloseTrade(string why)
+    {
+        Note(why);
+        tradeSince = default;
+        if (lastTalkedKey != 0) memory.Tried.Add(lastTalkedKey);
+        if (Interact.IsOpen("ContextIconMenu")) Interact.Close("ContextIconMenu");
+        if (!QuestSteps.CancelTrade())
+        {
+            AskUser("The hand-over window didn't take the quest's items and can't be closed now; close it yourself, then resume.");
+            return;
+        }
+        Wait(1);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>An event (an object's or an NPC's scene) or its cast is playing.</summary>
+    private static bool InEvent
+        => Services.Condition[ConditionFlag.OccupiedInEvent] || Services.Condition[ConditionFlag.OccupiedInQuestEvent]
+           || Services.Condition[ConditionFlag.Casting] || Services.Condition[ConditionFlag.Casting87];
 
     /// <summary>The target is close enough to act on.</summary>
     private static bool InReach(StepPlan p, Vector3 me)
@@ -750,12 +904,19 @@ internal sealed unsafe class QuestStepper
         };
     }
 
-    /// <summary>The quest's object as loaded now: by its id, else (it was reloaded) the nearest with its base id.</summary>
-    private static IGameObject? Live(ulong id, uint baseId)
+    /// <summary>
+    /// The quest's object as loaded now: by its id; when it was loaded again (a new id), the same placement in the
+    /// zone's layout, or (one without a placement) the same NPC or object close to where it was. Never another one of
+    /// the same kind elsewhere.
+    /// </summary>
+    private static IGameObject? Live(StepObject t)
     {
-        if (QuestSteps.Find(id) is { } o && o.BaseId == baseId) return o;
-        return Interact.Nearest(ObjectKind.EventNpc, b => b == baseId) ?? Interact.Nearest(ObjectKind.EventObj, b => b == baseId)
-               ?? Interact.Nearest(ObjectKind.BattleNpc, b => b == baseId);
+        if (QuestSteps.Find(t.Id) is { } o && o.BaseId == t.BaseId && (t.Instance == 0 || QuestSteps.Instance(o) == t.Instance)) return o;
+        return Services.Objects
+            .Where(x => x.BaseId == t.BaseId && x.IsTargetable
+                        && (t.Instance != 0 ? QuestSteps.Instance(x) == t.Instance : Vector3.Distance(x.Position, t.Position) <= 10f))
+            .OrderBy(x => Vector3.DistanceSquared(x.Position, t.Position))
+            .FirstOrDefault();
     }
 
     private static string Describe(StepPlan p) => p.Kind switch
@@ -781,6 +942,7 @@ internal sealed unsafe class QuestStepper
         Problem = why;
         Status = "Waiting for you: " + why;
         phase = Phase.Decide;
+        blocked.Reset();
         Note("[!] waiting for the player: " + why);
         Log(why, true);
     }

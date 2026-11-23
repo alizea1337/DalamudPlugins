@@ -163,6 +163,13 @@ internal sealed class QuestTravel
             Plan();
             return;
         }
+        // However the portal's windows behave (a menu while scene tasks are pending, a game that stays busy), it gets
+        // this long.
+        if (DateTime.UtcNow > deadline)
+        {
+            GiveUpOnPortal(p, "didn't take the character in time");
+            return;
+        }
         if (Interact.SkipTalk()) { nextTry = DateTime.UtcNow.AddSeconds(0.5); return; }
         if (QuestSteps.Question() is { } question)
         {
@@ -191,16 +198,22 @@ internal sealed class QuestTravel
             return;
         }
         if (DateTime.UtcNow < nextTry || QuestSteps.Busy) return;
-        if (++tries > PortalTries || DateTime.UtcNow > deadline)
+        if (++tries > PortalTries)
         {
-            Note($"[!] {what}: the portal {p.Holder} didn't take the character; trying another way");
-            broken.Add((p.Holder, p.Warp));
-            Plan();
+            GiveUpOnPortal(p, "didn't take the character");
             return;
         }
         if (Holder(p) is not { } obj) { nextTry = DateTime.UtcNow.AddSeconds(1); return; }
         Interact.With(obj, travels: true);
         nextTry = DateTime.UtcNow.AddSeconds(3);
+    }
+
+    /// <summary>The portal doesn't work this trip: another way (or, with none, the ordinary trip, which says why it can't).</summary>
+    private void GiveUpOnPortal(Portal p, string why)
+    {
+        Note($"[!] {what}: the portal {p.Holder} {why}; trying another way");
+        broken.Add((p.Holder, p.Warp));
+        Plan();
     }
 
     private static Dalamud.Game.ClientState.Objects.Types.IGameObject? Holder(Portal p)
