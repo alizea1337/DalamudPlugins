@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- New: **Custom Deliveries** (Expeditions), the first step: where you stand, no deliveries made yet.\n  - The week: deliveries left of the 12, when they reset, and this week's bonus requests.\n  - Every client: their level (1 to 5) with progress, deliveries made this week, and what's in the way:\n    locked (with the quest that unlocks them), a story quest first, a class level too low, or done for the\n    week.\n  - Open a client for this week's three requests (crafted, gathered, fish or spearfishing), their\n    collectability tiers and what they pay, and for what's ahead: deliveries to the next level, the items\n    for reaching it, story quests still to do and their rewards, and the two achievement series.\n  - At the top level the requests change weekly; they're worked out from the week's data the way the game\n    does it. Opening a client's delivery window in the game checks them: the client then shows \"Matches\n    the game\", or \"Differs from the game\" (please send a bug report then).\n  - The game sends the delivery data once its client list (Timers, Custom Deliveries) is opened or a\n    client talked to; the page has a button that opens the list.\n  - The bug report has a Custom deliveries section.\r\n",
+    "Changelog": "- **Custom Deliveries, step 2: the delivery run** (crafted and gathered requests; fish come later).\n  - Start plans the week's deliveries, makes what isn't in your bags yet (the components bought from the\n    vendor next to the client, crafted at the tier the goal wants, or gathered as collectables), then\n    takes one tour through the clients and hands everything in. A rank-up changes a client's requests,\n    so the run plans again afterwards while deliveries are left (up to three rounds).\n  - Goal: Rank up (the clients below the top level first, the lowest first, the lowest tier), Scrips or\n    Gil (the best tier your gear reliably reaches). Picked for you until you choose: Rank up while a\n    client is below the top level, then Scrips. Bonus requests always come first.\n  - Options: prefer crafting and gathering; deliver anyway while ranking up (past the scrip cap); pause\n    for rank-up cutscenes (otherwise the run carries on after them); food and medicine for a higher tier.\n    Each client has \"Include in the run\" when opened; left-out clients say so.\n  - This week's plan shows on the page and on the Plan page (with no order): what goes to whom, made by\n    which class, at which collectability, and who gets nothing this time and why.\n  - Pause, Resume and Stop in the action bar and the compact strip; the Tripwire, /prov stop and the bug\n    report cover the run, and YesAlready is asked to stand aside while handing in.\n  - The Firmament: Provenance now travels there through Foundation's aetheryte.\n  - Locked clients no longer show a level and deliveries.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.20.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.20.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.20.0/latest.zip",
+    "AssemblyVersion": "0.21.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.0/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795432858
+    "LastUpdate": 1795435150
   }
 ]
