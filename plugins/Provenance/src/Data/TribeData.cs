@@ -25,8 +25,9 @@ namespace Provenance.Data;
 /// point bases the sheets place nowhere (territory 1), so the society's zone and <c>ExportedGatheringPoint</c> place them.
 /// </para>
 /// <para>
-/// The unlock quests and the society aetherytes are a fact table (the sheets don't link them); the portals in front of
-/// the Omicron and Loporrit givers and into Zirgorteh come from <c>Warp</c> and <c>Level</c> rows (queststeps research).
+/// The unlock quests and the society aetherytes are a fact table (the sheets don't link them). The portals in front of
+/// the Omicron and Loporrit givers and into Zirgorteh are the shipped portals.json (<see cref="Portals"/>), which the
+/// run's travel uses.
 /// </para>
 /// </remarks>
 internal sealed class TribeData
@@ -91,22 +92,6 @@ internal sealed class TribeData
 
     /// <summary>The Ixal and Moogle gil shops (mounts, minions, the Ehcatl Wristgloves); the others are found by their rank gates.</summary>
     private static readonly Dictionary<uint, uint> GilShops = new() { [5] = 262696, [8] = 262699 };
-
-    /// <summary>
-    /// Portals per society: the event object or NPC, where it stands (its Level row, or a recorded position where it has
-    /// none), and its warp (destination and question).
-    /// </summary>
-    private static readonly (uint Tribe, uint Id, bool Npc, uint Level, Vector3 Fallback, uint Territory, uint Warp, PortalUse Use)[] Portals =
-    {
-        // Omicrons: Stigma-4 stands in A-4 Research, behind this portal (no Level row; position from the research).
-        (16, 2013072, false, 0, new Vector3(456.7f, 438.0f, 310.2f), 960, 131483, PortalUse.ToGiver),
-        // Omicrons: Elysion, where some steps happen.
-        (16, 2013074, false, 9329555, Vector3.Zero, 960, 131480, PortalUse.SubZone),
-        // Loporrits: Managingway stands in Hoper's Hold, behind this passage.
-        (17, 2013249, false, 9563729, Vector3.Zero, 959, 131509, PortalUse.ToGiver),
-        // Yok Huy: Narvurgar, next to Vuyargur, takes you to Zirgorteh the Open-armed for the crafting steps.
-        (20, 1054640, true, 11859456, Vector3.Zero, 1187, 131605, PortalUse.SubZone),
-    };
 
     /// <summary>
     /// /say dailies whose phrase has no <c>_SAYTODO_</c> text (the Moogles' 2295 and five Ixal ones; queststeps research).
@@ -432,19 +417,8 @@ internal sealed class TribeData
         var intersocietal = b.IntersocietalQuest.RowId != 0 ? b.IntersocietalQuest.RowId : b.Expansion.RowId == 0 ? ArrIntersocietal : 0;
         var interName = intersocietal != 0 ? CleanName(Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Quest>().GetRowOrDefault(intersocietal)?.Name.ExtractText() ?? "") : "";
 
-        var portals = new List<TribePortal>();
-        foreach (var p in Portals.Where(p => p.Tribe == id))
-        {
-            var spot = p.Level != 0 ? Services.Data.GetExcelSheet<Level>().GetRowOrDefault(p.Level) : null;
-            var warp = Services.Data.GetExcelSheet<Warp>().GetRowOrDefault(p.Warp);
-            var name = p.Npc ? NpcName(p.Id) : Capitalise(Services.Data.GetExcelSheet<EObjName>().GetRowOrDefault(p.Id)?.Singular.ExtractText() ?? "");
-            portals.Add(new TribePortal(p.Id, p.Npc, name, spot?.Territory.RowId ?? p.Territory,
-                spot is { } s ? new Vector3(s.X, s.Y, s.Z) : p.Fallback, warp?.TerritoryType.RowId ?? 0, p.Warp,
-                warp?.Question.ExtractText() ?? "", p.Use));
-        }
-
         return new Tribe(id, Capitalise(b.Name.ExtractText()), (int)b.Expansion.RowId, kind, b.MaxRank, startRank, b.CurrencyItem.RowId,
-            territory, PlaceName(territory), Aetherytes.GetValueOrDefault(id), level, givers, unlock, rankQuests, intersocietal, interName, portals,
+            territory, PlaceName(territory), Aetherytes.GetValueOrDefault(id), level, givers, unlock, rankQuests, intersocietal, interName,
             shop.OrderBy(s => s.Rank < 0 ? int.MaxValue : s.Rank).ThenBy(s => s.Kind == ShopItemKind.Other ? 1 : 0).ThenBy(s => s.ItemId).ToList(),
             achievements.OrderBy(a => a.Intersocietal).ThenBy(a => a.Rank).ToList(), dailies);
     }

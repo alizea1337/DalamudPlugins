@@ -164,25 +164,6 @@ public sealed record TribeQuest(
 /// <param name="Position">World position from its <c>Level</c> row.</param>
 public sealed record TribeGiver(uint NpcId, string Name, uint Territory, string Place, Vector3 Position, int MinRank, int MaxRank);
 
-/// <summary>What a portal is for.</summary>
-public enum PortalUse
-{
-    /// <summary>The giver stands behind it: the way to the giver from the society's aetheryte.</summary>
-    ToGiver,
-    /// <summary>It leads to a zone some of the society's steps use (Zirgorteh, Elysion).</summary>
-    SubZone,
-}
-
-/// <summary>
-/// An object or NPC that warps the player within the society's zone or into a sub-zone: talk to it, then answer its
-/// yes/no question (<c>Warp.Question</c>) with yes.
-/// </summary>
-/// <param name="Id">The EObj or ENpc base id.</param>
-/// <param name="Npc">It's an NPC (else an event object).</param>
-/// <param name="Destination">The territory it leads to (the same zone for in-zone portals).</param>
-/// <param name="Question">Its yes/no question in the client's language ("Proceed to A-4 Research?").</param>
-public sealed record TribePortal(uint Id, bool Npc, string Name, uint Territory, Vector3 Position, uint Destination, uint Warp, string Question, PortalUse Use);
-
 /// <summary>A quest on the way to unlocking a society, with where to get it.</summary>
 /// <param name="Npc">The NPC who offers it, and where (zone name and map coordinates).</param>
 /// <param name="Requirement">The class it needs, as the game words it, with the level ("Disciple of the Hand, level 50").</param>
@@ -250,7 +231,7 @@ public sealed record Tribe(
     uint Id, string Name, int Expansion, TribeKind Kind, int MaxRank, int StartRank, uint CurrencyItem,
     uint Territory, string Place, uint Aetheryte, int Level,
     IReadOnlyList<TribeGiver> Givers, IReadOnlyList<TribeUnlockStep> Unlock, IReadOnlyList<TribeRankQuest> RankQuests,
-    uint IntersocietalQuest, string IntersocietalName, IReadOnlyList<TribePortal> Portals,
+    uint IntersocietalQuest, string IntersocietalName,
     IReadOnlyList<TribeShopItem> Shop, IReadOnlyList<TribeAchievement> Achievements, IReadOnlyList<TribeQuest> Dailies)
 {
     /// <summary>The rank quest offered at a rank (null at the top, or when the data has none).</summary>

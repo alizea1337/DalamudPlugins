@@ -28,7 +28,7 @@ public class TribePlannerTests
             givers.Length > 0 ? givers : new[] { Giver(id * 100) },
             Array.Empty<TribeUnlockStep>(),
             new[] { new TribeRankQuest(0x10000u + 9000 + id, $"Rank quest {id}", 3, 1, "Npc", territory, "Place", Vector2.Zero, Array.Empty<(uint, string)>()) },
-            0, "", Array.Empty<TribePortal>(), Array.Empty<TribeShopItem>(), Array.Empty<TribeAchievement>(), Array.Empty<TribeQuest>());
+            0, "", Array.Empty<TribeShopItem>(), Array.Empty<TribeAchievement>(), Array.Empty<TribeQuest>());
 
     private static TribeGiver Giver(uint npc, int minRank = 1, int maxRank = 8) => new(npc, $"Giver {npc}", 100, "Place", Vector3.Zero, minRank, maxRank);
 

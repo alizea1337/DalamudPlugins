@@ -120,7 +120,7 @@ public class TribeDayTests
     private static Tribe Society(IReadOnlyList<TribeGiver> givers, IReadOnlyList<TribeQuest> dailies, int maxRank = 8)
         => new(20, "Yok Huy", 5, TribeKind.Crafter, maxRank, 3, 46178, 1187, "Urqopacha", 201, 90, givers,
             Array.Empty<TribeUnlockStep>(), new[] { new TribeRankQuest(0x10000u + 5332, "Buried Memories", 4, 1, "Fahrafahr", 1187, "Urqopacha", Vector2.Zero, Array.Empty<(uint, string)>()) },
-            0, "", Array.Empty<TribePortal>(), Array.Empty<TribeShopItem>(), Array.Empty<TribeAchievement>(), dailies);
+            0, "", Array.Empty<TribeShopItem>(), Array.Empty<TribeAchievement>(), dailies);
 
     private static TribeGiver Giver(uint id, int rank) => new(id, "Giver " + id, 1187, "Urqopacha", Vector3.Zero, rank, rank);
 
