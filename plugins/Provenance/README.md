@@ -105,40 +105,62 @@ keeps it from sliding things around.
   planned, made and handed in. The page shows the deliveries left of the 12 a week and when they reset, the
   bonus requests, and each client's level, this week's requests and what the next level brings; a locked
   client names the quest that unlocks it (the run doesn't do quests). Start plans the week for the goal:
-  *Rank up* (the clients below the top level first, the lowest first, at the lowest collectability, since
-  every tier gives the same satisfaction), *Scrips* or *Gil* (bonus requests first, at the best tier your
-  gear reliably reaches). It takes what's in your bags first, then buys the components from the vendor next
-  to the client, crafts with a Raphael rotation or gathers the collectables, and hands everything in on one
-  tour, the Firmament included (through Foundation's aetheryte and the Firmament's own aethernet; on your
-  home world only). At a rank-up the rewards are accepted and the cutscene skipped (*Pause for rank-up
-  cutscenes* pauses for it instead), and the run plans again while deliveries are left, since the client's
-  requests change. A delivery whose scrips would go over the 4,000 cap is left out, unless you're ranking up
-  with *Deliver anyway while ranking up* on (the scrips over the cap are lost). Each client has *Include in
-  the run*. The week's plan (what goes to whom, made by which class, at which collectability, and who gets
-  nothing this time and why) shows on the page and on the Plan page when no order is on it; Pause, Resume
-  and Stop are in the action bar and the compact strip (`/prov compact`). Fish and spearfishing requests
-  come later.
-- **Tribes** (*Expeditions*), **coming in the next release**: the daily allied society quests. Until then
-  the page only says what it's for.
+  *Rank up* (the clients below the top level first, the lowest first, up to their next level each round, at
+  the lowest collectability, since every tier gives the same satisfaction; deliveries left over go to the
+  clients at the top level, bonus requests first), *Scrips* or *Gil* (bonus requests first; crafted requests
+  at the best tier your gear reliably reaches, gathered ones at the top tier). Until you pick one, the goal is
+  Rank up while any client you've unlocked is below the top level, otherwise Scrips. The run takes what's in
+  your bags first, buys the other components from the vendor next to the client (crystals are never bought:
+  they come from your bags), crafts with a Raphael rotation or gathers the collectables, and hands everything
+  in on one tour, the Firmament included (through Foundation's aetheryte and the Firmament's own aethernet; on
+  your home world only). At a rank-up the rewards are accepted and the cutscene skipped (*Pause for rank-up
+  cutscenes* pauses for it instead). A rank-up changes the client's requests, so after the tour the run plans
+  again while deliveries are left: up to 3 rounds, and only when the round before delivered something. A
+  delivery whose scrips would go over the 4,000 cap is left out; under Rank up, *Deliver anyway while ranking
+  up* still delivers to the clients below the top level (the scrips over the cap are lost). *Include in the
+  run* is in each client's opened row (not for a locked client). The week's plan (what goes to whom, made by
+  which class, at which collectability, and who gets nothing this time and why) shows on the page, and on the
+  Plan page when no order is on it and there's something to deliver; Pause, Resume and Stop are in the action
+  bar and the compact strip (`/prov compact`). Fish and spearfishing requests come later.
+- **Tribes** (*Expeditions*): the daily allied society quests.
   - The page: all 20 allied societies; whether each is unlocked and, if not, what's missing (the run doesn't
-    do unlock quests); rank and reputation, with the days to the next rank and to Bloodsworn; a notice when
-    a rank quest is ready; today's three quests for each society, worked out in advance and checked against
-    the game, each marked "the run can do it", "do it yourself" (with the reason) or "needs X" (crystals, a
-    class level); the allowances left and the countdown to the daily reset (15:00 UTC, shown in your local
-    time); what each rank opens in the society's shop and what you already own; and the achievements and
-    titles.
+    do unlock quests); rank and reputation, with the dailies and days to the next rank and to the society's
+    top rank (Bloodsworn for most, Sworn for the Ixal); a notice when a rank quest is ready; today's quests
+    from each giver, worked out in advance and checked against the game when you talk to the giver, each
+    marked "the run does it", "do it yourself" (with the reason) or "needs …" (crystals, a class level, a
+    saved gearset, or an item to wear, such as the Ixal's Ehcatl Wristgloves); the allowances left and the
+    countdown to the daily reset (15:00 UTC, shown in your local time); what each rank opens in the society's
+    shop and what you already own; and the achievements and titles.
   - The run, for the crafter and gatherer societies: the Moogles, Dwarves, Loporrits, Yok Huy, Namazu,
-    Qitari, Omicrons and Mamool Ja, plus the Ixal's craft-only dailies. It takes today's quests, up to the
-    12 daily allowances and 3 per society, and does them, errands included: talking, handing items over,
-    emotes, `/say`, key items, quest mounts and so on. Crafting quests are crafted with a Raphael rotation
-    (quality never matters for them), with crystals from your bags, then retainers, then gathering; without
-    them the quest is skipped and the reason given. Gathering quests are done as Miner or Botanist at the
-    society's own nodes.
-  - Goals: *Rank up* (societies below Bloodsworn first, the lowest rank first), *Currency* (for the society
-    shops) and *Levelling* (your lowest classes first). Each society has a checkbox; a quest is accepted on
-    your current class when it qualifies, otherwise on your best-geared one. Options: *Pause for cutscenes*
-    (otherwise they're skipped) and *Leave out quests that /say in public* (off to start; the run only says
-    the quest's own phrase, once).
+    Qitari, Omicrons and Mamool Ja, plus the Ixal's craft-only dailies. It takes today's quests within the 12
+    daily allowances: up to 3 from each giver (the Ixal have one giver for each rank, so more than 3 a day
+    there), and on the day you rank up the 3 more the giver offers when the new rank has dailies of its own
+    (reaching Sworn gives none for most societies, reaching Bloodsworn none for any). Dailies already in your
+    journal come first, and one accepted before the reset first of all, since the game gives no new dailies
+    until it's handed in. The run does the errands too: talking, handing items over, emotes, `/say`, key
+    items, quest mounts and so on. A `/say` is the quest's own phrase, said once; if the game doesn't take it,
+    the run hands that step to you. An emote gets one more try after 15 seconds when nothing changed.
+    Crafting quests are crafted with a Raphael rotation (quality never matters for them), with crystals from
+    your bags, then retainers, then gathering; otherwise the quest is left out, with the reason. The crystal
+    check assumes up to 4 crafts a quest, since the game only says how many once it's accepted. Gathering
+    quests are done as Miner or Botanist at the society's own nodes. Today's plan shows on the page, and on
+    the Plan page when no order is on it and there are dailies to do; Pause, Resume and Stop are in the
+    action bar and the compact strip.
+  - Goals: *Rank up* first takes the dailies that fill each society's bar, the lowest rank first;
+    allowances still left after that go to more dailies, since they still pay currency, gil, crystals and
+    EXP. A society whose bar is full waits for its rank quest: it gets
+    a notice, and its allowances go elsewhere. *Currency* (for the society shops) takes as many dailies as
+    the day allows, the Ixal's givers below Respected last, since their dailies pay no Oaknots. *Levelling*
+    takes each daily on your lowest class that qualifies. Currency and Levelling keep doing the dailies of a
+    society whose bar is full. Until you pick one, the goal is Rank up while a ticked society is below its
+    top rank, then Currency. Under Rank up and Currency a quest is accepted on your current class when it
+    qualifies, otherwise on your best-geared one.
+  - Options: *Include in the run* in each society's opened row; *Pause for cutscenes* (otherwise they're
+    skipped); *Leave out quests that /say in public* (off to start), which skips those quests altogether; and
+    *Note what the run would do while I do society quests myself (for bug reports)* (on to start, and only
+    active once you've opened the Tribes page). While you do a society quest by hand and no Provenance run is
+    going, it notes in the debug log what the run would do, with no player names. Bug reports carry it, which
+    helps check the run before it acts.
   - Never done by the run: these are marked "do it yourself", with the reason, and not accepted.
     - Shooting and bow minigames (the Namazu's bow; the Kojin, Ananta and Pixies snipes): the only known way
       to automate them fakes the minigame's result to the game, and Provenance doesn't fake results.
@@ -147,11 +169,14 @@ keeps it from sliding things around.
     - The Ixal's "Deliverance": it has a quota system of its own.
     - Fisher for the gatherer dailies: the game data has no fishing spot or bait for those quest fish, so
       gatherer dailies are taken as Miner or Botanist.
+  - Not yet done by the run: the Dwarves' cannon dailies, "Demolition Demo" and "Substitute Tester", are
+    "do it yourself" for now, because the cannon has to be aimed.
   - Planned for later releases:
     - Rank quests, started with *Do the rank quest*, escort and follow steps included. Three of them hold a
       solo duty (the Kojin's "A Test of Courage", the Ananta's "Schism between Sisters", the Pixies' "As the
       Heart Bids"): the run warns you beforehand and pauses at the duty for you to do it, then Resume
-      carries on.
+      carries on. Two contain a minigame and stay "do it yourself": the Kojin's "Under Wraps" and the
+      Namazu's "Out of the Frypan". Until then rank quests are yours to do.
     - The battle societies, with the basic combat on the job picked under Monster drops, plus the rest of
       the Ixal's dailies and the intersocietal quests for the "Allied" rank. For safety, *Levelling* only
       takes a battle quest on a job at least 5 levels above the quest's level, the lowest such job: the
@@ -183,7 +208,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 | Cosmic Exploration | Crafting missions (done; since 0.18), two-class missions and Cosmic Fortunes (done; since 0.19), then gathering missions with critical missions and red alerts, then fishing missions, then Master missions and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
 | Custom Deliveries | The page with the week and every client (done; since 0.20), the run for crafted and gathered requests (done; since 0.21), then fish and spearfishing requests, a shopping list for scrips at the cap and a trip after the run; later making items ahead and a Levelling goal |
-| Tribes | The page and the run for the crafter and gatherer societies' dailies (next release), then rank quests by button, then the battle societies with the rest of the Ixal and the intersocietal quests, then a shopping list for the society shops |
+| Tribes | The page and the run for the crafter and gatherer societies' dailies (done; since 0.22), then rank quests by button, then the battle societies with the rest of the Ixal and the intersocietal quests, then a shopping list for the society shops |
 
 ### To do
 

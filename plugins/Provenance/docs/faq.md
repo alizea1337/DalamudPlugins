@@ -175,17 +175,34 @@ alerts come next, then fishing missions.
 
 ## Custom Deliveries
 
+### Which goal does the delivery run pick for me?
+
+Until you pick one, *Rank up* while any client you've unlocked is below the top level, otherwise *Scrips*.
+Picking a goal keeps it; *Pick the goal for me again* goes back to the automatic one.
+
 ### Why does Rank up serve the clients below the top level first?
 
 The 12 deliveries a week are shared between all clients, and a delivery to a top-level client levels nobody.
-Under *Rank up* the clients below the top level get theirs first, the lowest level first; what's left goes to
-the top-level clients, bonus requests first. Under *Scrips* and *Gil*, bonus requests come first.
+Under *Rank up* the clients below the top level get theirs first, the lowest level first, up to their next
+level; what's left goes to the top-level clients, bonus requests first. Under *Scrips* and *Gil*, bonus
+requests come first.
 
 ### Why does Rank up use the lowest collectability?
 
-Every tier gives the same satisfaction towards the next level, so *Rank up* takes the lowest. *Scrips* and
-*Gil* aim for the best tier your gear reliably reaches, with food and medicine when *Food and medicine for a
-higher tier* is on.
+Every tier gives the same satisfaction towards the next level, so *Rank up* takes the lowest. Under *Scrips*
+and *Gil*, crafted requests aim for the best tier your gear reliably reaches, with food and medicine when
+*Food and medicine for a higher tier* is on, and gathered requests aim for the top tier.
+
+### Where do the components and crystals come from?
+
+What's in your bags counts first. The other components of a crafted request are bought from the vendor next
+to the client. Crystals are never bought: they have to be in your bags, and a crafted request whose crystals
+aren't there isn't planned (the plan says which crystals it needs).
+
+### Why does the run go round again after the tour?
+
+A rank-up changes the client's requests, so after the tour the run plans again while deliveries are left. It
+goes up to 3 rounds, and only when the round before delivered something.
 
 ### Why does it skip a client's delivery at the scrip cap?
 
@@ -197,16 +214,19 @@ top level regardless. A shopping list to spend scrips at the cap is planned.
 ### Why are fishing deliveries not done yet?
 
 The run comes in steps: crafted and gathered requests came first (0.21), and fish and spearfishing requests
-are the next step. Until then a client whose only doable request is a fish gets nothing ("fish come in a later
-version"). With *Prefer crafting and gathering* on, fish will only be delivered when neither the crafted nor
+are the next step. Until then the plan leaves fish requests out before it judges the others, so a client whose
+crafted and gathered requests can't be made shows why one of those can't, or "none of this week's requests can
+be made yet". With *Prefer crafting and gathering* on, fish will only be delivered when neither the crafted nor
 the gathered request can be done.
 
 ### Why is a client left out of this week's plan?
 
-The plan lists everyone who gets nothing this time, with the reason: locked (with the quest that unlocks
-them), a story quest first, no crafter or gatherer at the client's level, done for the week, the scrip cap,
-or no deliveries left. Clients in the Firmament only take deliveries on your home world, where the Firmament
-is open. The run does no quests, so unlocks and story quests are yours to do.
+Under "Not this time" the plan lists each ticked client that gets nothing this time, with the reason: a story
+quest first, no crafter or gatherer at the client's level, why its requests can't be made (a class level, a
+saved gearset, crystals, a collectability your gear doesn't reach), done for the week, the scrip cap, or no
+deliveries left. Locked clients and the ones you've unticked aren't listed there; opening a locked client's
+row on the page names the quest that unlocks it. Clients in the Firmament only take deliveries on your home
+world, where the Firmament is open. The run does no quests, so unlocks and story quests are yours to do.
 
 ### Why is the Custom Deliveries page empty?
 
@@ -221,14 +241,61 @@ the window showed other items. Please send a bug report then.
 
 ## Tribes
 
-Tribes comes in the next release; until then its page only says what it's for. These answers describe that
-release, and what's planned after it.
+Since 0.22 the run does the dailies of the crafter and gatherer societies, and the Ixal's craft-only ones.
+Rank quests by button, the battle societies, the rest of the Ixal's dailies, the intersocietal quests and a
+shopping list for the society shops are planned.
+
+### How many dailies does it take a day?
+
+Within the 12 allowances a day, up to 3 from each giver. Most societies have one giver; the Ixal have one for
+each rank, so more than 3 a day is possible there. On the day you rank up, the giver offers 3 more when the new
+rank has dailies of its own: reaching Sworn gives none for most societies, and reaching Bloodsworn none for
+any.
+
+### What does Rank up do with my allowances?
+
+Reputation past a full bar is lost until the rank quest is done, so *Rank up* first takes the dailies that
+fill each society's bar, the lowest rank first. Allowances still left after that go to more dailies, since
+they still pay currency, gil, crystals and EXP. A society whose bar is full waits for its rank quest: it gets a
+notice, and its allowances go elsewhere. *Currency* and *Levelling* keep doing its dailies.
+
+### Which goal does the Tribes run pick for me?
+
+Until you pick one, *Rank up* while a ticked society is below its top rank, then *Currency*.
+
+### Why do some Ixal dailies come last under Currency?
+
+The dailies of the Ixal's givers below Respected pay no Oaknots, so under *Currency* those givers come last.
+
+### How are the days to a rank counted?
+
+From the reputation each daily gives at your rank, up to 3 dailies a day, plus the 3 more on a rank-up day
+when the new rank has dailies of its own, with each rank quest done as soon as the bar fills. The page counts
+to the next rank and to the society's top rank: Bloodsworn for most, Sworn for the Ixal.
+
+### What do "the run does it", "do it yourself" and "needs …" mean?
+
+"The run does it": the run can take it today. "Do it yourself" comes with the reason the run doesn't take it
+(a minigame, a FATE, a rank quest and the like). "Needs …" says what's missing first: crystals, a class level, a
+saved gearset, or an item to wear (the Ixal's Ehcatl Wristgloves, sold by their vendor).
+
+### Where do the crystals for crafting dailies come from?
+
+From your bags, then your retainers, then gathering. A quest the crystals still don't cover is left out, with
+the reason. The game only says how many crafts a daily asks for once it's accepted, so the check assumes up
+to 4.
 
 ### Why won't the run do the shooting and bow minigames?
 
 The only known way to automate them fakes the minigame's result to the game, and Provenance doesn't fake
 results. The Namazu's bow quest and the Kojin, Ananta and Pixies snipes are marked "do it yourself", with that
-reason, and not accepted.
+reason, and not accepted. Once rank quests come (planned), the two with a minigame, the Kojin's "Under Wraps"
+and the Namazu's "Out of the Frypan", stay "do it yourself" too.
+
+### Why are the Dwarves' cannon dailies "do it yourself"?
+
+"Demolition Demo" and "Substitute Tester" fire a cannon that has to be aimed at each target, which the run
+can't do yet. They're "do it yourself" for now.
 
 ### Why are the FATE dailies left out?
 
@@ -254,28 +321,38 @@ and ARR society quests aren't level-synced, so the extra levels keep the fights 
 ### Does the run unlock societies or do rank quests?
 
 It doesn't do unlock quests: the page shows what's missing for each society, and those quests are yours. Rank
-quests are planned for a later release, started with *Do the rank quest*; the three with a solo duty (Kojin,
-Ananta, Pixies) warn you beforehand and pause at the duty for you to do it.
+quests are yours too for now: the page gives a notice when one is ready. They're planned for a later release,
+started with *Do the rank quest*; the three with a solo duty (Kojin, Ananta, Pixies) will warn you beforehand
+and pause at the duty for you to do it.
 
 ### Can I keep some allowances for myself?
 
-Tick only the societies the run should do. It takes up to 3 quests from each ticked society, within the 12
-allowances a day, so ticking fewer leaves the rest for you; there's no separate setting for it.
+Tick only the societies the run should do (*Include in the run*, in each society's opened row). It takes up to
+3 quests from each giver of a ticked society, within the 12 allowances a day, so ticking fewer leaves the rest
+for you; there's no separate setting for it.
 
 ### Will it say things in public chat?
 
-Some quests ask you to `/say` a phrase; the run says only the quest's own phrase, once. *Leave out quests that
-/say in public* (off to start) skips those quests.
+Some quests ask you to `/say` a phrase. The run says the quest's own phrase once; if the game doesn't take it,
+the run hands that step to you. *Leave out quests that /say in public* (off to start) skips those quests
+altogether. Emotes get one more try after 15 seconds when nothing changed.
+
+### What does the bug report option on the Tribes page do?
+
+With *Note what the run would do while I do society quests myself (for bug reports)*, while you do a society
+quest by hand and no Provenance run is going, the debug log notes what the run would do, with no player names.
+Bug reports carry it, which helps check the run before it acts on a quest. It's on to start, and only active
+once you've opened the Tribes page.
 
 ## Safety & bug reports
 
 ### What does the Tripwire do?
 
-While a run, the Cosmic loop or the delivery run works, it stops everything at once, even a craft under way,
-and the chat says why. It goes off when the character is moved with nothing to explain it (a game master can
-summon a character, for example) or a game master is around, and, if you turn them on, when a player appears
-close by or a hidden player is close by. Your own teleports, Provenance's own trips and your party never count;
-it's under Settings, Security.
+While a run, the Cosmic loop, the delivery run or the Tribes run works, it stops everything at once, even a
+craft under way, and the chat says why. It goes off when the character is moved with nothing to explain it (a
+game master can summon a character, for example) or a game master is around, and, if you turn them on, when a
+player appears close by or a hidden player is close by. Your own teleports, Provenance's own trips and your
+party never count; it's under Settings, Security.
 
 ### Why is a player in the debug log shown as a "ref"?
 
