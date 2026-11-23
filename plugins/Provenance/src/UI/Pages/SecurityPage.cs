@@ -6,7 +6,7 @@ using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
 
-/// <summary>Getting unstuck, trades from other players, being moved by someone else, players around, and limits that keep a run from going too far.</summary>
+/// <summary>Getting unstuck, trades from other players, the tripwire (being moved, players around), and limits that keep a run from going too far.</summary>
 internal sealed class SecurityPage : Page
 {
     public SecurityPage(Plugin plugin) : base(plugin) { }
@@ -49,23 +49,17 @@ internal sealed class SecurityPage : Page
         }
         Ui.EndCard();
 
-        // Being moved
+        // Tripwire: being moved and players around
         Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Being moved");
-        Ui.Wrapped("While a run or the Cosmic loop works, a move it didn't make stops everything at once: walking, flying, gathering, fishing and "
-                   + "even a craft under way. That's another zone, or far across this one in an instant, with no teleport, aethernet, door or "
-                   + "knock-out before it. A game master can summon a character, for example. Your own teleports don't count, and the chat says "
-                   + "where the character was taken.");
+        using (Ui.F.Strong.Push()) Ui.Text("Tripwire");
+        Ui.Wrapped("While a run or the Cosmic loop works, any of these stops everything at once: walking, flying, gathering, fishing and even "
+                   + "a craft under way. The chat says what set it off. Your own teleports and your party never count.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         v = c.StopWhenMoved;
-        if (Ui.Checkbox("Stop everything when the character is moved", ref v)) { c.StopWhenMoved = v; Save(); }
-        Ui.EndCard();
-
-        // Players around
-        Ui.BeginCard(width: w);
-        using (Ui.F.Strong.Push()) Ui.Text("Players around");
-        Ui.Wrapped("While a run or the Cosmic loop works, these stop everything at once, the same way as being moved. Party members never count.");
-        ImGui.Dummy(new Vector2(0, 2 * s));
+        if (Ui.Checkbox("Stop when the character is moved", ref v,
+                "Another zone, or far across this one in an instant, with no teleport, aethernet, door or knock-out before it. "
+                + "A game master can summon a character, for example."))
+        { c.StopWhenMoved = v; Save(); }
         v = c.StopForGameMaster;
         if (Ui.Checkbox("Stop when a game master is around", ref v, "Anyone the game shows as a game master, at any distance."))
         { c.StopForGameMaster = v; Save(); }
