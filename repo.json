@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: trips in the Firmament walked all the way (200 to 350 yalms, getting stuck on the way) instead of\n  taking its aethernet. The Firmament's aethernet isn't in the game's usual aetheryte data, so Provenance\n  didn't know it was there; now it does (its eight shards), and takes it when walking to the nearest shard\n  and from the one nearest the target is clearly quicker. A destination the shard doesn't offer yet (not\n  attuned) means walking, as before.\n- After \"Travel to the Firmament\" the trip can now take that aethernet too (it counted as a hop already).\n- The debug log says when a trip walks a long way and why (no aethernet hop is quicker there).\r\n",
+    "Changelog": "- Custom Deliveries: rank-up cutscenes are now skipped (the game's own skip, answered with Yes), unless\n  \"Pause for rank-up cutscenes\" is on, which pauses so you can watch.\n- Fixed: the Firmament's aethernet shards open the aethernet list, not a menu; the run waited for a menu,\n  then tried to walk off with the list still open (and got stuck at the Mendicant's Court). It now picks\n  the destination in the list; a destination not attuned yet means walking, with the list closed first.\n- Fixed: arriving \"close\" to an NPC counted only the distance on the ground, so a trip could end right\n  above them (on a roof, or hovering on the mount): \"Target is too far below you\", and the vendor couldn't\n  be talked to. Close now has to be on the same level too; above or below, the trip goes down (or up) to\n  them, dismounting if need be.\n- Fixed: leaving a client closed the delivery window without ending the conversation, so the game kept\n  you busy for a while and the next teleport was refused (\"you are busy with something else\"). The run\n  now leaves like a player: closes the windows and picks \"Nothing\".\n- The compact window shows what you ran last (an order, Cosmic Exploration or the custom deliveries)\n  instead of always Cosmic Exploration when nothing is going; its Start starts that one.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.21.2.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.2/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.2/latest.zip",
+    "AssemblyVersion": "0.21.3.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.3/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.3/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795436267
+    "LastUpdate": 1795437186
   }
 ]
