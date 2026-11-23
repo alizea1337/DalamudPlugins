@@ -157,8 +157,9 @@ internal sealed unsafe partial class Travel
         var mounted = Services.Condition[ConditionFlag.Mounted];
         var away = Vector3.Distance(me, target);
 
-        // Close by on the ground (riding or on foot): straight in on foot; vnavmesh finds the door.
-        if (!Services.Condition[ConditionFlag.InFlight] && away <= RideFrom)
+        // Close by on the ground at about its level (riding or on foot): straight in on foot; vnavmesh finds the door. Up
+        // on its roof (an earlier leg came down there), mounted, the way in is by the open spot near it.
+        if (!Services.Condition[ConditionFlag.InFlight] && away <= RideFrom && me.Y - target.Y <= MaxRise)
         {
             if (mounted)
             {
