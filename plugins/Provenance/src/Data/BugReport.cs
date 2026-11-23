@@ -138,6 +138,21 @@ internal static class BugReport
         if (runs.Log.Count == 0) Line("Empty.");
         foreach (var e in runs.Log.Take(40)) Line($"{e.Time:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
 
+        // ---------------------------------------------------------------- Custom deliveries
+        if (catalog?.Deliveries is { Clients.Count: > 0 } deliveries)
+        {
+            Section("Custom deliveries");
+            Line($"Data from the game: {(Integrations.Deliveries.Loaded ? "yes" : "no")}, seed {Integrations.Deliveries.Seed}, bonus row {Integrations.Deliveries.GuaranteeRow(deliveries.GuaranteeRows)} of {deliveries.GuaranteeRows}, "
+                 + $"week {Integrations.Deliveries.WeekNumber}, {Integrations.Deliveries.Remaining} of {Integrations.Deliveries.WeeklyAllowance} left, resets {Integrations.Deliveries.NextReset:yyyy-MM-dd HH:mm}");
+            foreach (var client in deliveries.Clients)
+            {
+                var w = Integrations.Deliveries.Week(deliveries, client);
+                var checkedText = Integrations.Deliveries.Matches(client.Id) switch { true => "matches the game", false => "DIFFERS from the game", _ => "not checked" };
+                Line($"{client.Id} {client.Name}: unlocked {Integrations.Deliveries.QuestDone(client.UnlockQuest)}, level {w.Rank}, satisfaction {w.Satisfaction}/{w.Required}, used {w.Used}/{client.PerWeek}, "
+                     + $"requests [{string.Join(", ", w.Requests.Select(r => r == null ? "-" : $"{r.Item.ItemId}{(r.Bonus ? " bonus" : "")}"))}], {checkedText}");
+            }
+        }
+
         // ---------------------------------------------------------------- Cosmic Exploration
         var cosmic = plugin.Config.Cosmic;
         if (cosmic.Classes.Count > 0 || plugin.CosmicLoop.Lines.Count > 0)

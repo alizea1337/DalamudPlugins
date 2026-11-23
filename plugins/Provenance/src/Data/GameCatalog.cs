@@ -94,6 +94,7 @@ internal sealed class GameCatalog : IGameCatalog
         c.ApplyTomes();
         c.BuildBrowse();
         c.Cosmic = CosmicData.Build();
+        c.Deliveries = DeliveryData.Build();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
             c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
         return c;
@@ -738,6 +739,9 @@ internal sealed class GameCatalog : IGameCatalog
 
     /// <summary>Cosmic Exploration's missions, trader stock and NPCs.</summary>
     public CosmicData Cosmic { get; private set; } = new();
+
+    /// <summary>Custom deliveries: clients, requests per level, rewards, the bonus rotation.</summary>
+    public DeliveryData Deliveries { get; private set; } = new();
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
     public Dictionary<uint, uint> ManipulationQuest { get; } = new();

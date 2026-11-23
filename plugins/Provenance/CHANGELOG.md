@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.20.0
+
+- New: **Custom Deliveries** (Expeditions), the first step: where you stand, no deliveries made yet.
+  - The week: deliveries left of the 12, when they reset, and this week's bonus requests.
+  - Every client: their level (1 to 5) with progress, deliveries made this week, and what's in the way:
+    locked (with the quest that unlocks them), a story quest first, a class level too low, or done for the
+    week.
+  - Open a client for this week's three requests (crafted, gathered, fish or spearfishing), their
+    collectability tiers and what they pay, and for what's ahead: deliveries to the next level, the items
+    for reaching it, story quests still to do and their rewards, and the two achievement series.
+  - At the top level the requests change weekly; they're worked out from the week's data the way the game
+    does it. Opening a client's delivery window in the game checks them: the client then shows "Matches
+    the game", or "Differs from the game" (please send a bug report then).
+  - The game sends the delivery data once its client list (Timers, Custom Deliveries) is opened or a
+    client talked to; the page has a button that opens the list.
+  - The bug report has a Custom deliveries section.
+
 ## 0.19.12
 
 - The debug log now follows every trip, as [travel] lines: where a trip goes and from where, each

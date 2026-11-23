@@ -60,7 +60,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 new CosmicPage(this),
                 new PlaceholderPage(this, "Tribes", FontAwesomeIcon.Handshake, "the daily allied society (tribe) quests, from taking them to handing them in"),
-                new PlaceholderPage(this, "Custom Deliveries", FontAwesomeIcon.BoxOpen, "the weekly custom deliveries, making what each client asks for and delivering it"),
+                new DeliveriesPage(this),
                 new PlaceholderPage(this, "The Diadem", FontAwesomeIcon.Cloud, "gathering in the Diadem"),
                 new PlaceholderPage(this, "Ocean Fishing", FontAwesomeIcon.Ship, "ocean fishing voyages"),
             }),
@@ -169,6 +169,7 @@ public sealed class Plugin : IDalamudPlugin
             Runs.Tick();
             CosmicLoop.Tick();
             guard.Tick();
+            Integrations.Deliveries.Observe(Plans.Catalog?.Deliveries);
         }
         catch (Exception e)
         {
