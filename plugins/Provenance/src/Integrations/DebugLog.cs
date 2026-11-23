@@ -9,7 +9,8 @@ namespace Provenance.Integrations;
 /// A detailed log for bug reports: every step and decision of the runs (orders and the Cosmic loop) and the crafter,
 /// with the numbers they went by. Each run gets its own file (logs/session-…), so the bug report can carry the whole
 /// run that's going and the one before it, even after a crash; a file per day keeps everything besides (a week's
-/// worth). No character names go in, like the bug report.
+/// worth). No character names go in plain, like the bug report: the one exception, the player who set the Security
+/// tripwire off, goes in base64-encoded ("ref …"), which hides it at a glance but decodes for debugging.
 /// </summary>
 internal static class DebugLog
 {

@@ -3,7 +3,8 @@
 ## 0.19.11
 
 - New (Security): *Tripwire*. While a run or the Cosmic loop works, any of these stops everything at once,
-  even a craft under way, and the chat says what set it off (the debug log notes it, without names). Your
+  even a craft under way, and the chat says what set it off (the debug log notes it too, with the player's
+  name and world only base64-encoded as a "ref", so it doesn't read at a glance but decodes for debugging). Your
   own teleports, Provenance's own trips and your party never count.
   - *The character is moved* (on by default): another zone, or a jump far across the zone in an instant,
     with no teleport, aethernet, door, ferry, knock-out, duty or cutscene just before it (a game master

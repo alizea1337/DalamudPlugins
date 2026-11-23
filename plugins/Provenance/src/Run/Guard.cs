@@ -88,15 +88,27 @@ internal sealed unsafe class Guard
         if (loading || explained) players.Unsettle(now);
         if (me == null) return;
         if (players.Feed(now, me.Position, Around(me), look) is not { } who) return;
-        var name = Services.Objects.SearchById(who.Id)?.Name.TextValue is { Length: > 0 } n ? n : "someone";
+        var obj = Services.Objects.SearchById(who.Id);
+        var name = obj?.Name.TextValue is { Length: > 0 } n ? n : "someone";
         var seen = who.Kind switch
         {
             WatcherKind.GameMaster => $"a game master ({name}) is around",
             WatcherKind.Appeared => $"{name} appeared {who.Yalms:N0} yalms away without walking there",
             _ => $"a player the game doesn't draw ({name}) is {who.Yalms:N0} yalms away",
         };
-        // No names in the debug log (it goes into bug reports).
-        StopEverything(seen, $"{who.Kind} player {who.Yalms:0.0} yalms away");
+        StopEverything(seen, $"{who.Kind} player {who.Yalms:0.0} yalms away, ref {Reference(obj)}");
+    }
+
+    /// <summary>
+    /// Who set the tripwire off, for the debug log: "Name@World" in base64. The debug log goes into bug reports, so the
+    /// name doesn't read at a glance there, but it decodes for debugging. Base64 is an encoding, not a hash: anyone who
+    /// decodes it reads the name.
+    /// </summary>
+    private static string Reference(Dalamud.Game.ClientState.Objects.Types.IGameObject? obj)
+    {
+        if (obj?.Name.TextValue is not { Length: > 0 } name) return "-";
+        var world = (obj as IPlayerCharacter)?.HomeWorld.ValueNullable?.Name.ExtractText();
+        return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(world is { Length: > 0 } ? $"{name}@{world}" : name));
     }
 
     /// <summary>The other players in the object table, with what the watch needs to know about each.</summary>
