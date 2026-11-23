@@ -34,6 +34,10 @@ internal static unsafe class Interact
         return names;
     });
 
+    /// <summary>An aetheryte or an aethernet shard (where a teleport or an aethernet hop arrives).</summary>
+    public static bool IsCrystal(IGameObject o)
+        => o.ObjectKind == ObjectKind.Aetheryte || o.ObjectKind == ObjectKind.EventObj && ShardNames.Value.Contains(o.Name.TextValue);
+
     /// <summary>
     /// The crystal of an Aetheryte row, to talk to for the aethernet. A city's main aetheryte is an aetheryte
     /// object with the row as its id. An aethernet shard is an event object named "Aethernet shard" with an id of

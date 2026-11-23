@@ -199,6 +199,14 @@ public sealed class SecuritySettings
     /// with nothing explaining it (a cast, an interaction, a knock-out, a duty, Provenance's own trip) stops everything.
     /// </summary>
     public bool StopWhenMoved { get; set; } = true;
+    /// <summary>While a run works: a player with a game master's online status anywhere around stops everything.</summary>
+    public bool StopForGameMaster { get; set; } = true;
+    /// <summary>While a run works: a player who appears close by without walking there (not at an aetheryte, not in the party).</summary>
+    public bool StopWhenPlayerAppears { get; set; }
+    /// <summary>While a run works: a player close by whom the game doesn't draw, for a few seconds.</summary>
+    public bool StopForHiddenPlayer { get; set; }
+    /// <summary>What counts as close by for those two, in yalms.</summary>
+    public int NearbyYalms { get; set; } = 15;
     /// <summary>Most gil a run may spend at vendors. 0: no limit (besides the price cap per item).</summary>
     public int MaxGilPerRun { get; set; }
     /// <summary>Stop a run after this many minutes (after the craft under way). 0: no limit.</summary>

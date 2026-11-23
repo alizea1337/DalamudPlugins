@@ -8,6 +8,13 @@
   duty or cutscene just before it (a game master can summon a character, for example). Your own
   teleports and Provenance's own trips don't count. The chat says where the character was taken, and the
   debug log notes it.
+- New (Security, *Players around*): while a run or the Cosmic loop works, it can stop everything when
+  someone may be watching. *A game master is around* (on by default): anyone the game shows as a game
+  master. *A player appears close by* (off): someone who didn't walk there; arrivals at an aetheryte don't
+  count. *A hidden player is close by* (off): someone the game knows is there but doesn't draw, for 3
+  seconds. "Close by" is a distance you set (15 yalms to start). Party members never count. The last two
+  are off to start because busy places set them off more often (players logging in or coming back from a
+  duty next to you, a low character display limit).
 
 ## 0.19.10
 

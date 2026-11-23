@@ -6,7 +6,7 @@ using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
 
-/// <summary>Getting unstuck, trades from other players, being moved by someone else, and limits that keep a run from going too far.</summary>
+/// <summary>Getting unstuck, trades from other players, being moved by someone else, players around, and limits that keep a run from going too far.</summary>
 internal sealed class SecurityPage : Page
 {
     public SecurityPage(Plugin plugin) : base(plugin) { }
@@ -59,6 +59,27 @@ internal sealed class SecurityPage : Page
         ImGui.Dummy(new Vector2(0, 2 * s));
         v = c.StopWhenMoved;
         if (Ui.Checkbox("Stop everything when the character is moved", ref v)) { c.StopWhenMoved = v; Save(); }
+        Ui.EndCard();
+
+        // Players around
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Players around");
+        Ui.Wrapped("While a run or the Cosmic loop works, these stop everything at once, the same way as being moved. Party members never count.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        v = c.StopForGameMaster;
+        if (Ui.Checkbox("Stop when a game master is around", ref v, "Anyone the game shows as a game master, at any distance."))
+        { c.StopForGameMaster = v; Save(); }
+        v = c.StopWhenPlayerAppears;
+        if (Ui.Checkbox("Stop when a player appears close by", ref v,
+                "Someone who didn't walk there. Arrivals at an aetheryte don't count, but in busy places players also log in or come back from a duty right next to you."))
+        { c.StopWhenPlayerAppears = v; Save(); }
+        v = c.StopForHiddenPlayer;
+        if (Ui.Checkbox("Stop when a hidden player is close by", ref v,
+                "Someone the game knows is there but doesn't draw, for 3 seconds. A low character display limit hides players in busy places too. "
+                + "A game master the game doesn't send to you at all can't be seen by any plugin."))
+        { c.StopForHiddenPlayer = v; Save(); }
+        if (c.StopWhenPlayerAppears || c.StopForHiddenPlayer)
+            Slider("Close by", "##nearby", c.NearbyYalms, 5, 50, "within %d yalms", x => c.NearbyYalms = x);
         Ui.EndCard();
 
         // Limits
