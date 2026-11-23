@@ -87,7 +87,7 @@ internal sealed unsafe partial class Travel
     }
 
     /// <summary>These rules apply: not carrying something on foot, not on a quest mount, not under water, and coming down hasn't failed.</summary>
-    private bool IndoorsApplies => !OnFoot && !KeepMount && !NoFly && !indoorsOff && !Services.Condition[ConditionFlag.Diving];
+    private bool IndoorsApplies => RoofAware && !OnFoot && !KeepMount && !NoFly && !indoorsOff && !Services.Condition[ConditionFlag.Diving];
 
     /// <summary>Walking out of a building, or the rest of the way on foot after coming down: no mount, no flying.</summary>
     private bool StayOnFoot => walkingOut || onFootRest;

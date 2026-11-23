@@ -127,6 +127,14 @@ internal sealed unsafe partial class Travel
     /// </summary>
     public bool KeepMount { get; set; }
 
+    /// <summary>
+    /// The rules for buildings and raised floors (Travel.Indoors.cs): out of a building on foot first, a target under a
+    /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to quest
+    /// NPCs (the Tribes run turns it on); off, a trip goes exactly as it always did (gathering under tree canopies, cliff
+    /// nodes, vendors, clients).
+    /// </summary>
+    public bool RoofAware { get; set; }
+
     /// <param name="exactPosition">The real target once it's in view (an NPC or a bell); null until then.</param>
     public void GoTo(string description, uint territoryId, Vector2 approximateXz, float withinYalms, Func<Vector3?>? exactPosition)
     {
@@ -429,7 +437,7 @@ internal sealed unsafe partial class Travel
                 Note($"{what}: right above or below the target ({rise:0} yalms); getting down to it");
                 Vnav.Stop();
                 // In the air beside it, not right above: come down on the floor at it instead of getting off up here.
-                if (InAirBeside(me, target) && !indoorsOff && FloorAt(target) is { } floor)
+                if (RoofAware && InAirBeside(me, target) && !indoorsOff && FloorAt(target) is { } floor)
                 {
                     StartDescent(floor, $"in the air {flat:0.0} yalms beside the target, not right above it; coming down on the floor at it, {Where(floor)}, then walking");
                     return;
@@ -443,7 +451,7 @@ internal sealed unsafe partial class Travel
             // platform, into the water below); there the floor at it is come down on instead.
             if (DateTime.UtcNow - landingSince > TimeSpan.FromSeconds(6) && Services.Condition[ConditionFlag.Mounted] && !dismountTried)
             {
-                if (!InAirBeside(me, target))
+                if (!RoofAware || !InAirBeside(me, target))
                 {
                     dismountTried = true;
                     Note($"{what}: still {rise:0} yalms above or below; dismounting");

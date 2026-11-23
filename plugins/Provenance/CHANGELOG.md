@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.2
+
+- Tribes: after crafting a quest's items, the run kept talking to the NPC who hands out the materials (he still
+  shows the quest's marker, for spare materials) instead of going to hand the quest in. Once the quest's items
+  are made or gathered, the run now only goes to the NPC the quest is handed in to.
+- Tribes: when a quest makes you choose a reward, the run picks one: a sack of gil when there is one, otherwise
+  the item that sells to vendors for the most (the first listed when they're equal), then completes the quest.
+- Tribes: trips to quest NPCs indoors or on raised floors. A run that couldn't get down to an NPC in time got off
+  its mount in mid-air and dropped straight down: into the water below a platform, or outside a building. The run
+  now checks whether a roof is over the NPC; if so, it lands on open ground nearby and walks in through the door,
+  and when it starts indoors it walks out before mounting. It only gets off in the air right above the NPC.
+  Orders, Custom Deliveries and Cosmic Exploration travel as before.
+
 ## 0.22.1
 
 - Fixed: trips walked instead of flying in A Realm Reborn zones (North Shroud, Coerthas and the others). Flying

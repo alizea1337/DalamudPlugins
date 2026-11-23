@@ -31,7 +31,8 @@ internal sealed class QuestTravel
     /// <summary>Talks to a portal before it counts as not working.</summary>
     private const int PortalTries = 3;
 
-    private readonly Travel travel = new();
+    /// <summary>Quest NPCs stand indoors and on raised floors: the buildings rules are on for every Tribes trip.</summary>
+    private readonly Travel travel = new() { RoofAware = true };
     private readonly HashSet<(uint, uint)> broken = new();
     private string what = "";
     private uint territory;
