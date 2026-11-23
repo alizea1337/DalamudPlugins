@@ -162,6 +162,40 @@ internal static class BugReport
             foreach (var e in plugin.DeliveryLoop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
         }
 
+        // ---------------------------------------------------------------- Allied societies (Tribes)
+        if (catalog?.Tribes is { Tribes.Count: > 0 } tribes)
+        {
+            Section("Tribes");
+            var ready = Integrations.Tribes.Ready;
+            Line($"State from the game: {(ready ? "yes" : "no")}, seed {Integrations.Tribes.Seed}, {Integrations.Tribes.AllowancesLeft} of {Integrations.Tribes.DailyAllowance} allowances left, "
+                 + $"day {Integrations.Tribes.DayNumber}, resets {Integrations.Tribes.NextReset:yyyy-MM-dd HH:mm}");
+            var t = plugin.Config.Tribes;
+            Line($"Settings: goal {t.Goal?.ToString() ?? "automatic"}, left out [{string.Join(",", t.LeftOut)}], pause for cutscenes {t.PauseForCutscenes}, leave out /say {t.LeaveOutSay}");
+            if (ready)
+            {
+                var accepted = Integrations.Tribes.Accepted(tribes);
+                var slots = Integrations.Tribes.DailySlots();
+                Line($"Today's slots: [{string.Join(", ", slots.Select(x => $"{x.Row - 0x10000}{(x.Done ? " done" : "")}"))}]");
+                foreach (var a in accepted)
+                    Line($"In the journal: {a.Quest.Number} \"{a.Quest.Name}\" ({a.Quest.Kind}), step {a.Sequence}, taken as {ClassJobs.Abbreviation(a.AcceptClassJob)}{(a.Leftover ? ", LEFT OVER from before the reset" : "")}");
+                foreach (var society in tribes.Tribes)
+                {
+                    var day = Integrations.Tribes.Today(tribes, society, accepted, slots);
+                    if (!day.Unlocked)
+                    {
+                        Line($"{society.Id} {society.Name}: locked");
+                        continue;
+                    }
+                    Line($"{society.Id} {society.Name}: rank {day.Rank}{(day.RankedUpToday ? " (ranked up today)" : "")}, reputation {day.Value}/{day.Needed}{(day.BarFull ? ", bar full" : "")}{(day.Allied ? ", allied" : "")}, taken today {day.Taken}");
+                    foreach (var g in day.Givers.Where(g => g.Offers.Count > 0))
+                    {
+                        var check = Integrations.Tribes.Matches(g.Giver.NpcId) switch { true => "matches the game", false => "DIFFERS from the game", _ => "not checked" };
+                        Line($"  giver {g.Giver.NpcId}: offers [{string.Join(", ", g.Offers.Select(o => $"{o.Quest.Number} {o.State}{(o.AcceptedAs != 0 ? " " + ClassJobs.Abbreviation(o.AcceptedAs) : "")}"))}], taken {g.Taken}, {check}");
+                    }
+                }
+            }
+        }
+
         // ---------------------------------------------------------------- Cosmic Exploration
         var cosmic = plugin.Config.Cosmic;
         if (cosmic.Classes.Count > 0 || plugin.CosmicLoop.Lines.Count > 0)

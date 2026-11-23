@@ -24,6 +24,8 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>The Cosmic Exploration loop: planet, classes, goal, extras, shopping list, and what runs of each mission came to.</summary>
     public CosmicSettings Cosmic { get; set; } = new();
     public DeliverySettings Deliveries { get; set; } = new();
+    /// <summary>Allied societies (the Tribes page): the day's goal, which societies, and how.</summary>
+    public TribeSettings Tribes { get; set; } = new();
     /// <summary>What was started last ("order", "cosmic", "deliveries"): the compact strip shows that one when nothing runs.</summary>
     public string LastLoop { get; set; } = "";
     public ConsumableSettings Consumables { get; set; } = new();
@@ -69,6 +71,8 @@ public sealed class Configuration : IPluginConfiguration
             c.Cosmic.RecordsVersion = 2;
         }
         c.Characters ??= new();
+        c.Tribes ??= new();
+        c.Tribes.LeftOut ??= new();
         c.Consumables ??= new();
         c.Crafting ??= new();
         c.Run ??= new();
@@ -416,6 +420,20 @@ public sealed class DeliverySettings
     public bool PauseForCutscenes { get; set; }
     /// <summary>Food and medicine may be used to reach a higher collectability tier (not when ranking up: any tier does).</summary>
     public bool UseConsumables { get; set; } = true;
+}
+
+/// <summary>Allied societies (Expeditions, Tribes): what the day's dailies aim for, which societies, and how.</summary>
+[Serializable]
+public sealed class TribeSettings
+{
+    /// <summary>The goal picked; null: "Rank up" while any ticked society is below its top rank, otherwise "Currency".</summary>
+    public Core.Tribes.TribeGoal? Goal { get; set; }
+    /// <summary>Societies left out (BeastTribe rows); every other unlocked society takes part.</summary>
+    public HashSet<uint> LeftOut { get; set; } = new();
+    /// <summary>Pause the run for quest cutscenes, so they can be watched; otherwise the run skips them.</summary>
+    public bool PauseForCutscenes { get; set; }
+    /// <summary>Leave out dailies that say a phrase in /say (public chat); the run says only the quest's own phrase, once.</summary>
+    public bool LeaveOutSay { get; set; }
 }
 
 [Serializable]
