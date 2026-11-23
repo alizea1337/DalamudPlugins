@@ -119,6 +119,8 @@ internal sealed unsafe class QuestStepper
     public bool SkipCutscenesNow => State == StepperState.Working && !Paused && !options.PauseForCutscenes;
     /// <summary>The character is about to jump through a portal (the Security check expects it).</summary>
     public bool TakingPortal => travel.AtPortal;
+    /// <summary>Waiting because a cutscene plays and the options say to pause for them (not a problem: Resume carries on).</summary>
+    public bool PausedForCutscene => State == StepperState.WaitingForUser && cutscenePaused;
 
     // ------------------------------------------------------------------ control
 

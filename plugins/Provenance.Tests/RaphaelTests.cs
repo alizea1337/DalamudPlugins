@@ -20,6 +20,17 @@ public class RaphaelTests
     }
 
     [Fact]
+    public void The_game_s_own_recipe_numbers_replace_the_recipe_id()
+    {
+        var sheet = new RaphaelRequest(36771, 100, 5844, 5182, 572, true, false, 0);
+        var live = sheet with { Live = new LiveRecipe(690, 6600, 12000, 80) };
+        Assert.Equal("solve --custom-recipe 690 6600 12000 80 --level 100 --stats 5844 5182 572 --manipulation --target-quality 0 --output-variables action_ids final_quality recipe_max_quality",
+            RaphaelCli.Arguments(live));
+        Assert.StartsWith("solve --recipe-id 36771 ", RaphaelCli.Arguments(sheet));
+        Assert.NotEqual(sheet.CacheKey, live.CacheKey);
+    }
+
+    [Fact]
     public void Hq_ingredients_start_the_craft_with_quality()
     {
         var withHq = new RaphaelRequest(37825, 100, 5700, 5300, 645, true, false, null, new[] { 2, 1, 0 });

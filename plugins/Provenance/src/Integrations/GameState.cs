@@ -42,6 +42,53 @@ internal static unsafe class GameState
         return module != null && module->EquipGearset(index, 0) >= 0;
     }
 
+    /// <summary>A piece of gear is on the character now.</summary>
+    public static bool Wearing(uint itemId)
+    {
+        var c = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        if (c == null || itemId == 0) return false;
+        for (var i = 0; i < c->Size; i++)
+            if (c->GetInventorySlot(i) is var slot && slot != null && slot->GetBaseItemId() == itemId) return true;
+        return false;
+    }
+
+    private static readonly InventoryType[] GearPlaces =
+    {
+        InventoryType.ArmoryHands, InventoryType.ArmoryBody, InventoryType.ArmoryHead, InventoryType.ArmoryLegs, InventoryType.ArmoryFeets,
+        InventoryType.ArmoryWaist, InventoryType.ArmoryEar, InventoryType.ArmoryNeck, InventoryType.ArmoryWrist, InventoryType.ArmoryRings,
+        InventoryType.ArmoryMainHand, InventoryType.ArmoryOffHand,
+        InventoryType.Inventory1, InventoryType.Inventory2, InventoryType.Inventory3, InventoryType.Inventory4,
+    };
+
+    /// <summary>
+    /// Puts on a piece of gear from the armoury chest or the bags, as dragging it onto its slot does (the piece it
+    /// replaces goes to the armoury chest). False when it isn't found or has no slot.
+    /// </summary>
+    public static bool Equip(uint itemId)
+    {
+        var inv = InventoryManager.Instance();
+        var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId);
+        if (inv == null || row?.EquipSlotCategory.ValueNullable is not { } category) return false;
+        // The equipped items' slots, in the game's order.
+        var slot = category.MainHand > 0 ? 0 : category.OffHand > 0 ? 1 : category.Head > 0 ? 2 : category.Body > 0 ? 3 : category.Gloves > 0 ? 4
+            : category.Waist > 0 ? 5 : category.Legs > 0 ? 6 : category.Feet > 0 ? 7 : category.Ears > 0 ? 8 : category.Neck > 0 ? 9
+            : category.Wrists > 0 ? 10 : category.FingerR > 0 ? 11 : category.FingerL > 0 ? 12 : -1;
+        if (slot < 0) return false;
+        foreach (var place in GearPlaces)
+        {
+            var c = inv->GetInventoryContainer(place);
+            if (c == null || !c->IsLoaded) continue;
+            for (var i = 0; i < c->Size; i++)
+            {
+                var s = c->GetInventorySlot(i);
+                if (s == null || s->GetBaseItemId() != itemId) continue;
+                inv->MoveItemSlot(place, (ushort)i, InventoryType.EquippedItems, (ushort)slot, true);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>[primary, secondary, points] as the game shows them now, food and medicine included.</summary>
     public static int[] LiveStats(Discipline d)
     {

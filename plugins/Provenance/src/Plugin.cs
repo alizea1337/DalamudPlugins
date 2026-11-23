@@ -32,6 +32,10 @@ public sealed class Plugin : IDalamudPlugin
     internal Run.Deliveries.DeliveryRun DeliveryLoop { get; }
     /// <summary>The week's custom-delivery plan (for the page and the run).</summary>
     internal Data.DeliveryPlanning DeliveryPlanning { get; }
+    /// <summary>The allied society run (Tribes).</summary>
+    internal Run.Tribes.TribeRun TribeLoop { get; }
+    /// <summary>The day's allied society plan (for the pages and the run).</summary>
+    internal Data.TribePlanning TribePlanning { get; }
     internal RunEngine Runs { get; }
     private readonly Run.Guard guard;
     internal MainWindow Main { get; }
@@ -55,9 +59,11 @@ public sealed class Plugin : IDalamudPlugin
         CosmicLoop = new Run.Cosmic.CosmicRun(this);
         DeliveryPlanning = new Data.DeliveryPlanning(this);
         DeliveryLoop = new Run.Deliveries.DeliveryRun(this);
-        // Rank-up cutscenes of the custom deliveries: the game's own skip, triggered only while the delivery run waits
-        // out a hand-over (ECommons' AutoCutsceneSkipper, MIT; the run answers the "Skip cutscene?" question).
-        ECommons.Automation.AutoCutsceneSkipper.Init(_ => DeliveryLoop.SkipCutscenesNow);
+        TribePlanning = new Data.TribePlanning(this);
+        TribeLoop = new Run.Tribes.TribeRun(this);
+        // Cutscenes: the game's own skip, triggered only while the delivery run waits out a hand-over or the allied
+        // society run works on a quest (ECommons' AutoCutsceneSkipper, MIT; the runs answer the "Skip cutscene?" question).
+        ECommons.Automation.AutoCutsceneSkipper.Init(_ => DeliveryLoop.SkipCutscenesNow || TribeLoop.SkipCutscenesNow);
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
@@ -157,6 +163,7 @@ public sealed class Plugin : IDalamudPlugin
         if (Runs.Active) Runs.Stop();
         else if (CosmicLoop.Active) CosmicLoop.Stop();
         else if (DeliveryLoop.Active) DeliveryLoop.Stop();
+        else if (TribeLoop.Active) TribeLoop.Stop();
         else if (walking) Services.Chat.Print("[Provenance] Stopped moving.");
         else Services.Chat.Print("[Provenance] Nothing to stop.");
     }
@@ -180,6 +187,7 @@ public sealed class Plugin : IDalamudPlugin
             Runs.Tick();
             CosmicLoop.Tick();
             DeliveryLoop.Tick();
+            TribeLoop.Tick();
             guard.Tick();
             Integrations.Deliveries.Observe(Plans.Catalog?.Deliveries);
             Integrations.Tribes.Observe(Plans.Catalog?.Tribes);
@@ -213,6 +221,8 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception e) { Services.Log.Error(e, "Stopping the Cosmic loop on unload failed"); }
         try { DeliveryLoop.Stop("Provenance was unloaded.", true); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the custom deliveries on unload failed"); }
+        try { TribeLoop.Stop("Provenance was unloaded.", true); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the allied society run on unload failed"); }
         try { Runs.Dispose(); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the run on unload failed"); }
         Plans.Dispose();

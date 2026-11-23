@@ -412,6 +412,7 @@ internal sealed class RunEngine : IDisposable
         if (Active) return "A run is already going.";
         if (plugin.CosmicLoop.Active) return "The Cosmic Exploration loop is going; stop it first.";
         if (plugin.DeliveryLoop.Active) return "The custom deliveries are going; stop them first.";
+        if (plugin.TribeLoop.Active) return "The allied society run is going; stop it first.";
         if (plugin.Plans.Catalog == null) return "Still reading game data.";
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";

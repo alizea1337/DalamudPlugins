@@ -25,7 +25,13 @@ namespace Provenance.Run;
 /// <param name="Cosmic">A Cosmic Exploration mission recipe: made in the mission's own crafting log, from the Cosmopouch.</param>
 /// <param name="SteadyHand">Stellar Steady Hand uses the mission lends (Raphael plans with them).</param>
 /// <param name="UseConsumables">Eat and take medicine as set under Settings, Crafting (the Cosmic loop only when its suggestion was taken).</param>
-internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq, int? Quality = null, bool Cosmic = false, int SteadyHand = 0, bool UseConsumables = true);
+/// <param name="LiveRecipe">
+/// A recipe the game may adjust to the crafter's level (allied society quest recipes: "the difficulty of this quest has
+/// been synced to your current level"): its numbers are read from the game and logged next to the sheet's, and the
+/// rotation is worked out for the game's when they differ.
+/// </param>
+internal sealed record CraftJob(RecipeInfo Recipe, int Crafts, bool Hq, int? Quality = null, bool Cosmic = false, int SteadyHand = 0, bool UseConsumables = true,
+    bool LiveRecipe = false);
 
 /// <summary>
 /// Crafts a queue of recipes, one synthesis at a time: right job and gearset, repair, food and
@@ -73,6 +79,15 @@ internal sealed unsafe class Crafter
     private bool pauseRequested;
     private bool leaveStanceOnPause;
     private DateTime lastEquip;
+
+    /// <summary>A <see cref="CraftJob.LiveRecipe"/> job: the game's numbers for the recipe when they differ from the sheet's (null: the sheet's).</summary>
+    private LiveRecipe? live;
+    /// <summary>The crafting log's numbers for the recipe were compared with the sheet's (once per job).</summary>
+    private bool liveChecked;
+    /// <summary>The synthesis window's numbers were compared with the ones the rotation was worked out for (this craft).</summary>
+    private bool windowChecked;
+    /// <summary>The synthesis window showed other numbers: the next craft gets a rotation for them.</summary>
+    private bool solveAgainAfterCraft;
 
     /// <summary>A specialist action (Heart and Soul, Quick Innovation) was refused this session: rotations leave them out from then on.</summary>
     private bool specialistRefused;
@@ -155,7 +170,16 @@ internal sealed unsafe class Crafter
         macroHq = null;
         LastQuality = -1;
         SteadyHandUsed = 0;
+        ForgetLive();
         Go(Step.NextRecipe);
+    }
+
+    private void ForgetLive()
+    {
+        live = null;
+        liveChecked = false;
+        windowChecked = false;
+        solveAgainAfterCraft = false;
     }
 
     /// <summary>Pause after the craft that's under way (or right away between crafts).</summary>
@@ -290,6 +314,7 @@ internal sealed unsafe class Crafter
             Current = next;
             doneThisJob = 0;
             macro.Clear();
+            ForgetLive();
         }
 
         var catalog = plugin.Plans.Catalog!;
@@ -450,10 +475,12 @@ internal sealed unsafe class Crafter
             var hqIn = Current.Cosmic ? null : HqIngredients(Current);
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
                 manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused,
-                Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed));
+                Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed),
+                Live: Current.LiveRecipe ? live : null);
             Status = "Working out the rotation";
             DebugLog.Write("crafter", $"solve recipe {r.RecipeId} ({plugin.Plans.Catalog!.ItemName(r.ItemId)}), level {request.Level}, stats {request.Craftsmanship}/{request.Control}/{request.Cp}, "
-                                      + $"Steady Hand {request.SteadyHand}, target {request.TargetQuality?.ToString() ?? "max"}, specialist {request.Specialist}, manipulation {request.Manipulation}, cosmic {Current.Cosmic}");
+                                      + $"Steady Hand {request.SteadyHand}, target {request.TargetQuality?.ToString() ?? "max"}, specialist {request.Specialist}, manipulation {request.Manipulation}, cosmic {Current.Cosmic}"
+                                      + (request.Live is { } l ? $", the game's numbers ({l})" : ""));
             raphael.ForgetFailure(request);
             macroHq = hqIn;
             solvingFor = request;
@@ -511,7 +538,23 @@ internal sealed unsafe class Crafter
     {
         var id = Current!.Recipe.RecipeId;
         if (Current.Cosmic) { OpenCosmicRecipe(id); return; }
-        if (SelectedRecipe() == id && Ready("RecipeNote")) { Wait(0.4); Go(Step.Ingredients, keepWait: true); return; }
+        if (SelectedRecipe() == id && Ready("RecipeNote"))
+        {
+            // A quest recipe the game adjusts: once the log shows it, plan for the game's numbers if they differ.
+            if (Current.LiveRecipe && !liveChecked)
+            {
+                liveChecked = true;
+                if (CheckLiveRecipe())
+                {
+                    macro.Clear();
+                    Go(Step.Solve);
+                    return;
+                }
+            }
+            Wait(0.4);
+            Go(Step.Ingredients, keepWait: true);
+            return;
+        }
         if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(10);
         if (DateTime.UtcNow > deadline) { Fail("The recipe didn't open."); return; }
         Status = "Opening the recipe";
@@ -669,6 +712,7 @@ internal sealed unsafe class Crafter
             actionPending = false;
             fallback = false;
             stepIndexBefore = -1;
+            windowChecked = false;
             DebugLog.Write("crafter", $"synthesis started: recipe {Current!.Recipe.RecipeId}, craft {doneThisJob + 1} of {Current.Crafts}, rotation {macro.Count} steps");
             Status = $"Crafting {plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId)}";
             Go(Step.Acting);
@@ -717,6 +761,11 @@ internal sealed unsafe class Crafter
         {
             Wait(0.1);
             return;
+        }
+        if (Current!.LiveRecipe && !windowChecked)
+        {
+            windowChecked = true;
+            CheckSynthesisWindow(synth);
         }
 
         var job = Current!.Recipe.Job.ClassJobId();
@@ -799,10 +848,88 @@ internal sealed unsafe class Crafter
         if (Current.Cosmic && macro.Contains(StellarSteadyHand)) macro.Clear();
         DebugLog.Write("crafter", $"crafted {name} ({doneThisJob} of {Current.Crafts}), {actionsUsed} actions, rotation quality {LastQuality}, Steady Hand used {SteadyHandUsed}");
         Crafted?.Invoke(Current.Recipe);
+        if (solveAgainAfterCraft)
+        {
+            // The synthesis window showed numbers the rotation wasn't worked out for: a new one for the next craft.
+            solveAgainAfterCraft = false;
+            macro.Clear();
+        }
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
         // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.
         Go(doneThisJob < Current.Crafts ? macro.Count == 0 ? Step.Solve : Step.Ingredients : Step.NextRecipe, keepWait: true);
+    }
+
+    // ------------------------------------------------------------------ recipes the game adjusts
+
+    /// <summary>
+    /// The recipe's numbers in the sheet: its recipe level, and progress, quality and durability with the recipe's
+    /// factors applied (as the game computes them).
+    /// </summary>
+    private static LiveRecipe? SheetNumbers(uint recipeId)
+    {
+        if (Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Recipe>().GetRowOrDefault(recipeId) is not { } r) return null;
+        if (r.RecipeLevelTable.ValueNullable is not { } level) return null;
+        return Scaled(r, (int)r.RecipeLevelTable.RowId, level);
+    }
+
+    private static LiveRecipe Scaled(Lumina.Excel.Sheets.Recipe r, int rlvl, Lumina.Excel.Sheets.RecipeLevelTable level)
+        => new(rlvl, (int)(level.Difficulty * (long)r.DifficultyFactor / 100), (int)(level.Quality * (long)r.QualityFactor / 100),
+            (int)(level.Durability * (long)r.DurabilityFactor / 100));
+
+    /// <summary>
+    /// With the recipe open in the crafting log: compares the recipe level the game uses with the sheet's and writes
+    /// both to the debug log. A different level (the quest syncing the recipe to the crafter's) gives the numbers of that
+    /// level to plan with. True when they changed what the rotation was worked out for.
+    /// </summary>
+    private bool CheckLiveRecipe()
+    {
+        var entry = SelectedEntry();
+        var id = Current!.Recipe.RecipeId;
+        if (entry == null || SheetNumbers(id) is not { } sheet) return false;
+        var rlvl = (int)entry->RecipeLevelTableId;
+        DebugLog.Write("crafter", $"recipe {id} in the crafting log: recipe level {rlvl}, difficulty {entry->Difficulty}, quality {entry->Quality}, durability {entry->Durability}, "
+                                  + $"class level {entry->ClassJobLevel}; the sheet: {sheet}");
+        if (rlvl <= 0 || rlvl == sheet.RecipeLevel) return false;
+        var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Recipe>().GetRow(id);
+        if (Services.Data.GetExcelSheet<Lumina.Excel.Sheets.RecipeLevelTable>().GetRowOrDefault((uint)rlvl) is not { } level) return false;
+        var numbers = Scaled(row, rlvl, level);
+        if (live == numbers) return false;
+        live = numbers;
+        DebugLog.Write("crafter", $"[!] recipe {id}: the game uses recipe level {rlvl}, not the sheet's {sheet.RecipeLevel}; planning with {numbers}");
+        return true;
+    }
+
+    /// <summary>
+    /// At the start of a synthesis: the progress, quality and durability the synthesis window shows, next to the sheet's
+    /// and the ones the rotation was worked out for (debug log). When the window's differ, the next craft gets a
+    /// rotation for them; this one finishes with Basic Synthesis if its rotation falls short.
+    /// </summary>
+    private void CheckSynthesisWindow(AtkUnitBase* addon)
+    {
+        var synth = (FFXIVClientStructs.FFXIV.Client.UI.AddonSynthesis*)addon;
+        var progress = Number(synth->MaxProgress);
+        var quality = Number(synth->MaxQuality);
+        var durability = Number(synth->StartingDurability);
+        var id = Current!.Recipe.RecipeId;
+        var sheet = SheetNumbers(id);
+        var planned = live ?? sheet;
+        DebugLog.Write("crafter", $"recipe {id} at the start of the synthesis: progress {progress}, quality {quality}, durability {durability}; "
+                                  + $"the sheet: {sheet?.ToString() ?? "unknown"}; planned with {planned?.ToString() ?? "unknown"}");
+        if (progress <= 0 || durability <= 0 || planned is not { } p) return;
+        if (p.Progress == progress && p.Durability == durability && (quality <= 0 || p.Quality == quality)) return;
+        var rlvl = SelectedEntry() is var e && e != null && e->RecipeLevelTableId > 0 ? (int)e->RecipeLevelTableId : p.RecipeLevel;
+        live = new LiveRecipe(rlvl, progress, quality > 0 ? quality : p.Quality, durability);
+        solveAgainAfterCraft = true;
+        DebugLog.Write("crafter", $"[!] recipe {id}: the synthesis window's numbers differ from the plan's; the next craft is planned with {live}");
+    }
+
+    /// <summary>A number a text node shows ("3,500" → 3500); 0 when it has none.</summary>
+    private static int Number(AtkTextNode* node)
+    {
+        if (node == null) return 0;
+        var digits = new string(node->NodeText.ToString().Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var n) ? n : 0;
     }
 
     // ------------------------------------------------------------------ helpers

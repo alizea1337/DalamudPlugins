@@ -33,7 +33,7 @@ internal sealed unsafe class Guard
     {
         Watch();
         var s = plugin.Config.Security;
-        if (!s.DeclineTrades || (s.TradesOnlyDuringRuns && !(plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active))) return;
+        if (!s.DeclineTrades || (s.TradesOnlyDuringRuns && !(plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active || plugin.TribeLoop.Active))) return;
         if (!GenericHelpers.TryGetAddonByName<AtkUnitBase>("Trade", out var trade) || !trade->IsVisible) return;
         if (DateTime.UtcNow - lastTrade < TimeSpan.FromSeconds(1)) return;
         lastTrade = DateTime.UtcNow;
@@ -53,7 +53,7 @@ internal sealed unsafe class Guard
         var sec = plugin.Config.Security;
         var look = new WatchFor(sec.StopForGameMaster, sec.StopWhenPlayerAppears, sec.StopForHiddenPlayer, Math.Clamp(sec.NearbyYalms, 5, 50));
         var lookAround = look.GameMasters || look.Appearing || look.Hidden;
-        var working = (sec.StopWhenMoved || lookAround) && (plugin.Runs.Working || plugin.CosmicLoop.Working || plugin.DeliveryLoop.Working);
+        var working = (sec.StopWhenMoved || lookAround) && (plugin.Runs.Working || plugin.CosmicLoop.Working || plugin.DeliveryLoop.Working || plugin.TribeLoop.Working);
         if (!working)
         {
             if (watching) { moves.Reset(); players.Reset(); }
@@ -142,10 +142,11 @@ internal sealed unsafe class Guard
         players.Reset();
         watching = false;
         var reason = $"Stopped everything: {what} (Security tab).";
-        DebugLog.Write("guard", $"[!] {forLog}; run working {plugin.Runs.Working}, cosmic working {plugin.CosmicLoop.Working}");
+        DebugLog.Write("guard", $"[!] {forLog}; run working {plugin.Runs.Working}, cosmic working {plugin.CosmicLoop.Working}, deliveries working {plugin.DeliveryLoop.Working}, tribes working {plugin.TribeLoop.Working}");
         if (plugin.Runs.Working) plugin.Runs.Stop(reason, problem: true, now: true);
         if (plugin.CosmicLoop.Working) plugin.CosmicLoop.Stop(reason, problem: true);
         if (plugin.DeliveryLoop.Working) plugin.DeliveryLoop.Stop(reason, problem: true);
+        if (plugin.TribeLoop.Working) plugin.TribeLoop.Stop(reason, problem: true);
         Vnav.Stop();
         Services.Chat.PrintError("[Provenance] " + reason);
     }

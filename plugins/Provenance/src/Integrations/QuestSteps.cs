@@ -557,6 +557,14 @@ internal static unsafe class QuestSteps
         return true;
     }
 
+    /// <summary>The title of the quest the journal window offers (its title text, as shown), or null when none is offered.</summary>
+    public static string? OfferTitle()
+    {
+        if (Interact.Ready("JournalAccept") is var a && a == null) return null;
+        var j = (AddonJournalAccept*)a;
+        return j->QuestTitleText == null ? null : j->QuestTitleText->NodeText.ToString();
+    }
+
     /// <summary>Declines a quest offer that isn't the run's (a click on Decline).</summary>
     public static bool Decline()
     {

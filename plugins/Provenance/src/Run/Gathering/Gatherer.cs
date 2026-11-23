@@ -20,6 +20,14 @@ using Provenance.Integrations;
 namespace Provenance.Run.Gathering;
 
 /// <summary>
+/// Where to look for a node the shipped node data doesn't have: an allied society's quest-only node, whose gathering
+/// points the sheets place in no zone (territory 1). The zone, the centre and radius of the spawn area (the quest's map
+/// marker, else the game's exported gathering area), the gathering point base whose points spawn there, and the class
+/// that gathers it.
+/// </summary>
+internal sealed record GatherArea(uint Territory, Vector3 Centre, float Radius, uint PointBase, uint ClassJob);
+
+/// <summary>
 /// Provenance's own gathering (replacing GatherBuddy Reborn's auto-gather): picks the next node for
 /// what the order still needs, changes into the gatherer's gearset, travels there (teleport, aethernet,
 /// mount, fly), finds the node among its known spawn spots, opens it and works the gathering window
@@ -45,6 +53,14 @@ internal sealed unsafe class Gatherer
     private List<GatherTarget> targets = new();
     private Func<GatherTarget, int> left = _ => 0;
     private Func<IReadOnlySet<uint>> neededCollectables = () => new HashSet<uint>();
+    /// <summary>Targets gathered at an area of their own (quest-only nodes), by item.</summary>
+    private Dictionary<uint, GatherArea> areas = new();
+    /// <summary>The area of the node chosen, when it's one of those (null for nodes the node data knows).</summary>
+    private GatherArea? area;
+    /// <summary>Times every search spot of the area was looked at without a node in view.</summary>
+    private int areaRounds;
+    /// <summary>Rounds of the area's spots without finding a node before the gatherer gives up.</summary>
+    private const int AreaRounds = 2;
 
     private Step step = Step.Idle;
     private DateTime waitUntil;
@@ -137,6 +153,8 @@ internal sealed unsafe class Gatherer
                     yield return $"  spawn spot: point {s.Point} at {s.At.X:0.0}, {s.At.Y:0.0}, {s.At.Z:0.0}{(visited.Contains((s.Point, (int)s.At.X, (int)s.At.Z)) ? " (visited)" : "")}";
             yield return $"spot travelled to: {spot.X:0.0}, {spot.Y:0.0}, {spot.Z:0.0}";
         }
+        if (area is { } a)
+            yield return $"area: territory {a.Territory}, centre {a.Centre.X:0.0}, {a.Centre.Z:0.0}, radius {a.Radius:0}, point base {a.PointBase}, class {a.ClassJob}, rounds without a node {areaRounds}";
         yield return "targets: " + string.Join("; ", targets.Select(x => $"{Catalog.ItemName(x.ItemId)} ({x.ItemId}) {x.Supply}, {left(x)} left"));
         foreach (var (group, until) in givenUp.Where(kv => kv.Value > now)) yield return $"group {group} given up until {until.ToLocalTime():HH:mm:ss}";
         if (abandoned.Count > 0) yield return "groups dropped for the run: " + string.Join(", ", abandoned);
@@ -150,13 +168,20 @@ internal sealed unsafe class Gatherer
     public bool UpkeepBusy => upkeep.Busy;
 
     /// <param name="reduceNow">Collectables gathered to be reduced; reduced between nodes as soon as they're in the bags.</param>
+    /// <param name="gatherAreas">
+    /// Targets whose nodes the node data doesn't know (allied society quest nodes), by item: searched for in their area
+    /// and recognised by their gathering point base. Orders pass none.
+    /// </param>
     public void Begin(IEnumerable<GatherTarget> gatherTargets, Func<GatherTarget, int> leftOf, Func<IReadOnlySet<uint>> collectablesNeeded,
-        Func<IReadOnlySet<uint>>? reduceNow = null)
+        Func<IReadOnlySet<uint>>? reduceNow = null, IReadOnlyDictionary<uint, GatherArea>? gatherAreas = null)
     {
         targets = gatherTargets.Where(t => t.Supply != Supply.Fish).ToList();
         left = leftOf;
         neededCollectables = collectablesNeeded;
         this.reduceNow = reduceNow ?? (() => new HashSet<uint>());
+        areas = gatherAreas?.ToDictionary(kv => kv.Key, kv => kv.Value) ?? new Dictionary<uint, GatherArea>();
+        area = null;
+        areaRounds = 0;
         visited.Clear();
         givenUp.Clear();
         giveUps.Clear();
@@ -274,9 +299,33 @@ internal sealed unsafe class Gatherer
                         && !(skipNodes.TryGetValue(o.GameObjectId, out var until) && DateTime.UtcNow < until))
             .GroupBy(o => o.BaseId)
             .ToDictionary(g => g.Key, g => g.Min(o => Vector3.Distance(o.Position, me)));
+
+        // A quest's own node, in its area: searched for there (the node data doesn't know it).
         foreach (var t in targets)
         {
-            if (left(t) <= 0) continue;
+            if (left(t) <= 0 || !areas.TryGetValue(t.ItemId, out var a)) continue;
+            if (abandoned.Contains(a.PointBase) || (a.Territory != here && !CanReach(a.Territory)))
+            {
+                if (unreachable.Add(t.ItemId))
+                    log(abandoned.Contains(a.PointBase)
+                        ? $"Stopped trying to gather {Catalog.ItemName(t.ItemId)}: its node couldn't be landed at or opened {MaxGiveUps} times in a row."
+                        : $"Can't get to where {Catalog.ItemName(t.ItemId)} is gathered.", true);
+                continue;
+            }
+            if (givenUp.TryGetValue(a.PointBase, out var until) && DateTime.UtcNow < until) { skipped = true; continue; }
+            Waiting = false;
+            WaitingToRetry = false;
+            current = t;
+            area = a;
+            nodePoints = Catalog.Gather.PointsOfBase(a.PointBase).ToHashSet();
+            node = new GatherPoint(nodePoints.FirstOrDefault(), a.PointBase, a.Territory, a.ClassJob, 0, false, 0, 0, 0, false);
+            Go(Step.Gear);
+            return;
+        }
+
+        foreach (var t in targets)
+        {
+            if (left(t) <= 0 || areas.ContainsKey(t.ItemId)) continue;
             var any = false;
             var dropped = false;
             foreach (var p in Catalog.GatherPoints(t.ItemId))
@@ -320,15 +369,44 @@ internal sealed unsafe class Gatherer
         Waiting = false;
         WaitingToRetry = false;
         current = pick.Target;
+        area = null;
         node = pick.Point;
         nodePoints = Catalog.GatherPoints(pick.Target.ItemId).Where(p => p.BaseId == pick.Point.BaseId).Select(p => p.PointId).ToHashSet();
         Go(Step.Gear);
     }
 
-    /// <summary>Known spawn spots of a node (every GatheringPoint of the base), each with where to stand.</summary>
+    /// <summary>
+    /// Known spawn spots of a node (every GatheringPoint of the base), each with where to stand. For a quest node in an
+    /// area of its own: where its points were seen before (learned on this PC), then places to look from: the centre,
+    /// and around it when the area is wide (point 0).
+    /// </summary>
     private List<(uint Point, Vector3 At)> BasePositions(uint itemId, uint baseId)
-        => Catalog.GatherPoints(itemId).Where(p => p.BaseId == baseId)
+    {
+        if (area is { } a && a.PointBase == baseId) return AreaSpots(a);
+        return Catalog.GatherPoints(itemId).Where(p => p.BaseId == baseId)
             .SelectMany(p => Catalog.Gather.Positions(p.PointId).Select(pos => (p.PointId, pos))).ToList();
+    }
+
+    /// <summary>A wider area than this is looked over from points around its centre too.</summary>
+    private const float WideArea = 30f;
+
+    private List<(uint Point, Vector3 At)> AreaSpots(GatherArea a)
+    {
+        var spots = new List<(uint Point, Vector3 At)>();
+        // Seen before: points of the base are only ever in the society's zone, but keep to the area's surroundings.
+        var reach = a.Radius > 0 ? a.Radius + InView : float.MaxValue;
+        foreach (var point in Catalog.Gather.PointsOfBase(a.PointBase))
+        foreach (var pos in Catalog.Gather.Positions(point))
+            if (Across(pos, a.Centre) <= reach) spots.Add((point, pos));
+        spots.Add((0, a.Centre));
+        if (a.Radius > WideArea)
+            for (var k = 0; k < 4; k++)
+            {
+                var angle = k * MathF.PI / 2;
+                spots.Add((0, a.Centre + new Vector3(MathF.Cos(angle), 0, MathF.Sin(angle)) * (a.Radius * 0.6f)));
+            }
+        return spots;
+    }
 
     // ------------------------------------------------------------------ getting ready
 
@@ -394,6 +472,12 @@ internal sealed unsafe class Gatherer
         var open = spots.Where(s => !visited.Contains((s.Point, (int)s.At.X, (int)s.At.Z))).ToList();
         if (open.Count == 0)
         {
+            // A quest node's area looked over again and again without the node in view: it isn't there for the run.
+            if (area != null && ++areaRounds >= AreaRounds)
+            {
+                Fail($"Couldn't find the node for {Catalog.ItemName(current.Value.ItemId)} around the quest's gathering area; gather it yourself.");
+                return;
+            }
             // Every spot seen: the group respawned. Start over.
             foreach (var s in spots) visited.Remove((s.Point, (int)s.At.X, (int)s.At.Z));
             open = spots;
@@ -699,6 +783,7 @@ internal sealed unsafe class Gatherer
     {
         EndGpWait();
         if (node != null) giveUps.Remove(node.BaseId); // it opened: the give-ups weren't in a row
+        areaRounds = 0;
         visitStart = current is { } cur && GameState.GatheredAsCollectable(cur.ItemId) && Services.Objects.LocalPlayer is { } p
             ? (cur.ItemId, p.CurrentGp, GameState.GatheredInBags(cur.ItemId), DateTime.UtcNow)
             : null;

@@ -14,6 +14,10 @@ namespace Provenance.Core.Crafting;
 /// </param>
 /// <param name="SteadyHand">Stellar Steady Hand uses a Cosmic Exploration mission lends (0: none).</param>
 /// <param name="Food">Food the rotation may count on (item id, 0: none); <paramref name="Potion"/> the same for medicine.</param>
+/// <param name="Live">
+/// The recipe's numbers as the game has them right now, when they differ from the sheet's (an allied society quest
+/// recipe the game adjusts to the crafter's level); null: the recipe as the sheet has it.
+/// </param>
 public sealed record RaphaelRequest(
     uint RecipeId,
     int Level,
@@ -28,7 +32,8 @@ public sealed record RaphaelRequest(
     uint Food = 0,
     bool FoodHq = false,
     uint Potion = 0,
-    bool PotionHq = false)
+    bool PotionHq = false,
+    LiveRecipe? Live = null)
 {
     public bool AnyHqIngredients => HqIngredients?.Any(n => n > 0) == true;
 
@@ -36,7 +41,14 @@ public sealed record RaphaelRequest(
                               + (AnyHqIngredients ? "|hq " + string.Join(",", HqIngredients!) : "")
                               + (SteadyHand > 0 ? "|ssh " + SteadyHand : "")
                               + (Food != 0 ? $"|food {Food}{(FoodHq ? "hq" : "")}" : "")
-                              + (Potion != 0 ? $"|potion {Potion}{(PotionHq ? "hq" : "")}" : "");
+                              + (Potion != 0 ? $"|potion {Potion}{(PotionHq ? "hq" : "")}" : "")
+                              + (Live is { } l ? $"|live {l.RecipeLevel},{l.Progress},{l.Quality},{l.Durability}" : "");
+}
+
+/// <summary>A recipe's numbers as the game shows them while crafting: its recipe level, progress, quality and durability.</summary>
+public readonly record struct LiveRecipe(int RecipeLevel, int Progress, int Quality, int Durability)
+{
+    public override string ToString() => $"recipe level {RecipeLevel}, progress {Progress}, quality {Quality}, durability {Durability}";
 }
 
 /// <summary>A rotation, and the quality it ends at (counting what HQ ingredients start it with) out of the recipe's most.</summary>
@@ -54,7 +66,11 @@ public static class RaphaelCli
     public static string Arguments(RaphaelRequest r)
     {
         var a = new StringBuilder();
-        a.Append(CultureInfo.InvariantCulture, $"solve --recipe-id {r.RecipeId} --level {r.Level} --stats {r.Craftsmanship} {r.Control} {r.Cp}");
+        // The game's own numbers for the recipe, when they differ from the sheet's (raphael-cli takes one or the other).
+        if (r.Live is { } live)
+            a.Append(CultureInfo.InvariantCulture, $"solve --custom-recipe {live.RecipeLevel} {live.Progress} {live.Quality} {live.Durability}");
+        else a.Append(CultureInfo.InvariantCulture, $"solve --recipe-id {r.RecipeId}");
+        a.Append(CultureInfo.InvariantCulture, $" --level {r.Level} --stats {r.Craftsmanship} {r.Control} {r.Cp}");
         if (r.Manipulation) a.Append(" --manipulation");
         // Heart and Soul / Quick Innovation only add quality; with no quality wanted raphael-cli even
         // fails with an internal error when they are offered, so leave them out.

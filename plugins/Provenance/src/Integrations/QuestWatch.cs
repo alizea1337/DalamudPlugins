@@ -60,7 +60,7 @@ internal static class QuestWatch
             var now = DateTime.UtcNow;
             if (now < next) return;
             next = now + Every;
-            var busy = plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active;
+            var busy = plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active || plugin.TribeLoop.Active;
             var quests = busy || !Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null ? new List<uint>() : SocietyQuests();
             if (quests.Count == 0)
             {
