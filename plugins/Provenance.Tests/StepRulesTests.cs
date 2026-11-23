@@ -40,7 +40,7 @@ public class StepRulesTests
     private static StepPlan Decide(QuestScript q, StepSnapshot s, StepMemory? m = null, DateTime? now = null, bool leaveOutSay = false)
     {
         m ??= new StepMemory();
-        m.Observe(s.Signature(q), now ?? T0);
+        m.Observe(s.Signature(), now ?? T0);
         return StepRules.Decide(q, s, m, now ?? T0, leaveOutSay);
     }
 
@@ -59,12 +59,30 @@ public class StepRulesTests
         => Assert.Equal(StepKind.Wait, Decide(Quest(), Snap(1, new[] { Obj(1, 5, 10) }, busy: true)).Kind);
 
     [Fact]
+    public void AnUnreadScriptWaits()
+    {
+        var s = new StepSnapshot { Quest = 65536 + 3902, Accepted = true, Sequence = 1, AcceptJob = Crp, Job = Crp, Territory = Zone, ScriptRead = false };
+        Assert.Equal(StepKind.Wait, Decide(Quest(Line(0, 1, "Speak.")), s).Kind);
+    }
+
+    [Fact]
+    public void AGameThatStaysBusyDoesntStopTheNoProgressClock()
+    {
+        var q = Quest(Line(0, 1, "Speak with someone."));
+        var s = Snap(1, new[] { Obj(1, 5, 10) }, busy: true);
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, s, m, T0.AddMinutes(4)).Kind);
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, m, T0.AddMinutes(6)).Kind);
+    }
+
+    [Fact]
     public void NoProgressForLongHandsTheStepToThePlayer()
     {
         var q = Quest(Line(0, 1, "Speak with someone."));
         var s = Snap(1, new[] { Obj(1, 5, 10) });
         var m = new StepMemory();
-        m.Observe(s.Signature(q), T0);
+        m.Observe(s.Signature(), T0);
         Assert.Equal(StepKind.Talk, StepRules.Decide(q, s, m, T0.AddMinutes(4)).Kind);
         Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, m, T0.AddMinutes(6)).Kind);
         m.Touch(T0.AddMinutes(6));
@@ -127,7 +145,7 @@ public class StepRulesTests
         var q = CraftQuest();
         var s = Snap(2, new[] { Obj(1, 1034104, 21) }, new[] { new TodoProgress(1, false, 0, 2, 31147) });
         var m = new StepMemory();
-        m.Observe(s.Signature(q), T0);
+        m.Observe(s.Signature(), T0);
         m.Tried.Add(1);
         m.Looked.Add(1034104 + 7);
         var plan = StepRules.Decide(q, s, m, T0);
@@ -150,6 +168,35 @@ public class StepRulesTests
 
         var withStatus = Snap(255, new[] { Obj(1, 1009218, 30, icon: 0) }, new[] { new TodoProgress(2, false, 0, 2, 8099) }, new() { [8049] = 2 }, statuses: new() { 549 });
         Assert.Equal(StepKind.Craft, Decide(q, withStatus).Kind);
+    }
+
+    private static QuestScript IxalCraft() => new()
+    {
+        Quest = 65536 + 1508, Giver = 1009212, TargetEnd = 1009212, Product = 8099, Materials = 8049, CraftStatus = 549,
+        Todos = new[] { new ScriptTodo(2, 255, 1, new[] { Npc(1009212, 500), Npc(1009218, 30) }, "Synthesize crafting tool components.") },
+    };
+
+    [Fact]
+    public void AFacilityAccessAboutToRunOutIsRenewedBeforeCrafting()
+    {
+        var s = new StepSnapshot
+        {
+            Quest = 65536 + 1508, Accepted = true, Sequence = 255, AcceptJob = Crp, Job = Crp, Territory = Zone,
+            Objects = new[] { Obj(1, 1009218, 30, icon: 0) }, Todos = new[] { new TodoProgress(2, false, 0, 2, 8099) },
+            Items = new Dictionary<uint, int> { [8049] = 2 }, Statuses = new HashSet<uint> { 549 }, Expiring = new HashSet<uint> { 549 },
+        };
+        var plan = Decide(IxalCraft(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(1009218u, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void TheClassComesBeforeTheFacilityAccess()
+    {
+        var s = Snap(255, new[] { Obj(1, 1009218, 30, icon: 0) }, new[] { new TodoProgress(2, false, 0, 2, 8099) }, new() { [8049] = 2 }, job: 9, accept: Crp);
+        var plan = Decide(IxalCraft(), s);
+        Assert.Equal(StepKind.SwitchJob, plan.Kind);
+        Assert.Equal(Crp, plan.Id);
     }
 
     // ------------------------------------------------------------------ gathering and the class
@@ -231,37 +278,127 @@ public class StepRulesTests
     };
 
     [Fact]
-    public void SayIsSentOnceThenRetriedOnlyAfterFifteenQuietSeconds()
+    public void SayIsSentOnceThenTheStepIsThePlayers()
     {
         var q = SayQuest();
         var s = Snap(1, new[] { Obj(1, 1044043, 10) }, new[] { new TodoProgress(0, false, 0, 2, 0) });
         var m = new StepMemory();
-        m.Observe(s.Signature(q), T0);
+        m.Observe(s.Signature(), T0);
 
         var plan = StepRules.Decide(q, s, m, T0);
         Assert.Equal(StepKind.Say, plan.Kind);
         Assert.Equal("coffee break", plan.Text);
         Assert.True(plan.Public);
-        m.Note(plan.Key, T0, isPublic: true);
+        m.Public.Note(plan.Key, T0);
 
+        // A moment for the game to count it, then the player's: never said twice.
         Assert.Equal(StepKind.Wait, StepRules.Decide(q, s, m, T0.AddSeconds(10)).Kind);
-        var retry = StepRules.Decide(q, s, m, T0.AddSeconds(16));
-        Assert.Equal(StepKind.Say, retry.Kind);
-        m.Note(retry.Key, T0.AddSeconds(16), isPublic: true);
-
-        var after = StepRules.Decide(q, s, m, T0.AddSeconds(60));
+        var after = StepRules.Decide(q, s, m, T0.AddSeconds(16));
         Assert.Equal(StepKind.AskUser, after.Kind);
         Assert.Contains("coffee break", after.What);
+        Assert.Contains("do this step yourself", after.What);
+    }
+
+    [Fact]
+    public void SayIsntSentAgainNearSomeoneElse()
+    {
+        var q = SayQuest();
+        var m = new StepMemory();
+        var first = Snap(1, new[] { Obj(1, 1044043, 10) }, new[] { new TodoProgress(0, false, 0, 2, 0) });
+        m.Observe(first.Signature(), T0);
+        m.Public.Note(StepRules.Decide(q, first, m, T0).Key, T0);
+        // The other person of the line comes into view; nothing moved: still the same step.
+        var other = Snap(1, new[] { Obj(2, 1044044, 5) }, new[] { new TodoProgress(0, false, 0, 2, 0) });
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, other, m, T0.AddSeconds(20)).Kind);
+    }
+
+    [Fact]
+    public void ASecondPersonOfTheLineGetsThePhraseOnceTheFirstCounted()
+    {
+        var q = SayQuest();
+        var m = new StepMemory();
+        var first = Snap(1, new[] { Obj(1, 1044043, 10), Obj(2, 1044044, 20) }, new[] { new TodoProgress(0, false, 0, 2, 0) });
+        m.Observe(first.Signature(), T0);
+        var plan = StepRules.Decide(q, first, m, T0);
+        m.Public.Note(plan.Key, T0);
+        // It counted: the quest's variables moved, the first person is done.
+        var counted = new StepSnapshot
+        {
+            Quest = first.Quest, Accepted = true, Sequence = 1, AcceptJob = Crp, Job = Crp, Territory = Zone,
+            Variables = new byte[] { 0x10, 0, 0, 0, 0, 0 },
+            Objects = new[] { Obj(1, 1044043, 10, icon: 0, active: false), Obj(2, 1044044, 20) },
+            Todos = new[] { new TodoProgress(0, false, 1, 2, 0) },
+        };
+        m.Observe(counted.Signature(), T0.AddSeconds(3));
+        var next = StepRules.Decide(q, counted, m, T0.AddSeconds(20));
+        Assert.Equal(StepKind.Say, next.Kind);
+        Assert.Equal(1044044u, next.Target!.BaseId);
+        Assert.NotEqual(plan.Key, next.Key);
+    }
+
+    [Fact]
+    public void SayGoesOnlyToWhomTheLineNames()
+    {
+        // A marked bystander (another quest's person, the giver) isn't the line's: the phrase isn't said near them.
+        var q = SayQuest();
+        var plan = Decide(q, Snap(1, new[] { Obj(1, 1043417, 3), Obj(2, 1050000, 4) }, new[] { new TodoProgress(0, false, 0, 2, 0) }));
+        Assert.NotEqual(StepKind.Say, plan.Kind);
+    }
+
+    [Fact]
+    public void ASayTriedBeforeAStopIsntSentByANewStepper()
+    {
+        var store = new PublicAttemptStore();
+        var q = SayQuest();
+        var s = Snap(1, new[] { Obj(1, 1044043, 10) }, new[] { new TodoProgress(0, false, 0, 2, 0) });
+        var before = new StepMemory { Public = store };
+        before.Observe(s.Signature(), T0);
+        store.Note(StepRules.Decide(q, s, before, T0).Key, T0);
+
+        var after = new StepMemory { Public = store };
+        after.Observe(s.Signature(), T0.AddMinutes(2));
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, s, after, T0.AddMinutes(2)).Kind);
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, after, T0.AddMinutes(3)).Kind);
+    }
+
+    [Fact]
+    public void ThePublicStoreStartsOverAtTheDailyReset()
+    {
+        var store = new PublicAttemptStore();
+        var at = new DateTime(2026, 11, 23, 14, 0, 0, DateTimeKind.Utc);
+        store.Note("k", at);
+        Assert.Equal(1, store.Get("k", at.AddMinutes(59))!.Count);
+        Assert.Null(store.Get("k", at.AddMinutes(61)));
+        Assert.Equal(PublicAttemptStore.GameDay(at.AddHours(2)), PublicAttemptStore.GameDay(at.AddHours(20)));
+    }
+
+    [Fact]
+    public void AnEmoteIsTriedOnceMoreAfterFifteenQuietSecondsThenThePlayer()
+    {
+        var q = EmoteQuest();
+        var s = Snap(2, new[] { Obj(2, 1034000, 10) });
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        var plan = StepRules.Decide(q, s, m, T0);
+        Assert.Equal(StepKind.Emote, plan.Kind);
+        m.Public.Note(plan.Key, T0);
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, s, m, T0.AddSeconds(10)).Kind);
+        var retry = StepRules.Decide(q, s, m, T0.AddSeconds(16));
+        Assert.Equal(StepKind.Emote, retry.Kind);
+        m.Public.Note(retry.Key, T0.AddSeconds(16));
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, s, m, T0.AddSeconds(20)).Kind);
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, m, T0.AddSeconds(40)).Kind);
     }
 
     [Fact]
     public void ProgressElsewhereDelaysTheRetry()
     {
         var tried = new Attempt { Count = 1, Last = T0 };
-        Assert.Equal(StepRules.PublicTry.NotYet, StepRules.PublicVerdict(tried, T0.AddSeconds(10), T0.AddSeconds(20)));
-        Assert.Equal(StepRules.PublicTry.Yes, StepRules.PublicVerdict(tried, T0.AddSeconds(10), T0.AddSeconds(26)));
-        Assert.Equal(StepRules.PublicTry.Yes, StepRules.PublicVerdict(null, T0, T0));
-        Assert.Equal(StepRules.PublicTry.GiveUp, StepRules.PublicVerdict(new Attempt { Count = 2, Last = T0 }, T0, T0.AddHours(1)));
+        Assert.Equal(StepRules.PublicTry.NotYet, StepRules.PublicVerdict(StepKind.Emote, tried, T0.AddSeconds(10), T0.AddSeconds(20)));
+        Assert.Equal(StepRules.PublicTry.Yes, StepRules.PublicVerdict(StepKind.Emote, tried, T0.AddSeconds(10), T0.AddSeconds(26)));
+        Assert.Equal(StepRules.PublicTry.Yes, StepRules.PublicVerdict(StepKind.Emote, null, T0, T0));
+        Assert.Equal(StepRules.PublicTry.GiveUp, StepRules.PublicVerdict(StepKind.Emote, new Attempt { Count = 2, Last = T0 }, T0, T0.AddHours(1)));
+        Assert.Equal(StepRules.PublicTry.GiveUp, StepRules.PublicVerdict(StepKind.Say, tried, T0, T0.AddSeconds(26)));
     }
 
     [Fact]
@@ -280,15 +417,17 @@ public class StepRulesTests
         Assert.Equal(1073u, plan.Territory);
     }
 
+    private static QuestScript EmoteQuest() => new()
+    {
+        Quest = 65536 + 3919, Giver = Giver,
+        Todos = new[] { Line(1, 2, "/psych the dwarf.", Npc(1034000, 10)) },
+        Emotes = new Dictionary<int, EmoteFact> { [1] = new EmoteFact(30, "/psych") },
+    };
+
     [Fact]
     public void EmoteTargetsTheMarkedPerson()
     {
-        var q = new QuestScript
-        {
-            Quest = 65536 + 3919, Giver = Giver,
-            Todos = new[] { Line(1, 2, "/psych the dwarf.", Npc(1034000, 10)) },
-            Emotes = new Dictionary<int, EmoteFact> { [1] = new EmoteFact(30, "/psych") },
-        };
+        var q = EmoteQuest();
         var s = Snap(2, new[] { Obj(1, 2011000, 5, kind: StepObjectKind.Object), Obj(2, 1034000, 10) });
         var plan = Decide(q, s);
         Assert.Equal(StepKind.Emote, plan.Kind);
@@ -323,7 +462,7 @@ public class StepRulesTests
         var q = new QuestScript
         {
             Quest = 65536 + 3912, Giver = Giver,
-            Todos = new[] { Line(0, 1, "Place the explosive at the designated location.") },
+            Todos = new[] { Line(0, 1, "Place the explosive at the designated location.", new ScriptSpot(8400001, Zone, new Vector3(10, 0, 0), 2011166, false)) },
             KeyItems = new[] { Item(2003030, "Precision Explosive", ground: true, range: 10) },
         };
         var s = Snap(1, new[] { Obj(1, 2011166, 10, icon: 0, kind: StepObjectKind.Object) }, items: new() { [2003030] = 1 });
@@ -349,12 +488,40 @@ public class StepRulesTests
     }
 
     [Fact]
-    public void AnItemTheLineDoesntNameIsUsedOnObjectsWhenItsTheOnlyOne()
+    public void AGroundItemIsntThrownAtWhatTheLineDoesntName()
+    {
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3912, Giver = Giver,
+            Todos = new[] { Line(0, 1, "Place the explosive at the designated location.", new ScriptSpot(8400001, Zone, new Vector3(10, 0, 0), 2011166, false)) },
+            KeyItems = new[] { Item(2003030, "Precision Explosive", ground: true, range: 10) },
+        };
+        // Another active object of the quest (the other barrel of a random pick) in view, the named one not.
+        var s = Snap(1, new[] { Obj(1, 2011167, 10, icon: 0, kind: StepObjectKind.Object) }, items: new() { [2003030] = 1 });
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Go, plan.Kind);
+    }
+
+    [Fact]
+    public void AnItemTheLineDoesntNameIsntUsedOnObjectsTheLineDoesntName()
     {
         var q = new QuestScript
         {
             Quest = 65536 + 5343, Giver = Giver,
             Todos = new[] { Line(1, 2, "Treat the designated locations.") },
+            KeyItems = new[] { Item(2003777, "Melting Salts") },
+        };
+        var s = Snap(2, new[] { Obj(2, 2014944, 10, icon: 0, kind: StepObjectKind.Object) }, items: new() { [2003777] = 3 });
+        Assert.NotEqual(StepKind.UseItem, Decide(q, s).Kind);
+    }
+
+    [Fact]
+    public void AnItemTheLineDoesntNameIsUsedOnObjectsWhenItsTheOnlyOne()
+    {
+        var q = new QuestScript
+        {
+            Quest = 65536 + 5343, Giver = Giver,
+            Todos = new[] { Line(1, 2, "Treat the designated locations.", new ScriptSpot(11955068, 1297, new Vector3(10, 0, 0), 2014944, false)) },
             KeyItems = new[] { Item(2003777, "Melting Salts") },
         };
         var s = Snap(2, new[] { Obj(1, 1055786, 3), Obj(2, 2014944, 10, icon: 0, kind: StepObjectKind.Object) }, items: new() { [2003777] = 3 });
@@ -455,6 +622,37 @@ public class StepRulesTests
     }
 
     [Fact]
+    public void RidingWithNothingLeftBeforeTheReportAsksThePlayer()
+    {
+        var q = MountQuest();
+        var s = Snap(2, mounted: true, mount: 227);
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        m.Looked.Add(1034065 + 7);
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, m, T0).Kind);
+    }
+
+    [Fact]
+    public void TheQuestMountIsGotBackTwiceAtMost()
+    {
+        var q = MountQuest();
+        var s = Snap(2, new[] { Obj(1, 1033715, 10) });
+        var m = new StepMemory { MountGiver = 1033715, Mounts = 2 };
+        m.Observe(s.Signature(), T0);
+        Assert.Equal(StepKind.Talk, StepRules.Decide(q, s, m, T0).Kind);
+        m.Mounts = 3;
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, m, T0).Kind);
+    }
+
+    [Fact]
+    public void RidingCarryingAndTheFacilityArentProgress()
+    {
+        var walking = Snap(2, new[] { Obj(1, 1033715, 10) });
+        var riding = Snap(2, new[] { Obj(1, 1033715, 10) }, mounted: true, mount: 227, statuses: new() { 404, 549 });
+        Assert.Equal(walking.Signature(), riding.Signature());
+    }
+
+    [Fact]
     public void RidingWithTargetsOutOfViewFollowsTheMarker()
     {
         var markers = new[] { new StepMarker(Zone, new Vector3(-295, 99, -724), 1, 71223, 8385036, 0) };
@@ -480,12 +678,12 @@ public class StepRulesTests
         var trees = new[] { Obj(1, 2007249, 10, icon: 0, kind: StepObjectKind.Object), Obj(2, 2007250, 20, icon: 0, kind: StepObjectKind.Object) };
         var s = Snap(1, trees);
         var m = new StepMemory();
-        m.Observe(s.Signature(q), T0);
+        m.Observe(s.Signature(), T0);
         m.Tried.Add(1);
         Assert.Equal(2u, StepRules.Decide(q, s, m, T0).Target!.Id);
 
         var after = Snap(1, trees, items: new() { [2001991] = 1 });
-        Assert.True(m.Observe(after.Signature(q), T0.AddSeconds(5)));
+        Assert.True(m.Observe(after.Signature(), T0.AddSeconds(5)));
         Assert.Empty(m.Tried);
     }
 
@@ -495,6 +693,66 @@ public class StepRulesTests
         var q = Quest(Line(0, 1, "Speak with them."));
         var s = Snap(1, new[] { Obj(1, Giver, 1), Obj(2, 2007000, 2, icon: 0, kind: StepObjectKind.Object), Obj(3, 1034103, 40) });
         Assert.Equal(1034103u, Decide(q, s).Target!.BaseId);
+    }
+
+    [Fact]
+    public void TheGiverIsntTalkedToBeforeTheReportUnlessTheLineNamesThem()
+    {
+        // Right after accepting: the giver still shows an icon, but talking to them would open their daily list.
+        var q = Quest(Line(0, 1, "Speak with the tinkerer.", Npc(1034103, 400)));
+        var plan = Decide(q, Snap(1, new[] { Obj(1, Giver, 1) }));
+        Assert.NotEqual(StepKind.Talk, plan.Kind);
+
+        var named = Quest(Line(0, 1, "Speak with Regitt again.", Npc(Giver, 1)));
+        Assert.Equal(Giver, Decide(named, Snap(1, new[] { Obj(1, Giver, 1) })).Target!.BaseId);
+
+        var report = Quest(Line(2, 255, "Report to Regitt."));
+        Assert.Equal(Giver, Decide(report, Snap(255, new[] { Obj(1, Giver, 1) })).Target!.BaseId);
+    }
+
+    [Fact]
+    public void OnlyTheQuestsOwnIconMarksAPerson()
+    {
+        // The game draws "dailies available" over a giver (another handler's icon); this quest gives them none.
+        var q = Quest(Line(0, 1, "Speak with someone.", Area(1, 50)));
+        var drawnOnly = Obj(1, 1034999, 2, icon: 0) with { Drawn = 71221 };
+        Assert.NotEqual(StepKind.Talk, Decide(q, Snap(1, new[] { drawnOnly })).Kind);
+    }
+
+    [Fact]
+    public void OtherThingsTheQuestHoldsArentTalkedTo()
+    {
+        var q = Quest(Line(0, 1, "Search the area.", Area(1, 50)));
+        var s = Snap(1, new[] { Obj(1, 30001, 2, kind: StepObjectKind.Other) });
+        Assert.NotEqual(StepKind.Talk, Decide(q, s).Kind);
+    }
+
+    [Fact]
+    public void ADecoyStaysTriedOnItsLinesAfterProgress()
+    {
+        var q = Quest(new ScriptTodo(0, 1, 3, new[] { Area(1, 50) }, "Inspect the artworks."));
+        var objects = new[] { Obj(1, 2007249, 10, icon: 0, kind: StepObjectKind.Object), Obj(2, 2007250, 20, icon: 0, kind: StepObjectKind.Object) };
+        var s = Snap(1, objects, new[] { new TodoProgress(0, false, 0, 3, 0) });
+        var m = new StepMemory();
+        m.Observe(s.Signature(), T0);
+        m.Decoy(StepRules.LineKey(q, s), objects[0].Key);
+        Assert.Equal(2u, StepRules.Decide(q, s, m, T0).Target!.Id);
+        // One of the three counted: the decoy stays one (its scene isn't played again).
+        var after = Snap(1, objects, new[] { new TodoProgress(0, false, 1, 3, 0) });
+        Assert.True(m.Observe(after.Signature(), T0.AddSeconds(5)));
+        Assert.Equal(2u, StepRules.Decide(q, after, m, T0.AddSeconds(5)).Target!.Id);
+        // On other lines it's forgotten.
+        Assert.False(m.IsDecoy(StepRules.LineKey(q, Snap(2, objects)), objects[0].Key));
+    }
+
+    [Fact]
+    public void AnObjectIsRememberedByItsPlaceInTheLayout()
+    {
+        var a = Obj(1, 2007249, 10) with { Instance = 77 };
+        var reloaded = Obj(9, 2007249, 10) with { Instance = 77 };
+        Assert.Equal(a.Key, reloaded.Key);
+        Assert.NotEqual(a.Key, (Obj(1, 2007249, 10) with { Instance = 78 }).Key);
+        Assert.Equal(5ul, Obj(5, 2007249, 10).Key);
     }
 
     [Fact]
@@ -508,7 +766,7 @@ public class StepRulesTests
         };
         var m = new StepMemory();
         var s = Snap(1, markers: markers);
-        m.Observe(s.Signature(q), T0);
+        m.Observe(s.Signature(), T0);
         var first = StepRules.Decide(q, s, m, T0);
         Assert.Equal(StepKind.Go, first.Kind);
         Assert.Equal(502u, first.Level);
@@ -593,6 +851,48 @@ public class StepRulesTests
         StepRules.Answered("What will you consume?", entries, 0, m);
         m.Observe("b", T0.AddSeconds(3));
         Assert.Equal(0, StepRules.ChooseEntry("What will you consume?", entries, q, m, Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("Commence “Marks of Friendship”?", "Marks of Friendship")]
+    [InlineData("Commence  “A Feast of Indecision”? ", "A Feast of Indecision")]
+    [InlineData("Commence?", null)]
+    [InlineData("Proceed to Hoper's Hold?", null)]
+    public void TheCommenceQuestionNamesItsQuest(string prompt, string? quest)
+        => Assert.Equal(quest, StepRules.Filled(prompt, "Commence “”?"));
+
+    [Fact]
+    public void AMenuIsLeftByItsOwnNothingEntry()
+    {
+        var leave = new[] { "Nothing", "Nothing.", "Cancel" };
+        Assert.Equal(2, StepRules.LeaveEntry(new[] { "Daily Quests", "Brainstorm", "Nothing." }, leave));
+        Assert.Equal(0, StepRules.LeaveEntry(new[] { "Cancel", "Marks of Friendship" }, leave));
+        // The last entry by position isn't a way out when it's a quest.
+        Assert.Equal(-1, StepRules.LeaveEntry(new[] { "Daily Quests", "Marks of Friendship" }, leave));
+    }
+
+    [Fact]
+    public void TheBusyWatchAsksAfterItsLimitWithNothingChanging()
+    {
+        var w = new BlockWatch();
+        Assert.False(w.Feed(true, "1|00", T0));
+        Assert.False(w.Feed(true, "1|00", T0 + BlockWatch.Limit));
+        Assert.True(w.Feed(true, "1|00", T0 + BlockWatch.Limit + TimeSpan.FromSeconds(1)));
+        // It starts over after saying so.
+        Assert.False(w.Feed(true, "1|00", T0 + BlockWatch.Limit + TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
+    public void TheBusyWatchStartsOverOnAChangeOrWhenTheGameIsFree()
+    {
+        var w = new BlockWatch();
+        w.Feed(true, "1|00", T0);
+        Assert.False(w.Feed(true, "2|00", T0.AddSeconds(70)));
+        Assert.False(w.Feed(true, "2|00", T0.AddSeconds(140)));
+        Assert.False(w.Feed(false, "2|00", T0.AddSeconds(141)));
+        Assert.False(w.Feed(true, "2|00", T0.AddSeconds(142)));
+        Assert.False(w.Feed(true, "2|00", T0.AddSeconds(200)));
+        Assert.True(w.Feed(true, "2|00", T0.AddSeconds(220)));
     }
 
     [Theory]

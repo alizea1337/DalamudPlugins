@@ -95,12 +95,21 @@ public enum StepObjectKind { Npc, Object, Other }
 
 /// <summary>One of the quest's own objects the game has loaded (from its event handler).</summary>
 /// <param name="Id">The game object id (to target it).</param>
-/// <param name="Icon">The icon over its head (0: none).</param>
+/// <param name="Icon">The icon this quest gives it (its own handler's answer; 0: none). Not the icon the game draws,
+/// which comes from every handler: a giver showing "dailies available" would count as this quest's target.</param>
 /// <param name="Active">The quest's script counts it as active now.</param>
 public sealed record StepObject(ulong Id, uint BaseId, StepObjectKind Kind, string Name, Vector3 Position, uint Icon, bool Active, bool Targetable)
 {
+    /// <summary>The icon the game draws over it, from all its handlers (for the log only).</summary>
+    public uint Drawn { get; init; }
+    /// <summary>Its place in the zone's layout (0 when it has none): tells two of the same NPC or object apart.</summary>
+    public uint Instance { get; init; }
+
     /// <summary>Something the step wants done with it: targetable and active.</summary>
     public bool Live => Targetable && Active;
+
+    /// <summary>What it's remembered by: its place in the layout when it has one (kept when it's loaded again), else its game object id.</summary>
+    public ulong Key => Instance != 0 ? ((ulong)BaseId << 32) | Instance : Id;
 }
 
 /// <summary>One of the quest's map markers.</summary>
@@ -139,8 +148,13 @@ public sealed class StepSnapshot
     /// <summary>The mount ridden (0 when not mounted or unknown).</summary>
     public uint Mount { get; init; }
     public bool Flying { get; init; }
-    /// <summary>Casting, in an event or cutscene, or between areas: nothing is started now.</summary>
+    /// <summary>Casting, in an event or cutscene, crafting, gathering, in combat, between areas: nothing is started now.</summary>
     public bool Busy { get; init; }
+    /// <summary>
+    /// The quest's script was asked (its to-do lines and objects are read). False while the game is busy, just after a
+    /// zone change or while the script isn't loaded: the lines and objects are then empty and nothing is decided.
+    /// </summary>
+    public bool ScriptRead { get; init; } = true;
 
     public IReadOnlyList<TodoProgress> Todos { get; init; } = Array.Empty<TodoProgress>();
     public IReadOnlyList<StepObject> Objects { get; init; } = Array.Empty<StepObject>();
@@ -148,20 +162,21 @@ public sealed class StepSnapshot
     /// <summary>Counts of the quest's items in the bags (normal and high quality together; key items too).</summary>
     public IReadOnlyDictionary<uint, int> Items { get; init; } = new Dictionary<uint, int>();
     public IReadOnlySet<uint> Statuses { get; init; } = new HashSet<uint>();
+    /// <summary>Statuses that run out soon (within <see cref="StepRules.StatusRenewBelow"/>): the Ixal facility access is renewed first.</summary>
+    public IReadOnlySet<uint> Expiring { get; init; } = new HashSet<uint>();
 
     public int Count(uint item) => item == 0 ? 0 : Items.GetValueOrDefault(item);
 
     /// <summary>
-    /// The quest's progress in one line: sequence, variables, what each to-do line counts, the quest's items and the
-    /// statuses and mount that matter. When it changes, the last action did something.
+    /// The quest's progress in one line: sequence, variables, what each to-do line counts and the quest's items. When
+    /// it changes, the last action did something. Riding the quest mount, carrying and the facility access aren't in
+    /// it: losing them isn't progress (it would clear what was tried and start the no-progress clock again, so a lost
+    /// mount could be got back, lost and got back without end).
     /// </summary>
-    public string Signature(QuestScript script)
+    public string Signature()
     {
         var items = string.Join(",", Items.Where(kv => kv.Value != 0).OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}x{kv.Value}"));
         var todos = string.Join(",", Todos.Select(t => $"{t.Index}:{(t.Checked ? 1 : 0)}:{t.Have}/{t.Needed}"));
-        var carry = script.CarryStatus != 0 && Statuses.Contains(script.CarryStatus) ? "carrying" : "";
-        var craft = script.CraftStatus != 0 && Statuses.Contains(script.CraftStatus) ? "facility" : "";
-        var riding = script.Mount is { } m && Mounted && Mount == m.Mount ? "riding" : "";
-        return $"{Accepted}|{Sequence}|{Convert.ToHexString(Variables)}|{todos}|{items}|{carry}{craft}{riding}";
+        return $"{Accepted}|{Sequence}|{Convert.ToHexString(Variables)}|{todos}|{items}";
     }
 }

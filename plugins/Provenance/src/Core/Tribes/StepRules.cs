@@ -65,7 +65,7 @@ public sealed record StepPlan(StepKind Kind, string What)
     public uint Level { get; init; }
     /// <summary>What an attempt is counted under (public actions: once per step).</summary>
     public string Key { get; init; } = "";
-    /// <summary>A /say or an emote: seen by everyone around, so tried at most twice.</summary>
+    /// <summary>A /say or an emote: seen by everyone around, so sent once per step (an emote once more).</summary>
     public bool Public => Kind is StepKind.Say or StepKind.Emote;
 
     public override string ToString()
@@ -99,25 +99,40 @@ public sealed class Attempt
 
 /// <summary>
 /// What the engine remembers while it works on one quest: the last progress (the snapshot's signature) and when it
-/// came; objects tried without effect and spots looked at since then; the public actions tried (kept for the whole
-/// quest); the quest mount's giver.
+/// came; objects tried without effect and spots looked at since then; objects that played a "not this one" scene on
+/// the current to-do lines (kept while those lines are open); the quest mount's giver and how often the character got
+/// on it; who handed over what's carried and how often; the teleports taken to drop the quest mount. The /say and
+/// emotes sent are in <see cref="Public"/>, which outlives the quest.
 /// </summary>
 public sealed class StepMemory
 {
     public string Signature { get; private set; } = "";
     public DateTime ProgressAt { get; private set; }
-    /// <summary>Objects talked to (or acted on) since the last progress without anything changing.</summary>
+    /// <summary>Objects (<see cref="StepObject.Key"/>) talked to or acted on since the last progress without anything changing.</summary>
     public HashSet<ulong> Tried { get; } = new();
     /// <summary>To-do spots and markers gone to and looked at since the last progress.</summary>
     public HashSet<uint> Looked { get; } = new();
     /// <summary>Attempts at the current step's interactions, cleared by progress.</summary>
     public Dictionary<string, Attempt> Attempts { get; } = new();
-    /// <summary>Attempts at /say and emotes, kept for the whole quest (they're public: once, and one retry).</summary>
-    public Dictionary<string, Attempt> PublicAttempts { get; } = new();
+    /// <summary>
+    /// The /say and emotes sent. The stepper hands every quest the day's shared store (<see cref="PublicAttemptStore.Shared"/>),
+    /// so stopping and starting again never sends one twice; a dry run (the watch, the tests) gets its own.
+    /// </summary>
+    public PublicAttemptStore Public { get; init; } = new();
     /// <summary>Answers given in menus: prompt and entries → (times answered, last index).</summary>
     public Dictionary<string, (int Times, int Index, string Signature)> Answers { get; } = new();
     /// <summary>The NPC that put the character on the quest mount (not a target of the mount's action).</summary>
     public uint MountGiver { get; set; }
+    /// <summary>Times the character got on the quest mount: the first time, and each time it was lost and got back.</summary>
+    public int Mounts { get; set; }
+    /// <summary>The NPC that handed over what's carried, and times something was picked up.</summary>
+    public uint CarryGiver { get; set; }
+    public int Pickups { get; set; }
+    /// <summary>Teleports taken to drop a quest mount that wouldn't let go (each costs gil).</summary>
+    public int DropTeleports { get; set; }
+
+    private string decoyLines = "";
+    private readonly HashSet<ulong> decoys = new();
 
     /// <summary>Takes the snapshot's signature: a change is progress, which clears what was tried.</summary>
     /// <returns>True when it changed.</returns>
@@ -145,15 +160,111 @@ public sealed class StepMemory
         if (Signature.Length > 0) ProgressAt = now;
     }
 
-    public void Note(string key, DateTime now, bool isPublic = false)
+    public void Note(string key, DateTime now)
     {
-        var book = isPublic ? PublicAttempts : Attempts;
-        if (!book.TryGetValue(key, out var a)) book[key] = a = new Attempt();
+        if (!Attempts.TryGetValue(key, out var a)) Attempts[key] = a = new Attempt();
         a.Count++;
         a.Last = now;
     }
 
     public int Count(string key) => Attempts.TryGetValue(key, out var a) ? a.Count : 0;
+
+    /// <summary>
+    /// An object that played its scene on these lines (<see cref="StepRules.LineKey"/>) without anything changing: a
+    /// decoy ("not this one"). It isn't tried again while the same lines are open, even after progress elsewhere on them.
+    /// </summary>
+    public void Decoy(string lines, ulong key)
+    {
+        if (lines != decoyLines)
+        {
+            decoys.Clear();
+            decoyLines = lines;
+        }
+        decoys.Add(key);
+    }
+
+    public bool IsDecoy(string lines, ulong key) => lines == decoyLines && decoys.Contains(key);
+}
+
+/// <summary>
+/// The /say and emotes sent, per quest, to-do line and quest state, for the game day (the daily reset at 15:00 UTC
+/// starts a new one). They're public and can't be taken back, so neither a new run nor a new stepper sends one again.
+/// </summary>
+public sealed class PublicAttemptStore
+{
+    /// <summary>The store the stepper uses (one for the plugin).</summary>
+    public static PublicAttemptStore Shared { get; } = new();
+
+    private static readonly TimeSpan ResetHour = TimeSpan.FromHours(15);
+    private readonly Dictionary<string, Attempt> book = new();
+    private DateTime day;
+
+    public Attempt? Get(string key, DateTime now)
+    {
+        lock (book)
+        {
+            Roll(now);
+            return book.GetValueOrDefault(key);
+        }
+    }
+
+    public Attempt Note(string key, DateTime now)
+    {
+        lock (book)
+        {
+            Roll(now);
+            if (!book.TryGetValue(key, out var a)) book[key] = a = new Attempt();
+            a.Count++;
+            a.Last = now;
+            return a;
+        }
+    }
+
+    /// <summary>The game day a moment (UTC) belongs to: it starts at the daily reset, 15:00 UTC.</summary>
+    public static DateTime GameDay(DateTime utc) => (utc - ResetHour).Date;
+
+    private void Roll(DateTime now)
+    {
+        var d = GameDay(now);
+        if (d == day) return;
+        book.Clear();
+        day = d;
+    }
+}
+
+/// <summary>
+/// The game staying busy (an event, a cutscene, a cast, scene tasks pending) with nothing about the quest changing.
+/// Every wait for the game is bounded by it: after <see cref="Limit"/> the step is the player's.
+/// </summary>
+public sealed class BlockWatch
+{
+    public static readonly TimeSpan Limit = TimeSpan.FromSeconds(75);
+
+    private DateTime since;
+    private string state = "";
+
+    /// <param name="blocked">The game is busy now.</param>
+    /// <param name="questState">The quest's state as far as it can be read while busy (sequence, variables).</param>
+    /// <returns>True once blocked for longer than <see cref="Limit"/> with the same state (then it starts over).</returns>
+    public bool Feed(bool blocked, string questState, DateTime now)
+    {
+        if (!blocked)
+        {
+            since = default;
+            return false;
+        }
+        if (since == default || questState != state)
+        {
+            since = now;
+            state = questState;
+            return false;
+        }
+        if (now - since <= Limit) return false;
+        since = default;
+        return true;
+    }
+
+    public void Reset() => since = default;
 }
 
 /// <summary>
@@ -169,7 +280,10 @@ public sealed class StepMemory
 /// </remarks>
 public static class StepRules
 {
-    /// <summary>A public action (/say, an emote) may be tried once more after this long with nothing changing.</summary>
+    /// <summary>
+    /// After a /say or an emote, this long with nothing changing before it's sent again (emotes) or the step goes to
+    /// the player: the game takes a moment to count it.
+    /// </summary>
     public static readonly TimeSpan PublicRetryAfter = TimeSpan.FromSeconds(15);
     /// <summary>Interactions with the same object, without anything changing, before it counts as tried.</summary>
     public const int InteractTries = 3;
@@ -181,15 +295,29 @@ public static class StepRules
     public const float TalkWithin = 3f;
     /// <summary>Gathering when the game doesn't say how many: the society quests want three.</summary>
     public const int DefaultGatherCount = 3;
+    /// <summary>Times the quest mount, or what's carried, is got back after it was lost, before the player takes over.</summary>
+    public const int MaxRegains = 2;
+    /// <summary>Teleports to drop a quest mount that won't let go (each costs gil), per quest.</summary>
+    public const int MaxDropTeleports = 1;
+    /// <summary>A status the crafting needs (the Ixal facility access) is renewed before crafting when it has less than this left.</summary>
+    public static readonly TimeSpan StatusRenewBelow = TimeSpan.FromSeconds(60);
+
+    /// <summary>How often a public action is sent for one step at most: a /say once (the player was told so), an emote once more.</summary>
+    public static int PublicTries(StepKind kind) => kind == StepKind.Say ? 1 : 2;
 
     /// <summary>The next step.</summary>
     public static StepPlan Decide(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay = false)
     {
         if (!s.Accepted)
             return s.Completed ? new StepPlan(StepKind.Done, "The quest is complete.") : new StepPlan(StepKind.Failed, "The quest isn't in the journal any more.");
-        if (s.Busy) return new StepPlan(StepKind.Wait, "busy");
+        // Before the wait for a busy game: a game that stays busy doesn't stop the clock.
         if (m.ProgressAt != default && now - m.ProgressAt > NoProgressLimit)
             return Ask($"Nothing has changed for {NoProgressLimit.TotalMinutes:0} minutes; do this step yourself, then resume.");
+        if (s.Busy || !s.ScriptRead) return new StepPlan(StepKind.Wait, "busy");
+
+        // The class first: as another class nobody (the facility supervisor neither) moves the quest on.
+        if (s.AcceptJob != 0 && s.Job != s.AcceptJob)
+            return new StepPlan(StepKind.SwitchJob, "the quest goes on only as the class it was accepted as") { Id = s.AcceptJob };
 
         var riding = q.Mount is { } qm && s.Mounted && s.Mount == qm.Mount;
 
@@ -200,9 +328,10 @@ public static class StepRules
         {
             if (s.Count(q.Materials) > 0 || q.Materials == 0)
             {
-                if (q.CraftStatus != 0 && !s.Statuses.Contains(q.CraftStatus))
+                if (q.CraftStatus != 0 && (!s.Statuses.Contains(q.CraftStatus) || s.Expiring.Contains(q.CraftStatus)))
                 {
-                    if (StatusGiver(q, s, m) is { } giver) return Talk(giver, "get the facility access back before crafting");
+                    if (StatusGiver(q, s, m) is { } giver)
+                        return Talk(giver, s.Statuses.Contains(q.CraftStatus) ? "renew the facility access (it runs out soon) before crafting" : "get the facility access back before crafting");
                     return Ask("The crafting needs the facility access status; talk to the supervisor for it, then resume.");
                 }
                 return craft;
@@ -213,14 +342,10 @@ public static class StepRules
         // Gathering: the to-do line is about the item for the class the quest was accepted as.
         if (Gather(q, s, m) is { } gather && gather.Count > 0) return gather;
 
-        if (s.AcceptJob != 0 && s.Job != s.AcceptJob)
-            return new StepPlan(StepKind.SwitchJob, "the quest goes on only as the class it was accepted as") { Id = s.AcceptJob };
-
         if (riding) return Riding(q, s, m);
 
         var carrying = q.CarryStatus != 0 && s.Statuses.Contains(q.CarryStatus);
-        var open = s.Todos.Where(t => !t.Checked).Select(t => t.Index).ToHashSet();
-        var lines = q.TodosAt(s.Sequence).Where(t => open.Count == 0 || open.Contains(t.Index)).ToList();
+        var lines = OpenLines(q, s);
 
         foreach (var line in lines)
         {
@@ -233,18 +358,28 @@ public static class StepRules
                 return Public(q, s, m, now, line, StepKind.Emote, emote.Command, emote.Emote, $"{emote.Command} at the target");
         }
 
-        // A key item to use: the line names it ("Use the firecrackers ..."), or it's the only one held and the step
-        // marks objects (not people) to use it on ("Salt the designated locations").
+        // A key item to use: the line names it ("Use the firecrackers ..."), or it's the only one held and the line
+        // points at objects (not people) to use it on ("Salt the designated locations").
         var usable = q.KeyItems.Where(k => k.Usable && s.Count(k.Id) > 0).ToList();
         foreach (var item in usable)
         {
             // Any of its names whole; its title's last word too (not the singular's or plural's: "sacks" is too common).
-            var named = lines.Any(l => item.Words.Any(w => l.Text.Contains(w, StringComparison.CurrentCultureIgnoreCase)) || Names(l.Text, item.Name));
-            var onObjects = usable.Count == 1 && lines.Count > 0 && Live(q, s, m).Any(o => o.Kind == StepObjectKind.Object);
-            if ((named || onObjects) && UseItem(q, s, m, item, carrying, named ? null : o => o.Kind == StepObjectKind.Object) is { } use) return use;
+            var naming = lines.Where(l => item.Words.Any(w => l.Text.Contains(w, StringComparison.CurrentCultureIgnoreCase)) || Names(l.Text, item.Name)).ToList();
+            var named = naming.Count > 0;
+            var spotObjects = SpotObjects(named ? naming : lines);
+            var onObjects = usable.Count == 1 && lines.Count > 0 && Live(q, s, m).Any(o => o.Kind == StepObjectKind.Object && spotObjects.Contains(o.BaseId));
+            if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects) is { } use) return use;
         }
 
-        if (Pick(q, s, m) is { } target) return Talk(target, carrying ? "deliver what you carry" : "the step's marked target") with { OnFoot = carrying };
+        if (Pick(q, s, m) is { } target)
+        {
+            // Getting the quest mount (or what's carried) back again and again: something takes it away; the player's.
+            if (!riding && q.Mount != null && s.Sequence != 255 && m.MountGiver != 0 && target.BaseId == m.MountGiver && m.Mounts > MaxRegains)
+                return Ask($"The quest mount was lost {m.Mounts} times; do this step yourself, then resume.");
+            if (!carrying && m.CarryGiver != 0 && target.BaseId == m.CarryGiver && m.Pickups > MaxRegains)
+                return Ask($"What you carry was dropped {m.Pickups} times; do this step yourself, then resume.");
+            return Talk(target, carrying ? "deliver what you carry" : "the step's marked target") with { OnFoot = carrying };
+        }
 
         if (Where(q, s, m) is { } go) return go with { OnFoot = carrying };
 
@@ -253,7 +388,10 @@ public static class StepRules
         return Ask("Can't tell what this step wants (nothing marked nearby, no map marker); do it yourself, then resume.");
     }
 
-    /// <summary>On the quest mount: its action on the next target, riding into the area, or getting off.</summary>
+    /// <summary>
+    /// On the quest mount: its action on the next target, riding into the area, or (at the report) getting off. Before
+    /// the report, a mount with nothing to do in view and nowhere left to look is the player's: getting off would lose it.
+    /// </summary>
     private static StepPlan Riding(QuestScript q, StepSnapshot s, StepMemory m)
     {
         var mount = q.Mount!;
@@ -270,14 +408,15 @@ public static class StepRules
                 : Math.Max(2f, mount.Range - 2f);
             return new StepPlan(StepKind.MountAction, "the quest mount's action on the next target")
             {
-                Target = t, Territory = s.Territory, Within = within, Id = mount.Action, Face = mount.Line, NoFly = noFly, Key = $"action:{t.Id}",
+                Target = t, Territory = s.Territory, Within = within, Id = mount.Action, Face = mount.Line, NoFly = noFly, Key = $"action:{t.Key}",
             };
         }
-        // Nothing to use the action on in view: the marked area (or the spot of the line), unless the quest is at its
-        // report already.
-        if (s.Sequence != 255 && Where(q, s, m) is { } go)
+        if (s.Sequence == 255)
+            return new StepPlan(StepKind.Dismount, "the quest mount has nothing more to do (the quest can't be reported while riding it)");
+        // Nothing to use the action on in view: the marked area (or the spot of the line).
+        if (Where(q, s, m) is { } go)
             return go with { NoFly = noFly, What = mount.Action == 0 ? "ride into the marked area" : go.What };
-        return new StepPlan(StepKind.Dismount, "the quest mount has nothing more to do (the quest can't be reported while riding it)");
+        return Ask("On the quest mount with nothing left in view to use it on and nowhere marked; do this step yourself, then resume.");
     }
 
     /// <summary>The craft step, when the current to-do line is about the quest's product (or, for older quests, the materials wait).</summary>
@@ -320,54 +459,70 @@ public static class StepRules
     }
 
     /// <summary>
-    /// A /say or an emote at the line's target: once, and once more only after the quest stayed unchanged for
-    /// <see cref="PublicRetryAfter"/>; then the player does it.
+    /// A /say or an emote at the line's target: only someone the line's own spots name (never a bystander, never the
+    /// giver unless the line names them), and once per step (a /say once, an emote once more after
+    /// <see cref="PublicRetryAfter"/> with nothing changing); then the player does it.
     /// </summary>
     private static StepPlan Public(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, ScriptTodo line, StepKind kind, string text, uint id, string what)
     {
-        var target = Pick(q, s, m, kind == StepKind.Emote ? o => o.Kind == StepObjectKind.Npc : null) ?? Pick(q, s, m);
-        StepPlan plan;
-        if (target != null)
-            plan = new StepPlan(kind, what) { Target = target, Territory = s.Territory, Within = PublicWithin, Text = text, Id = id, Key = $"{kind}:{line.Index}:{target.BaseId}" };
-        else if (Where(q, s, m) is { } go && go.Target == null && go.Spot != null)
+        var spots = SpotObjects(new[] { line });
+        var target = spots.Count == 0 ? null
+            : Pick(q, s, m, o => spots.Contains(o.BaseId) && (kind != StepKind.Emote || o.Kind == StepObjectKind.Npc));
+        if (target == null)
         {
             // Nothing in view yet: go there first (the target comes into view on the way).
-            return go;
+            if (Where(q, s, m) is { } go && go.Target == null && go.Spot != null) return go;
+            return Ask($"Can't find where to {what}; do this step yourself, then resume.");
         }
-        else return Ask($"Can't find where to {what}; do it yourself, then resume.");
+        var plan = new StepPlan(kind, what) { Target = target, Territory = s.Territory, Within = PublicWithin, Text = text, Id = id, Key = PublicKey(q, s, line, kind) };
 
-        var verdict = PublicVerdict(m.PublicAttempts.GetValueOrDefault(plan.Key), m.ProgressAt, now);
+        var verdict = PublicVerdict(kind, m.Public.Get(plan.Key, now), m.ProgressAt, now);
         return verdict switch
         {
             PublicTry.Yes => plan,
             PublicTry.NotYet => new StepPlan(StepKind.Wait, $"waiting to see whether the {(kind == StepKind.Say ? "phrase" : "emote")} counted"),
             _ => Ask(kind == StepKind.Say
-                ? $"Saying “{text}” didn't move the quest on; say it yourself near {target!.Name}, then resume."
-                : $"{text} didn't move the quest on; do it yourself at {target!.Name}, then resume."),
+                ? $"Saying “{text}” didn't move the quest on; do this step yourself (say it near {target.Name}), then resume."
+                : $"{text} didn't move the quest on; do this step yourself ({text} at {target.Name}), then resume."),
         };
     }
+
+    /// <summary>
+    /// What a public action is counted under: the quest, the line and the quest's state (sequence and variables), not
+    /// the target, so a phrase that didn't count isn't said again near someone else. The state is in it because a line
+    /// can want the phrase said to two or three people: once one counts, the quest's variables move and the next is a
+    /// step of its own.
+    /// </summary>
+    public static string PublicKey(QuestScript q, StepSnapshot s, ScriptTodo line, StepKind kind)
+        => $"{q.Quest}:{kind}:{line.Index}:{s.Sequence}:{Convert.ToHexString(s.Variables)}";
 
     public enum PublicTry { Yes, NotYet, GiveUp }
 
     /// <summary>
-    /// Whether a public action may be sent: never tried, yes; tried once, again only once both the try and the last
-    /// change of the quest are <see cref="PublicRetryAfter"/> old; tried twice, never.
+    /// Whether a public action may be sent: never tried, yes. Tried: not before both the try and the last change of the
+    /// quest are <see cref="PublicRetryAfter"/> old (it may still count); after that again only while under
+    /// <see cref="PublicTries"/> (an emote once more, a /say never), otherwise it's the player's.
     /// </summary>
-    public static PublicTry PublicVerdict(Attempt? tried, DateTime progressAt, DateTime now)
+    public static PublicTry PublicVerdict(StepKind kind, Attempt? tried, DateTime progressAt, DateTime now)
     {
         if (tried == null || tried.Count == 0) return PublicTry.Yes;
-        if (tried.Count >= 2) return PublicTry.GiveUp;
-        return now - tried.Last >= PublicRetryAfter && now - progressAt >= PublicRetryAfter ? PublicTry.Yes : PublicTry.NotYet;
+        if (now - tried.Last < PublicRetryAfter || now - progressAt < PublicRetryAfter) return PublicTry.NotYet;
+        return tried.Count >= PublicTries(kind) ? PublicTry.GiveUp : PublicTry.Yes;
     }
 
-    /// <summary>Using a key item the line names: on the target, on the ground at it, or on yourself next to it.</summary>
-    private static StepPlan? UseItem(QuestScript q, StepSnapshot s, StepMemory m, KeyItemFact item, bool carrying, Func<StepObject, bool>? only)
+    /// <summary>
+    /// Using a key item: on the target, on the ground at it, or on yourself next to it. Thrown on the ground (a wrong
+    /// spot can use it up), or used without the line naming it, it's aimed only at an object the line's spots name.
+    /// </summary>
+    private static StepPlan? UseItem(QuestScript q, StepSnapshot s, StepMemory m, KeyItemFact item, bool carrying, bool named, IReadOnlySet<uint> spotObjects)
     {
-        var target = Pick(q, s, m, only);
         var use = item.Ground ? ItemUse.Ground : item.Self ? ItemUse.Self : ItemUse.Target;
+        var strict = use == ItemUse.Ground || !named;
+        Func<StepObject, bool>? only = strict ? o => spotObjects.Contains(o.BaseId) && (named || o.Kind == StepObjectKind.Object) : null;
+        var target = Pick(q, s, m, only);
         var within = use == ItemUse.Self ? 2f : Math.Max(1.5f, item.Range - 1f);
         if (target != null)
-            return new StepPlan(StepKind.UseItem, $"use the {item.Name}") { Target = target, Territory = s.Territory, Within = within, Id = item.Id, Use = use, OnFoot = carrying, Key = $"item:{item.Id}:{target.Id}" };
+            return new StepPlan(StepKind.UseItem, $"use the {item.Name}") { Target = target, Territory = s.Territory, Within = within, Id = item.Id, Use = use, OnFoot = carrying, Key = $"item:{item.Id}:{target.Key}" };
         if (Where(q, s, m) is { } go)
         {
             // An area to use it in (no object to aim at): self-use there; otherwise go and look first.
@@ -379,30 +534,53 @@ public static class StepRules
     }
 
     private static StepPlan Talk(StepObject target, string what)
-        => new(StepKind.Talk, what) { Target = target, Within = TalkWithin, Key = $"talk:{target.Id}" };
+        => new(StepKind.Talk, what) { Target = target, Within = TalkWithin, Key = $"talk:{target.Key}" };
 
     private static StepPlan Ask(string text) => new(StepKind.AskUser, text);
 
-    /// <summary>The quest's objects the step wants something done with, not yet tried without effect.</summary>
-    public static IEnumerable<StepObject> Live(QuestScript q, StepSnapshot s, StepMemory m)
-        => s.Objects.Where(o => o.Targetable && (o.Active || o.Icon != 0) && !m.Tried.Contains(o.Id)
-                                // An NPC is a target when marked (an icon over its head); an object when the script counts it active.
-                                && (o.Kind != StepObjectKind.Npc || o.Icon != 0));
+    /// <summary>The to-do lines of the current sequence still open (all of them when the game reports none).</summary>
+    public static List<ScriptTodo> OpenLines(QuestScript q, StepSnapshot s)
+    {
+        var open = s.Todos.Where(t => !t.Checked).Select(t => t.Index).ToHashSet();
+        return q.TodosAt(s.Sequence).Where(t => open.Count == 0 || open.Contains(t.Index)).ToList();
+    }
+
+    /// <summary>Which lines are open, as a key: decoys are remembered while it stays the same.</summary>
+    public static string LineKey(QuestScript q, StepSnapshot s)
+        => $"{s.Sequence}:{string.Join(",", OpenLines(q, s).Select(l => l.Index))}";
+
+    /// <summary>The NPCs and objects the lines' spots name.</summary>
+    private static HashSet<uint> SpotObjects(IEnumerable<ScriptTodo> lines)
+        => lines.SelectMany(t => t.Spots).Select(p => p.Object).Where(o => o != 0).ToHashSet();
 
     /// <summary>
-    /// The target to act on: one the open lines' spots name first, then marked ones, then (before the last sequence)
-    /// anyone but the giver, then the nearest.
+    /// The quest's objects the step wants something done with, not yet tried without effect nor found to be a decoy on
+    /// these lines. An NPC is a target when this quest marks it (the quest's own icon); an object when the script counts
+    /// it active. Anything else the quest's handler holds (a gathering point) isn't talked to.
+    /// </summary>
+    public static IEnumerable<StepObject> Live(QuestScript q, StepSnapshot s, StepMemory m)
+    {
+        var lines = LineKey(q, s);
+        return s.Objects.Where(o => o.Kind != StepObjectKind.Other && o.Targetable && (o.Active || o.Icon != 0)
+                                    && !m.Tried.Contains(o.Key) && !m.IsDecoy(lines, o.Key)
+                                    && (o.Kind != StepObjectKind.Npc || o.Icon != 0));
+    }
+
+    /// <summary>
+    /// The target to act on: one the open lines' spots name first, then marked ones, then the nearest. The giver (and
+    /// whoever the quest is reported to) only when a line names them or the quest is at its report: talking to the giver
+    /// otherwise opens their list of dailies.
     /// </summary>
     public static StepObject? Pick(QuestScript q, StepSnapshot s, StepMemory m, Func<StepObject, bool>? only = null)
     {
-        var live = Live(q, s, m).Where(o => only?.Invoke(o) ?? true).ToList();
+        var named = SpotObjects(OpenLines(q, s));
+        var live = Live(q, s, m)
+            .Where(o => only?.Invoke(o) ?? true)
+            .Where(o => s.Sequence == 255 || (o.BaseId != q.Giver && o.BaseId != q.TargetEnd) || named.Contains(o.BaseId))
+            .ToList();
         if (live.Count == 0) return null;
-        var open = s.Todos.Where(t => !t.Checked).Select(t => t.Index).ToHashSet();
-        var named = q.TodosAt(s.Sequence).Where(t => open.Count == 0 || open.Contains(t.Index))
-            .SelectMany(t => t.Spots).Select(p => p.Object).Where(o => o != 0).ToHashSet();
         return live.OrderBy(o => named.Contains(o.BaseId) ? 0 : 1)
             .ThenBy(o => o.Icon != 0 ? 0 : 1)
-            .ThenBy(o => s.Sequence != 255 && (o.BaseId == q.Giver || o.BaseId == q.TargetEnd) ? 1 : 0)
             .ThenBy(o => Vector3.DistanceSquared(o.Position, s.Player))
             .First();
     }
@@ -425,9 +603,7 @@ public static class StepRules
                 Spot = marker.Position, Territory = marker.Territory, Within = marker.IsArea ? Math.Clamp(marker.Radius * 0.5f, 3f, 25f) : 6f,
                 Level = MarkerKey(marker),
             };
-        var open = s.Todos.Where(t => !t.Checked).Select(t => t.Index).ToHashSet();
-        var spot = q.TodosAt(s.Sequence)
-            .Where(t => open.Count == 0 || open.Contains(t.Index))
+        var spot = OpenLines(q, s)
             .SelectMany(t => t.Spots)
             .Where(p => !m.Looked.Contains(p.Level) && p.Object != q.Giver)
             .OrderBy(p => p.Territory == s.Territory ? 0 : 1)
@@ -453,11 +629,12 @@ public static class StepRules
         }
     }
 
-    /// <summary>For crafting: the marked NPC on the craft line that isn't the giver (the Ixal supervisor who grants the facility access).</summary>
+    /// <summary>For crafting: the NPC on the craft line that isn't the giver (the Ixal supervisor who grants the facility access).</summary>
     private static StepObject? StatusGiver(QuestScript q, StepSnapshot s, StepMemory m)
     {
         var npcs = q.TodosAt(s.Sequence).SelectMany(t => t.Spots).Where(p => p.Object != 0 && p.Object != q.Giver).Select(p => p.Object).ToHashSet();
-        return s.Objects.Where(o => o.Targetable && npcs.Contains(o.BaseId) && !m.Tried.Contains(o.Id)).OrderBy(o => Vector3.DistanceSquared(o.Position, s.Player)).FirstOrDefault();
+        return s.Objects.Where(o => o.Targetable && o.Kind != StepObjectKind.Other && npcs.Contains(o.BaseId) && !m.Tried.Contains(o.Key))
+            .OrderBy(o => Vector3.DistanceSquared(o.Position, s.Player)).FirstOrDefault();
     }
 
     private static StepObject Nearest(IEnumerable<StepObject> objects, Vector3 me)
@@ -538,6 +715,36 @@ public static class StepRules
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// What a question fills into the empty “” of a known text ("Marks of Friendship" from "Commence “Marks of
+    /// Friendship”?" against "Commence “”?"); null when the question isn't that text.
+    /// </summary>
+    public static string? Filled(string prompt, string template)
+    {
+        var p = Normal(prompt);
+        var k = Normal(template);
+        var hole = k.IndexOf("“”", StringComparison.Ordinal);
+        if (p.Length == 0 || hole < 0) return null;
+        var before = k[..(hole + 1)];
+        var after = k[(hole + 1)..];
+        if (p.Length <= k.Length || !p.StartsWith(before, StringComparison.CurrentCultureIgnoreCase) || !p.EndsWith(after, StringComparison.CurrentCultureIgnoreCase))
+            return null;
+        return p[before.Length..^after.Length].Trim();
+    }
+
+    /// <summary>
+    /// The menu entry that leaves it the way a player does: the last one whose text is one of the game's own "Nothing" /
+    /// "Cancel" texts (a trailing full stop aside); -1 when there's none (then the window is closed instead).
+    /// </summary>
+    public static int LeaveEntry(IReadOnlyList<string> entries, IEnumerable<string> leaveTexts)
+    {
+        static string Bare(string t) => Normal(t).TrimEnd('.', '。').Trim();
+        var leave = leaveTexts.Select(Bare).Where(t => t.Length > 0).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        for (var i = entries.Count - 1; i >= 0; i--)
+            if (leave.Contains(Bare(entries[i]))) return i;
+        return -1;
     }
 
     /// <summary>Text as compared: single spaces, trimmed, without the icon glyphs a menu entry can start with.</summary>
