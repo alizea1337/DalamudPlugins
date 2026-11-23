@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Tribes: talk windows inside an event scene weren't clicked through (the quest mounts' actions play one, like\n  the cloud mallow's Seed at Zenith), so the run stood there until you clicked. They're clicked now, unless\n  the run is set to pause for cutscenes.\n- Tribes: key items weren't handed over (the Moogles' Training Supplies for the mentee moogles). The run\n  looked for the wrong item among the offered ones, closed the window and went on to the next NPC, where the\n  window then never filled. Key items are handed over like other items now, and a hand-over window gets a\n  moment to settle before anything is pressed.\n- Tribes: after crafting, the run still talked to the NPC with the materials three times when the made items\n  go to someone else before the report (Mogwon instead of Moguppo). On a crafting step the game's data names\n  whoever the work goes to first and where the materials come from second, and the run goes by that now: the\n  materials first when there's nothing to craft from, then only whoever the work goes to.\n- Tribes: getting off the mount next to an NPC could take 20 seconds. From the air the game lands on the\n  first press and gets off on the second; the run started a new trip in between, which took off again. It now\n  waits for the landing and presses again, and nothing else meanwhile.\n- Tribes: on a quest mount, the run no longer flies back to whoever gave the mount between two targets (they\n  stay marked on the map, and were sometimes the nearest marker).\n- Every run: \"stuck\" was counted while vnavmesh was still working out a long path (the character stands still\n  meanwhile), so a trip backed off, side-stepped, teleported or gave up for nothing. The stuck check now\n  waits until the path is there.\r\n",
+    "Changelog": "- Tribes: some crafting dailies only count their item made high quality: 59 of them, most of the Ixal's and\n  some of the Moogles', Namazu's, Dwarves', Loporrits' and Yok Huy's. The run crafted every daily the fastest\n  way, so the item came out normal quality unless the recipe was easy enough to fill the quality bar by\n  accident, and the run then talked to the giver over and over (The Heart of Tankiness). It now reads from\n  the quest's own script which dailies want that, crafts those for full quality, and counts and hands in only\n  the high-quality ones. When one comes out normal quality all the same, it fetches new materials and tries\n  again; after two tries it asks you.\n- The Tribes page says \"high quality only\" on those dailies.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.22.3.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.3/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.3/latest.zip",
+    "AssemblyVersion": "0.22.4.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.4/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.4/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795467827
+    "LastUpdate": 1795469074
   }
 ]
