@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using Lumina.Excel.Sheets;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
@@ -95,11 +96,35 @@ internal sealed class GameCatalog : IGameCatalog
         c.BuildBrowse();
         c.Cosmic = CosmicData.Build();
         c.Deliveries = DeliveryData.Build();
-        c.Tribes = TribeData.Build();
         Services.Log.Information("Catalog ready: {Recipes} recipes, {Sources} sourced items, {Points} node points, {Fish} fish in {Ms} ms",
             c.recipesById.Count, c.sources.Count, c.Gather.PointCount, c.Gather.FishCount, sw.ElapsedMilliseconds);
+        c.ReadTribesLater();
         return c;
     }
+
+    /// <summary>
+    /// The allied societies take a while to read (every society quest's script and text), and only the Tribes page and
+    /// its run need them, so they're read on their own after the catalog is ready instead of holding it up for everyone.
+    /// Until then <see cref="Tribes"/> is empty and <see cref="TribesRead"/> false.
+    /// </summary>
+    private void ReadTribesLater()
+        => Task.Run(() =>
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                tribes = TribeData.Build();
+                Services.Log.Information("Allied societies read in {Ms} ms", sw.ElapsedMilliseconds);
+            }
+            catch (Exception e)
+            {
+                Services.Log.Error(e, "Couldn't read the allied societies");
+            }
+            finally
+            {
+                tribesRead = true;
+            }
+        });
 
     // ------------------------------------------------------------------ IGameCatalog
 
@@ -744,8 +769,17 @@ internal sealed class GameCatalog : IGameCatalog
     /// <summary>Custom deliveries: clients, requests per level, rewards, the bonus rotation.</summary>
     public DeliveryData Deliveries { get; private set; } = new();
 
-    /// <summary>Allied societies: societies, givers, quests and what they ask, ranks, shops and achievements.</summary>
-    public TribeData Tribes { get; private set; } = new();
+    private volatile TribeData tribes = new();
+    private volatile bool tribesRead;
+
+    /// <summary>
+    /// Allied societies: societies, givers, quests and what they ask, ranks, shops and achievements. Empty until they're
+    /// read, shortly after the rest of the catalog (<see cref="TribesRead"/>).
+    /// </summary>
+    public TribeData Tribes => tribes;
+
+    /// <summary>The allied societies have been read (or failed to be); until then <see cref="Tribes"/> is empty.</summary>
+    public bool TribesRead => tribesRead;
 
     /// <summary>Class quest that teaches Manipulation, per crafter ClassJob.</summary>
     public Dictionary<uint, uint> ManipulationQuest { get; } = new();

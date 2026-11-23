@@ -169,7 +169,7 @@ public sealed record TribeGiver(uint NpcId, string Name, uint Territory, string 
 
 /// <summary>A quest on the way to unlocking a society, with where to get it.</summary>
 /// <param name="Npc">The NPC who offers it, and where (zone name and map coordinates).</param>
-/// <param name="Requirement">The class it needs, as the game words it, with the level ("Disciple of the Hand, level 50").</param>
+/// <param name="Requirement">The class it needs, in plain words with the level ("a crafter at level 50"); empty when any class does.</param>
 /// <param name="Previous">Quests that must be done before it's offered.</param>
 public sealed record TribeUnlockStep(uint QuestId, string Name, uint Npc, string NpcName, uint Territory, string Place, Vector2 MapPosition,
     string Requirement, IReadOnlyList<(uint QuestId, string Name)> Previous);

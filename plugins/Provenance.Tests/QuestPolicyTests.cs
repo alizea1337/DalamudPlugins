@@ -35,6 +35,14 @@ public class QuestPolicyTests
     }
 
     [Fact]
+    public void EveryMinigameIsInTheMinigameSetWhichTheDataReadsTheFlagFrom()
+    {
+        foreach (var (number, reason) in QuestPolicy.Never)
+            Assert.Equal(reason.Contains("minigame"), QuestPolicy.Minigames.Contains(number));
+        Assert.Equal(6, QuestPolicy.Minigames.Count);
+    }
+
+    [Fact]
     public void TheNineFateDailiesAreNeverAutomated()
     {
         foreach (var n in new ushort[] { 1245, 1264, 1284, 1336, 1364, 1372, 1379, 1396, 1409 })

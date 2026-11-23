@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using Lumina.Excel.Sheets;
 
 namespace Provenance.Data;
@@ -18,7 +19,8 @@ internal sealed record QuestTodo(int Index, byte Sequence, byte Count, IReadOnly
 /// What the game data says about a quest beyond its sheet row: the script's named arguments
 /// (<c>Quest.QuestParams</c>: ACTOR0, RITEM1, EMOTE0, ...), its to-do lines with their spots, and its own text sheet
 /// (journal lines, the "/say" phrases) in the client's language. Shared by the Tribes page, the run and the step
-/// engine; read once per quest and kept.
+/// engine; read once per quest and kept. Safe from any thread: the catalog reads them on a worker thread while the
+/// step engine reads them on the game's.
 /// </summary>
 /// <remarks>
 /// Facts from the allied-society research (scratchpad reports): script args with values of 1,000,000+ are ENpc ids,
@@ -37,7 +39,9 @@ internal sealed class QuestFacts
     public IReadOnlyList<(string Name, uint Value)> Args { get; private init; } = Array.Empty<(string, uint)>();
     public IReadOnlyList<QuestTodo> Todos { get; private init; } = Array.Empty<QuestTodo>();
 
-    private Dictionary<string, string>? text;
+    private readonly Lazy<IReadOnlyDictionary<string, string>> text;
+
+    private QuestFacts() => text = new Lazy<IReadOnlyDictionary<string, string>>(ReadText, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>The quest's facts; null when the row doesn't exist. Row ids are the sheet's (65536 + the quest number).</summary>
     public static QuestFacts? Of(uint rowId)
@@ -102,32 +106,31 @@ internal sealed class QuestFacts
 
     /// <summary>
     /// The quest's own text in the client's language, keyed by row key (<c>TEXT_BANDWA002_03897_TODO_00</c>). Empty
-    /// when the sheet can't be read.
+    /// when the sheet can't be read. Read the first time it's asked for, once, whichever thread asks.
     /// </summary>
-    public IReadOnlyDictionary<string, string> Text
+    public IReadOnlyDictionary<string, string> Text => text.Value;
+
+    /// <summary>Reads the text sheet into a dictionary of its own, which is only handed out once it's complete.</summary>
+    private IReadOnlyDictionary<string, string> ReadText()
     {
-        get
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
         {
-            if (text != null) return text;
-            text = new Dictionary<string, string>(StringComparer.Ordinal);
-            try
+            var underscore = Key.LastIndexOf('_');
+            if (underscore < 0 || Key.Length < underscore + 4) return result;
+            var path = $"quest/{Key.Substring(underscore + 1, 3)}/{Key}";
+            var sheet = Services.Data.Excel.GetSheet<Lumina.Excel.RawRow>(Dalamud.Utility.ClientLanguageExtensions.ToLumina(Services.Data.Language), path);
+            foreach (var row in sheet)
             {
-                var underscore = Key.LastIndexOf('_');
-                if (underscore < 0 || Key.Length < underscore + 4) return text;
-                var path = $"quest/{Key.Substring(underscore + 1, 3)}/{Key}";
-                var sheet = Services.Data.Excel.GetSheet<Lumina.Excel.RawRow>(Dalamud.Utility.ClientLanguageExtensions.ToLumina(Services.Data.Language), path);
-                foreach (var row in sheet)
-                {
-                    var k = row.ReadStringColumn(0).ExtractText();
-                    if (k.Length > 0) text[k] = row.ReadStringColumn(1).ExtractText();
-                }
+                var k = row.ReadStringColumn(0).ExtractText();
+                if (k.Length > 0) result[k] = row.ReadStringColumn(1).ExtractText();
             }
-            catch (Exception e)
-            {
-                Services.Log.Debug("Quest text {Key} couldn't be read: {Message}", Key, e.Message);
-            }
-            return text;
         }
+        catch (Exception e)
+        {
+            Services.Log.Debug("Quest text {Key} couldn't be read: {Message}", Key, e.Message);
+        }
+        return result;
     }
 
     /// <summary>The journal's to-do lines in order (<c>..._TODO_00</c>, <c>_01</c>, ...), as the game shows them.</summary>

@@ -227,11 +227,13 @@ internal sealed class TribeData
                 steps |= StepKinds.SubZone;
                 if (value != tribeTerritory && !subZones.Contains(value)) subZones.Add(value);
             }
-            else if (Is(name, "SNP")) steps |= StepKinds.Snipe;
+            else if (Is(name, "SNP") || Is(name, "SNP_")) steps |= StepKinds.Snipe;
             else if (name.StartsWith("BIND_LEAD", StringComparison.Ordinal) || name.StartsWith("SEQEV_TSURE", StringComparison.Ordinal) || name == "ET_DOUKOU")
                 steps |= StepKinds.Escort;
         }
         if (q.ClassJobCategory1.RowId != 0) steps |= StepKinds.OtherClass;
+        // Not every minigame names itself in the script (2991 and 3707 have no SNP argument).
+        if (QuestPolicy.Minigames.Contains((ushort)(q.RowId - 0x10000))) steps |= StepKinds.Snipe;
 
         // Zones the to-do lines point at, besides the society's own.
         foreach (var todo in facts?.Todos ?? Array.Empty<QuestTodo>())
@@ -427,14 +429,29 @@ internal sealed class TribeData
     {
         if (Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Quest>().GetRowOrDefault(row) is not { } q) return null;
         var (npc, npcName, zone, place, map) = Issuer(q);
-        // Category 1 is "All Classes": nothing worth saying.
-        var category = q.ClassJobCategory0.RowId > 1 ? q.ClassJobCategory0.ValueNullable?.Name.ExtractText() ?? "" : "";
+        var who = Who(q.ClassJobCategory0.RowId, q.ClassJobCategory0.ValueNullable?.Name.ExtractText() ?? "");
         var level = q.ClassJobLevel.Count > 0 ? q.ClassJobLevel[0] : 0;
-        var requirement = category.Length == 0 ? "" : level > 1 ? $"{category}, level {level}" : category;
+        var requirement = who.Length == 0 ? "" : level > 1 ? $"{who} at level {level}" : who;
         var previous = q.PreviousQuest.Where(p => p.RowId != 0)
             .Select(p => (p.RowId, CleanName(p.ValueNullable?.Name.ExtractText() ?? ""))).ToList();
         return new TribeUnlockStep(q.RowId, CleanName(q.Name.ExtractText()), npc, npcName, zone, place, map, requirement, previous);
     }
+
+    /// <summary>
+    /// The classes a quest's <c>ClassJobCategory</c> takes, in plain words: "a crafter", "a gatherer", "a crafter or
+    /// gatherer", "a combat class" (the categories society unlock quests use), else the game's own name ("a Disciple of
+    /// War"); empty for "All Classes" (1) and none.
+    /// </summary>
+    public static string Who(uint category, string gameName) => category switch
+    {
+        0 or 1 => "",
+        32 => "a gatherer",
+        33 => "a crafter",
+        35 => "a crafter or gatherer",
+        142 => "a combat class",
+        _ when gameName.StartsWith("Disciple ", StringComparison.Ordinal) => "a " + gameName,
+        _ => gameName,
+    };
 
     /// <summary>Who offers a quest and where: the NPC, the zone and its name, and the map coordinates.</summary>
     private static (uint Npc, string Name, uint Territory, string Place, Vector2 Map) Issuer(Lumina.Excel.Sheets.Quest? q)
