@@ -97,7 +97,13 @@ internal sealed class TribesPage : Page
     {
         var s = Ui.S;
         var w = MathF.Min(ImGui.GetContentRegionAvail().X, 760 * s);
-        Ui.Heading("Tribes", "The allied societies' daily quests: twelve a day between them, three per society. Open a society for "
+        // Until the page has been opened once, nothing of Tribes runs in the background (the watch).
+        if (!S.Seen)
+        {
+            S.Seen = true;
+            Config.Save();
+        }
+        Ui.Heading("Tribes", "The allied societies' daily quests: twelve a day between them, three from each giver. Open a society for "
                              + "today's quests, how far its next rank is, and what its ranks open.");
         ImGui.Dummy(new Vector2(0, 2 * s));
         if (startProblem != null && !Loop.Active)
@@ -109,7 +115,8 @@ internal sealed class TribesPage : Page
         }
         if (Data is not { Tribes.Count: > 0 } data)
         {
-            Ui.Wrapped(Plans.Catalog == null ? "Reading the game data…" : "The game data has no allied societies.", Palette.TextMuted);
+            // The societies are read after the rest of the catalog.
+            Ui.Wrapped(Plans.Catalog is not { TribesRead: true } ? "Reading the game data…" : "The game data has no allied societies.", Palette.TextMuted);
             return;
         }
         if (!Game.Ready)
@@ -307,7 +314,7 @@ internal sealed class TribesPage : Page
     private static void DrawCrystals(Plugin plugin, GameCatalog catalog, TribePlan plan)
     {
         var s = Ui.S;
-        var crystals = plugin.TribePlanning.Crystals(plan);
+        var crystals = plugin.TribePlanning.CrystalsShown(plan);
         if (crystals.Count == 0) return;
         ImGui.Dummy(new Vector2(0, 4 * s));
         Ui.Wrapped("Crystals, for up to " + QuestCraft.MostCrafts + " crafts a daily: "
@@ -357,11 +364,19 @@ internal sealed class TribesPage : Page
         }
         v = S.LeaveOutSay;
         if (Ui.Checkbox("Leave out quests that /say in public", ref v,
-                "Some dailies have you say a phrase in /say, which players nearby see. The run says only the quest's own phrase, once. On: those quests are yours to do."))
+                "Some dailies have you say a phrase in /say, which players nearby see. The run says only the quest's own phrase, and never twice: "
+                + "if the game misses it, the run asks you to do that step. On: those quests are yours to do."))
         {
             S.LeaveOutSay = v;
             Config.Save();
             snapshot = null;
+        }
+        v = S.WatchByHand;
+        if (Ui.Checkbox("Note what the run would do while I do society quests myself", ref v,
+                "For bug reports: the debug log notes the steps and targets the run would pick. It only watches, it never acts."))
+        {
+            S.WatchByHand = v;
+            Config.Save();
         }
         Ui.EndCard();
     }
@@ -377,8 +392,8 @@ internal sealed class TribesPage : Page
         ImGui.BeginGroup();
         using (Ui.F.Strong.Push()) Ui.Text($"{snap.Allowances} of {Game.DailyAllowance} allowances left today");
         var reset = Game.NextReset;
-        Ui.Wrapped($"They come back in {Until(reset)}, at {reset:HH:mm} your time. Each society gives up to 3 dailies a day, "
-                   + "and 3 more of the new rank on the day you rank up.", Palette.TextMuted);
+        Ui.Wrapped($"They come back in {Until(reset)}, at {reset:HH:mm} your time. Each giver offers up to 3 dailies a day, "
+                   + "and 3 more of the new rank on the day you rank up, when that rank has dailies of its own.", Palette.TextMuted);
         ImGui.EndGroup();
 
         var leftovers = snap.Accepted.Where(a => a.Leftover).ToList();
@@ -575,7 +590,7 @@ internal sealed class TribesPage : Page
         }
         var first = steps[0];
         Ui.Wrapped($"Unlock it with the quest \"{first.Name}\" from {first.NpcName} in {Where(first.Place, first.MapPosition)}"
-                   + (first.Requirement.Length > 0 ? $", on {Article(first.Requirement)}." : "."), Palette.Text);
+                   + (first.Requirement.Length > 0 ? $", on {first.Requirement}." : "."), Palette.Text);
         var before = first.Previous.Where(p => !Game.QuestDone(p.QuestId)).Select(p => $"\"{p.Name}\"").ToList();
         if (before.Count > 0) Ui.Wrapped($"It needs {Join(before)} done first.", Palette.TextMuted);
         foreach (var next in steps.Skip(1))
@@ -786,7 +801,7 @@ internal sealed class TribesPage : Page
         if (q.SubZones.Count > 0) parts.Add("goes to " + Join(q.SubZones.Select(ZoneName).Where(z => z.Length > 0).Distinct()));
         if (q.Has(StepKinds.Snipe)) parts.Add("shoots targets");
         if (q.Has(StepKinds.Combat)) parts.Add("fights");
-        return parts.Count == 0 ? "An errand: talks to people around" : "An errand: " + Join(parts);
+        return parts.Count == 0 ? "An errand: talks to people nearby" : "An errand: " + Join(parts);
     }
 
     /// <summary>Whether the offers worked out for a giver match what its list showed today.</summary>
@@ -915,10 +930,6 @@ internal sealed class TribesPage : Page
     // ------------------------------------------------------------------ words
 
     private static string Where(string place, Vector2 map) => map == Vector2.Zero ? place : $"{place} ({map.X:0.0}, {map.Y:0.0})";
-
-    /// <summary>"Disciple of the Hand, level 50" → "a Disciple of the Hand, level 50" (the game's category names are singular or "Any …").</summary>
-    private static string Article(string requirement)
-        => requirement.StartsWith("Disciple ", StringComparison.Ordinal) ? "a " + requirement : requirement;
 
     private static string Join(IEnumerable<string> parts, string last = "and")
     {

@@ -432,11 +432,14 @@ public sealed class TribeSettings
     public HashSet<uint> LeftOut { get; set; } = new();
     /// <summary>Pause the run for quest cutscenes, so they can be watched; otherwise the run skips them.</summary>
     public bool PauseForCutscenes { get; set; }
-    /// <summary>Leave out dailies that say a phrase in /say (public chat); the run says only the quest's own phrase, once.</summary>
+    /// <summary>
+    /// Leave out dailies that say a phrase in /say (public chat). Otherwise the run says only the quest's own phrase, once
+    /// per step and never again: if the game misses it, the run asks the player to do that step.
+    /// </summary>
     public bool LeaveOutSay { get; set; }
     /// <summary>
     /// While you do a society quest yourself (no Provenance loop going), note in the debug log what the run would do,
-    /// for bug reports. Only once the Tribes page has been opened (<see cref="Seen"/>).
+    /// for bug reports (the Tribes page's options). Only once the Tribes page has been opened (<see cref="Seen"/>).
     /// </summary>
     public bool WatchByHand { get; set; } = true;
     /// <summary>The Tribes page has been opened (or its run started) at least once: until then nothing of Tribes runs in the background.</summary>

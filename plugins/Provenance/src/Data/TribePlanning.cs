@@ -85,7 +85,21 @@ internal sealed class TribePlanning
     private static int? CraftsLeft(TribeQuest q)
         => q.Craft is { Materials: not 0 } c && QuestSteps.ItemCount(c.Materials) is > 0 and var n ? n : null;
 
-    /// <summary>The crystals a plan may use, with what's on hand and what the retainers hold.</summary>
+    private (TribePlan Plan, DateTime At, List<CrystalNeed> Needs)? shown;
+
+    /// <summary>
+    /// <see cref="Crystals"/> for the pages, which draw every frame: worked out again at most once a second, or when the
+    /// plan changes (the retainer totals and the bag counts aren't free).
+    /// </summary>
+    public List<CrystalNeed> CrystalsShown(TribePlan plan)
+    {
+        if (shown is { } c && ReferenceEquals(c.Plan, plan) && DateTime.UtcNow - c.At < TimeSpan.FromSeconds(1)) return c.Needs;
+        var needs = Crystals(plan);
+        shown = (plan, DateTime.UtcNow, needs);
+        return needs;
+    }
+
+    /// <summary>The crystals a plan may use, with what's on hand and what the retainers hold, read now.</summary>
     public List<CrystalNeed> Crystals(TribePlan plan)
     {
         var retainers = plugin.Config.Stock.Retainers ? RetainerCache.Totals(plugin.Config) : new Dictionary<uint, int>();
