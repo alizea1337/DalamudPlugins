@@ -78,6 +78,15 @@ internal sealed unsafe class TribeRun
     private DateTime pendingSince;
     private int visits;
     private int progressAtVisit;
+    /// <summary>Trips back to the giver while accepting, this visit (one that isn't found where the data puts them ends it).</summary>
+    private int giverTrips;
+    /// <summary>Dailies left over from before the reset when the visit began (a new one found on the way plans the day again).</summary>
+    private HashSet<uint> leftoversAtVisit = new();
+    /// <summary>The visit ends to plan again, not for want of progress: its quests aren't left out.</summary>
+    private bool replanning;
+
+    /// <summary>Trips back to the giver while accepting, per visit, before the giver is given up on for the day.</summary>
+    private const int MaxGiverTrips = 2;
 
     // The quest under way.
     private PlannedQuest? quest;
@@ -148,6 +157,8 @@ internal sealed unsafe class TribeRun
             return "Provenance's crafting solver (raphael-cli.exe) is missing next to it, so the crafting dailies can't be done. Reinstalling Provenance brings it back.";
 
         plugin.Config.LastLoop = "tribes";
+        // Tribes has been used: the hand watch may run from now on (when its option is on).
+        Settings.Seen = true;
         plugin.Config.Save();
         log.Clear();
         excluded.Clear();
@@ -265,6 +276,8 @@ internal sealed unsafe class TribeRun
         if (gathering || step == Step.Gather) gatherer.Resume();
         if (step == Step.Retainers) retainers.Resume();
         if (step == Step.Tour && visitStep == Visit.Travel) TravelToGiver(afterTravel);
+        // The visit's step afresh: its tries and its time limit start over (a long pause isn't a giver that doesn't answer).
+        else if (step == Step.Tour && visit != null && visitStep is Visit.SwitchJob or Visit.Accept or Visit.Leave) To(visitStep);
         Wait(0.3);
     }
 
@@ -546,6 +559,9 @@ internal sealed unsafe class TribeRun
         pendingAccept = null;
         quest = null;
         tries = 0;
+        giverTrips = 0;
+        replanning = false;
+        leftoversAtVisit = Leftovers();
         progressAtVisit = Completed + AcceptedCount;
         foreach (var q in v.InJournal) queue.Enqueue(q);
         var parts = new List<string>();
@@ -619,6 +635,7 @@ internal sealed unsafe class TribeRun
             To(Visit.Accept);
             return;
         }
+        if (DateTime.UtcNow > deadline) { FailAccepts($"couldn't change to {ClassJobs.Abbreviation(job)} (the game stayed busy)"); return; }
         if (GameState.InCraftingStance) { Interact.Close("RecipeNote"); Wait(1); return; }
         if (QuestSteps.Busy) { Wait(0.5); return; }
         var set = GameState.BestGearset(job);
@@ -646,14 +663,22 @@ internal sealed unsafe class TribeRun
 
     /// <summary>
     /// At the giver: talk, pick each planned daily in its "Daily Quests" list, accept it (declining any other offer),
-    /// and answer the game's own "Commence" question; anything else is the player's.
+    /// and answer the game's own "Commence" question for a planned daily; anything else is the player's. The class is
+    /// checked again right before Accept and Commence (a daily locks to the class it's accepted on).
     /// </summary>
     private void TickAccept()
     {
         var v = visit!;
         var g = v.Giver;
-        if (DeliveryWindow.SceneBusy) { Wait(0.2); return; }
-        if (GameState.CurrentJob != v.ClassJob && !QuestSteps.Busy && Interact.Menu() == null && Interact.Ready("JournalAccept") == null)
+        if (DeliveryWindow.SceneBusy)
+        {
+            // Scene tasks pending: wait, but not past the step's time limit.
+            if (DateTime.UtcNow > deadline) { FailAccepts("the game stayed busy at the giver"); return; }
+            Wait(0.2);
+            return;
+        }
+        if (GameState.CurrentJob != v.ClassJob && !QuestSteps.Busy && Interact.Menu() == null && Interact.Ready("JournalAccept") == null
+            && Interact.Ready("SelectYesno") == null)
         {
             To(Visit.SwitchJob);
             return;
@@ -675,6 +700,18 @@ internal sealed unsafe class TribeRun
             else if (DateTime.UtcNow - pendingSince > TimeSpan.FromSeconds(10)) pendingAccept = null;
         }
 
+        // A daily left over from before the reset turned up (the giver's list showed none of today's): the game takes
+        // no new ones until it's done, so the day is planned again with it first.
+        if (Leftovers().Except(leftoversAtVisit).ToList() is { Count: > 0 } left)
+        {
+            var names = left.Select(r => Catalog?.Tribes is { } td && td.Quest(r) is { } tq ? $"\"{tq.Name}\"" : $"{r - 0x10000}");
+            Log($"{string.Join(", ", names)} {(left.Count == 1 ? "is" : "are")} left over from before the daily reset; planning again.", false);
+            DebugLog.Write("tribes", $"leftover found at {g.Name}: [{string.Join(",", left.Select(r => r - 0x10000))}]; planning again");
+            replanning = true;
+            To(Visit.Leave);
+            return;
+        }
+
         if (Interact.Ready("JournalAccept") != null)
         {
             var title = StepRules.Normal(TribeData.CleanName(QuestSteps.OfferTitle() ?? ""));
@@ -685,6 +722,15 @@ internal sealed unsafe class TribeRun
                 DebugLog.Write("tribes", $"offer \"{title}\" declined ({(mine == null ? "not in the plan" : "no allowances left")})");
                 QuestSteps.Decline();
                 if (mine != null) { FailAccepts("no allowances are left"); return; }
+                Wait(1);
+                return;
+            }
+            // Not on the visit's class (changed meanwhile): declined, and the class put on first.
+            if (GameState.CurrentJob != v.ClassJob)
+            {
+                DebugLog.Write("tribes", $"offer \"{title}\" declined: on {GameState.CurrentJob}, not {v.ClassJob}");
+                QuestSteps.Decline();
+                To(Visit.SwitchJob);
                 Wait(1);
                 return;
             }
@@ -700,13 +746,26 @@ internal sealed unsafe class TribeRun
 
         if (QuestSteps.Question() is { } question)
         {
-            if (StepRules.KnownQuestion(question, new[] { QuestSteps.CommenceQuestion }))
+            // "Commence “…”?" for a daily of this visit's plan, on the visit's class: Yes. Anything else is the player's.
+            var commenced = StepRules.Filled(question, QuestSteps.CommenceQuestion);
+            var planned = commenced != null && v.ToAccept.Any(q => !QuestSteps.Accepted(q.Quest.RowId)
+                                                                   && StepRules.Normal(TribeData.CleanName(q.Quest.Name)).Equals(StepRules.Normal(TribeData.CleanName(commenced)), StringComparison.CurrentCultureIgnoreCase));
+            if (planned && GameState.CurrentJob == v.ClassJob)
             {
                 if (QuestSteps.Yes()) DebugLog.Write("tribes", $"question \"{question}\" -> Yes");
                 Wait(0.8);
                 return;
             }
-            DebugLog.Write("tribes", $"[!] unknown question while accepting: \"{question}\"");
+            if (planned)
+            {
+                // Not on the visit's class (changed meanwhile): No, and the class put on first.
+                DebugLog.Write("tribes", $"question \"{question}\" -> No: on {GameState.CurrentJob}, not {v.ClassJob}");
+                Interact.No();
+                To(Visit.SwitchJob);
+                Wait(1);
+                return;
+            }
+            DebugLog.Write("tribes", $"[!] {(commenced != null ? "a daily not in the plan in the" : "unknown")} question while accepting: \"{question}\"");
             AwaitUser($"The game asks “{question}”; answer it yourself, then resume.");
             return;
         }
@@ -767,6 +826,15 @@ internal sealed unsafe class TribeRun
         var npc = Interact.Nearest(ObjectKind.EventNpc, id => id == g.NpcId);
         if (npc == null || Interact.Distance(npc) > 6f)
         {
+            // Back to the giver, a couple of times; one who isn't found where the data puts them ends the visit.
+            if (++giverTrips > MaxGiverTrips)
+            {
+                var why = $"{g.Name} wasn't found to talk to where the game data puts them";
+                excludedGivers[g.NpcId] = why;
+                DebugLog.Write("tribes", $"[!] {why} ({(npc == null ? "not in view" : $"{Interact.Distance(npc):0.0} yalms away")}) after {MaxGiverTrips} trips back; giver left out today");
+                FailAccepts(why);
+                return;
+            }
             TravelToGiver(Visit.Accept);
             return;
         }
@@ -793,9 +861,9 @@ internal sealed unsafe class TribeRun
     }
 
     /// <summary>
-    /// The giver's windows closed the way a player does: talk clicked through, an offer declined, a menu's last entry
-    /// ("Nothing", "Cancel") when it isn't one of the society's quests (otherwise the list is closed). Nothing is sent
-    /// while scene tasks are pending. True while something was open.
+    /// The giver's windows closed the way a player does: talk clicked through, an offer declined, a menu left by its
+    /// own "Nothing" / "Cancel" entry (the game's texts), otherwise the menu closed. Nothing is sent while scene tasks
+    /// are pending. True while something was open.
     /// </summary>
     private bool CloseGiverWindows()
     {
@@ -803,10 +871,8 @@ internal sealed unsafe class TribeRun
         if (DeliveryWindow.SceneBusy || Interact.Ready("SelectYesno") != null) { Wait(0.3); return true; }
         if (Interact.Ready("JournalAccept") != null) { QuestSteps.Decline(); Wait(0.8); return true; }
         if (Interact.Menu() is not { Count: > 0 } menu) return false;
-        var tribe = visit!.Tribe.Id;
-        var quests = (Catalog?.Tribes.Quests ?? Array.Empty<TribeQuest>()).Where(q => q.TribeId == tribe)
-            .Select(q => StepRules.Normal(TribeData.CleanName(q.Name))).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
-        if (!quests.Contains(StepRules.Normal(TribeData.CleanName(menu[^1].Text)))) menu[^1].Select();
+        var leave = StepRules.LeaveEntry(menu.Select(e => e.Text).ToList(), QuestSteps.LeaveTexts);
+        if (leave >= 0) menu[leave].Select();
         else
         {
             Interact.Close("SelectIconString");
@@ -816,11 +882,20 @@ internal sealed unsafe class TribeRun
         return true;
     }
 
+    /// <summary>The society dailies in the journal left over from before the reset (Quest sheet rows).</summary>
+    private HashSet<uint> Leftovers()
+        => Catalog?.Tribes is { } data ? Game.Accepted(data).Where(a => a.Leftover).Select(a => a.Quest.RowId).ToHashSet() : new HashSet<uint>();
+
     private void AfterVisit()
     {
         var v = visit;
         deadline = default;
-        if (v != null && Completed + AcceptedCount == progressAtVisit)
+        if (replanning)
+        {
+            replanning = false;
+            DebugLog.Write("tribes", $"visit to {v?.Giver.Name} ends to plan the day again");
+        }
+        else if (v != null && Completed + AcceptedCount == progressAtVisit)
         {
             // Nothing came of it: not planned again today.
             foreach (var q in v.Quests)
@@ -863,6 +938,8 @@ internal sealed unsafe class TribeRun
 
         if (crafting) { TickCrafting(); return; }
         if (gathering) { TickGathering(); return; }
+        // After crafting or gathering (the log closing, the node letting go), the wait before the next step.
+        if (DateTime.UtcNow < waitUntil) return;
         stepper.Tick();
         var state = stepper.State;
         if (state != lastState)
@@ -914,6 +991,13 @@ internal sealed unsafe class TribeRun
         var recipe = catalog.RecipesFor(need.Product).FirstOrDefault(r => r.Job.ClassJobId() == need.ClassJob)
                      ?? (quest!.Quest.Craft?.For(need.ClassJob) is { } qr ? catalog.Recipe(qr.RecipeId) : null);
         if (recipe == null) { AwaitUser($"No recipe for {name} as {ClassJobs.Abbreviation(need.ClassJob)}; craft it yourself, then resume."); return; }
+        // The facility access gone or about to run out: renewed first (the stepper talks to the supervisor).
+        if (need.RequiredStatus != 0 && !QuestSteps.StatusLasts(need.RequiredStatus, StepRules.StatusRenewBelow))
+        {
+            DebugLog.Write("tribes", $"craft: status {need.RequiredStatus} is gone or runs out within {StepRules.StatusRenewBelow.TotalSeconds:0} seconds; renewing it first");
+            stepper.Recheck("the facility access runs out soon");
+            return;
+        }
         // On the quest's class first (the crafter would change to its gearset, which takes the item to wear off).
         if (GameState.CurrentJob != need.ClassJob)
         {
