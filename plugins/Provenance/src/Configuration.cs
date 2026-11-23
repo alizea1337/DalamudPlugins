@@ -434,6 +434,13 @@ public sealed class TribeSettings
     public bool PauseForCutscenes { get; set; }
     /// <summary>Leave out dailies that say a phrase in /say (public chat); the run says only the quest's own phrase, once.</summary>
     public bool LeaveOutSay { get; set; }
+    /// <summary>
+    /// While you do a society quest yourself (no Provenance loop going), note in the debug log what the run would do,
+    /// for bug reports. Only once the Tribes page has been opened (<see cref="Seen"/>).
+    /// </summary>
+    public bool WatchByHand { get; set; } = true;
+    /// <summary>The Tribes page has been opened (or its run started) at least once: until then nothing of Tribes runs in the background.</summary>
+    public bool Seen { get; set; }
 }
 
 [Serializable]
