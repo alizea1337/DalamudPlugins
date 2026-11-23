@@ -36,6 +36,7 @@
     <EmbeddedResource Include="Resources/fish.json" LogicalName="Provenance.Resources.fish.json" />
     <EmbeddedResource Include="Resources/fishspots.json" LogicalName="Provenance.Resources.fishspots.json" />
     <EmbeddedResource Include="Resources/ilvconvert.csv" LogicalName="Provenance.Resources.ilvconvert.csv" />
+    <EmbeddedResource Include="Resources/portals.json" LogicalName="Provenance.Resources.portals.json" />
     <Content Include="NOTICE.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>

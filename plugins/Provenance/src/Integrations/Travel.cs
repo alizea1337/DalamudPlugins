@@ -110,6 +110,21 @@ internal sealed unsafe class Travel
     public string? Failure { get; private set; }
     public bool Done => Current is State.Arrived or State.Failed;
 
+    /// <summary>
+    /// Walk only: no mount, no flying, no teleport to get unstuck (carrying something for a quest, which a mount or a
+    /// teleport would drop). Set before <see cref="GoTo"/>; it stays until changed.
+    /// </summary>
+    public bool OnFoot { get; set; }
+
+    /// <summary>Don't fly (riding a quest mount that may not). Set before <see cref="GoTo"/>; it stays until changed.</summary>
+    public bool NoFly { get; set; }
+
+    /// <summary>
+    /// Riding a quest mount whose action reaches up and down: arrive by the distance on the ground alone, and never
+    /// dismount to get down to the target (the quest mount can't be called back). Set before <see cref="GoTo"/>.
+    /// </summary>
+    public bool KeepMount { get; set; }
+
     /// <param name="exactPosition">The real target once it's in view (an NPC or a bell); null until then.</param>
     public void GoTo(string description, uint territoryId, Vector2 approximateXz, float withinYalms, Func<Vector3?>? exactPosition)
     {
@@ -137,6 +152,7 @@ internal sealed unsafe class Travel
         Current = State.Idle;
         Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
         if (Services.ClientState.TerritoryType == territory) { Enter(State.WaitingForMap); return; }
+        if (OnFoot) { Fail($"{what} is in another zone, and what you carry doesn't go along on a teleport."); return; }
         if (territory == Firmament) { StartFirmament(); return; }
         if (Teleporter.NearestTo(territory, null) != null) { Enter(State.Teleporting); return; }
         if (Teleporter.AethernetRoute(territory) is not { } r) { Fail($"No unlocked aetheryte or aethernet shard leads to {Place(territory)}."); return; }
@@ -370,7 +386,7 @@ internal sealed unsafe class Travel
 
         var flat = Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z));
         // Height matters once the real target (an NPC, a crystal) is in sight: above it on a roof or a mount is too far to talk.
-        var rise = seen is { } at ? Math.Abs(me.Y - at.Y) : 0f;
+        var rise = seen is { } at && !KeepMount ? Math.Abs(me.Y - at.Y) : 0f;
         if (flat <= range && rise <= MaxRise)
         {
             Vnav.Stop();
@@ -427,7 +443,7 @@ internal sealed unsafe class Travel
             if (!Services.Condition[ConditionFlag.Mounted] && DateTime.UtcNow < mountUntil) return;
             mountUntil = default;
         }
-        else if (!Vnav.Busy && !Services.Condition[ConditionFlag.Mounted] && Vector3.Distance(me, target) > RideFrom && TryMount())
+        else if (!OnFoot && !Vnav.Busy && !Services.Condition[ConditionFlag.Mounted] && Vector3.Distance(me, target) > RideFrom && TryMount())
         {
             mountUntil = DateTime.UtcNow.AddSeconds(4);
             Status = "Mounting up";
@@ -440,7 +456,7 @@ internal sealed unsafe class Travel
         if (!Vnav.Busy || retarget)
         {
             if (retarget) Vnav.Stop();
-            flying = CanFlyHere();
+            flying = !OnFoot && (Services.Condition[ConditionFlag.InFlight] || !NoFly && CanFlyHere());
             if (Vnav.MoveCloseTo(target, flying, Math.Max(1, range - 1)))
             {
                 walkingTo = target;
@@ -474,7 +490,7 @@ internal sealed unsafe class Travel
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
         Note($"{what}: stuck ({stuckCount}) at {Where(me)}, {Vector3.Distance(me, target):0} yalms to go");
         if (AdvancedUnstuck && Unstuck(me, target)) return;
-        if (stuckCount == 2 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
+        if (stuckCount == 2 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
             // Second time: start over from the zone's aetheryte.
             Enter(State.Teleporting, 20);
@@ -521,7 +537,7 @@ internal sealed unsafe class Travel
             }
             default:
                 // 4: teleport to the zone's aetheryte (when there is one), 5 and later: give up.
-                if (stuckCount == 4 && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
+                if (stuckCount == 4 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
                 {
                     Enter(State.Teleporting, 20);
                     return true;
