@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using ECommons.Automation;
 using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -111,21 +112,53 @@ internal static unsafe class DeliveryWindow
         return true;
     }
 
-    /// <summary>The rank-up rewards window is up and can be accepted.</summary>
-    public static bool RankUpReady
+    /// <summary>The rank-up rewards window is up.</summary>
+    public static bool RankUpOpen => Interact.Ready("SatisfactionSupplyResult") != null;
+
+    /// <summary>The rewards window's Accept button can be pressed.</summary>
+    public static bool RankUpButtonReady
+        => Interact.Ready("SatisfactionSupplyResult") is var addon && addon != null
+           && ButtonReady(new AddonMaster.SatisfactionSupplyResult((nint)addon).AcceptButton);
+
+    /// <summary>
+    /// Accepts the rank-up rewards: the Accept button when it can be pressed (what a click does, even while the event
+    /// script waits on the window); with <paramref name="force"/>, otherwise the window's confirm, as LlamaLibrary
+    /// (MIT) sends it. Which one it used comes back in <paramref name="how"/>.
+    /// </summary>
+    public static bool AcceptRankUp(bool force, out string how)
+    {
+        how = "";
+        var addon = Interact.Ready("SatisfactionSupplyResult");
+        if (addon == null) return false;
+        var window = new AddonMaster.SatisfactionSupplyResult((nint)addon);
+        if (ButtonReady(window.AcceptButton)) { window.Accept(); how = "button"; return true; }
+        if (!force) return false;
+        Callback.Fire(addon, true, 1);
+        how = "confirm";
+        return true;
+    }
+
+    /// <summary>
+    /// Whether ECommons' cutscene skipper hooked the game's cutscene input (null when it can't be told), for the
+    /// debug log: the skip only happens with the hook in place.
+    /// </summary>
+    public static bool? CutsceneSkipperHooked
     {
         get
         {
-            if (SceneBusy || Interact.Ready("SatisfactionSupplyResult") is var addon && addon == null) return false;
-            return ButtonReady(new AddonMaster.SatisfactionSupplyResult((nint)addon).AcceptButton);
+            try
+            {
+                var hookField = typeof(AutoCutsceneSkipper).GetField("CutsceneHandleInputHook", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+                if (hookField == null) return null;
+                var hook = hookField.GetValue(null);
+                if (hook == null) return false;
+                return hook.GetType().GetProperty("IsEnabled")?.GetValue(hook) as bool? ?? true;
+            }
+            catch
+            {
+                return null;
+            }
         }
-    }
-
-    public static bool AcceptRankUp()
-    {
-        if (!RankUpReady) return false;
-        new AddonMaster.SatisfactionSupplyResult((nint)Interact.Ready("SatisfactionSupplyResult")).Accept();
-        return true;
     }
 
     /// <summary>A button that's there, enabled and wired to its event (each pointer checked before it's followed).</summary>

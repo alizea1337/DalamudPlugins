@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.5
+
+- Custom Deliveries: a client's level-up rewards are now accepted, and the level-up cutscene is skipped.
+  The game counts the delivery a moment before the cutscene starts, so the run had already moved on to
+  leaving the client, and neither the skip nor the rewards were looked after from there. Both are now
+  handled at any point of the tour, and the run doesn't travel on while a cutscene plays.
+- After a level-up, the run waits until the rewards have been accepted before it goes on.
+- The debug log notes whether the cutscene skip could hook into the game, and each cutscene and rewards
+  window it meets.
+
 ## 0.21.4
 
 - Aetherial reduction no longer counts on timed fish (fish that only bite in a time window or in certain

@@ -66,6 +66,13 @@ internal sealed unsafe class DeliveryRun
     private bool cutsceneHandled;
     /// <summary>A rank-up was counted: wait out its cutscene, rewards and talk before going on.</summary>
     private bool rankedUp;
+    private DateTime rankedAt;
+    /// <summary>This hand-over's rank-up rewards were accepted.</summary>
+    private bool rewardsAccepted;
+    /// <summary>When the rewards window came up (accepted a moment later, as a person would).</summary>
+    private DateTime rewardsSeen;
+    /// <summary>This hand-over's cutscene was noted in the debug log.</summary>
+    private bool cutsceneSeen;
     private DateTime calmSince;
     /// <summary>When the hand-over was sent: its aftermath gets a few minutes at most, whatever plays.</summary>
     private DateTime handedAt;
@@ -93,8 +100,11 @@ internal sealed unsafe class DeliveryRun
     public int Planned => plan.Count;
     /// <summary>Deliveries handed in this round.</summary>
     public int DeliveredThisRound => deliveredThisRound;
-    /// <summary>Skip the rank-up cutscene now: the run waits out a hand-over and isn't set to pause for cutscenes.</summary>
-    public bool SkipCutscenesNow => Working && step == Step.Tour && visit == Visit.After && !Settings.PauseForCutscenes;
+    /// <summary>
+    /// Skip cutscenes now: the run is on its tour and isn't set to pause for them. The whole tour, not only right after
+    /// a hand-over: the game counts a rank-up before its cutscene starts.
+    /// </summary>
+    public bool SkipCutscenesNow => Working && step == Step.Tour && !Settings.PauseForCutscenes;
 
     /// <summary>The client being visited on the tour, when there is one.</summary>
     public DeliveryClient? Visiting => step == Step.Tour && tourIndex < tour.Count ? tour[tourIndex].Delivery.Client : null;
@@ -131,7 +141,7 @@ internal sealed unsafe class DeliveryRun
         DebugLog.BeginSession("deliveries");
         DebugLog.Write("deliveries", $"goal {Settings.Goal?.ToString() ?? "automatic"}, left out [{string.Join(",", Settings.LeftOut)}], prefer craft/gather {Settings.PreferCraftGather}, "
                                      + $"anyway {Settings.DeliverAnywayWhileRanking}, pause for cutscenes {Settings.PauseForCutscenes}, consumables {Settings.UseConsumables}, "
-                                     + $"{Deliver.Remaining} left, seed {Deliver.Seed}");
+                                     + $"{Deliver.Remaining} left, seed {Deliver.Seed}, cutscene skipper hooked {SkipperText()}");
         Log("Started.", false);
         BeginRound();
         return null;
@@ -513,6 +523,7 @@ internal sealed unsafe class DeliveryRun
         if (tourIndex >= tour.Count) { EndRound(); return; }
         var (d, count) = tour[tourIndex];
         var client = d.Client;
+        if (TickRankUpScene(client)) return;
         switch (visit)
         {
             case Visit.Travel:
@@ -584,6 +595,9 @@ internal sealed unsafe class DeliveryRun
                 rankBefore = Deliver.Rank(client.Id);
                 rankedUp = false;
                 cutsceneHandled = false;
+                cutsceneSeen = false;
+                rewardsAccepted = false;
+                rewardsSeen = default;
                 calmSince = default;
                 if (!DeliveryWindow.PickRequest(slot)) { Wait(0.3); return; }
                 tries = 0;
@@ -623,22 +637,69 @@ internal sealed unsafe class DeliveryRun
         }
     }
 
-    /// <summary>After the hand-over: the scrip-cap question, a rank-up (cutscene, rewards), the client's thanks; done once the game counts it.</summary>
-    private void TickAfter(PlannedDelivery d, int count)
+    /// <summary>
+    /// What a rank-up brings, at any point of the tour (the game counts the delivery before its cutscene starts): the
+    /// rewards window is accepted and the "Skip cutscene?" question answered; while a cutscene plays, the run doesn't
+    /// travel or leave. True when it took the tick.
+    /// </summary>
+    private bool TickRankUpScene(DeliveryClient client)
     {
-        var client = d.Client;
-        // The skipped cutscene asks "Skip cutscene?" (and a rank-up scene can ask a question of its own): the first answer.
+        if (DeliveryWindow.RankUpOpen)
+        {
+            if (rewardsSeen == default)
+            {
+                rewardsSeen = DateTime.UtcNow;
+                DebugLog.Write("deliveries", $"{client.Name}'s rewards window ({visit}): accept button ready {DeliveryWindow.RankUpButtonReady}, scene busy {DeliveryWindow.SceneBusy}");
+            }
+            Status = $"Accepting {client.Name}'s rewards";
+            var open = DateTime.UtcNow - rewardsSeen;
+            if (open < TimeSpan.FromSeconds(0.8)) { Wait(0.3); return true; }
+            // The button, as a click; a few seconds without one it can press, the window's confirm.
+            if (DeliveryWindow.AcceptRankUp(open > TimeSpan.FromSeconds(4), out var how))
+            {
+                DebugLog.Write("deliveries", $"accepted {client.Name}'s rewards ({how})");
+                if (!rewardsAccepted) Log($"Accepted {client.Name}'s level-up rewards.", false);
+                rewardsAccepted = true;
+                Wait(1.5);
+                return true;
+            }
+            Wait(0.3);
+            return true;
+        }
+        rewardsSeen = default;
+
         var inCutscene = Services.Condition[ConditionFlag.OccupiedInCutSceneEvent] || Services.Condition[ConditionFlag.WatchingCutscene]
                          || Services.Condition[ConditionFlag.WatchingCutscene78];
-        if (inCutscene && !Settings.PauseForCutscenes && Interact.Menu() is { Count: >= 2 } prompt)
+        if (!inCutscene) return false;
+        if (!cutsceneSeen)
+        {
+            cutsceneSeen = true;
+            DebugLog.Write("deliveries", $"{client.Name}'s cutscene ({visit}): skip {SkipCutscenesNow}, cutscene skipper hooked {SkipperText()}");
+        }
+        // The skipped cutscene asks "Skip cutscene?" (and a rank-up scene can ask a question of its own): the first answer.
+        if (!Settings.PauseForCutscenes && Interact.Menu() is { Count: >= 2 } prompt)
         {
             DebugLog.Write("deliveries", $"cutscene question: [{string.Join(" / ", prompt.Select(e => e.Text.Trim()))}] -> \"{prompt[0].Text.Trim()}\"");
             if (!cutsceneHandled) Log($"Skipped {client.Name}'s cutscene.", false);
             cutsceneHandled = true;
             prompt[0].Select();
             Wait(1);
-            return;
+            return true;
         }
+        // Not on the move while it plays (a teleport is refused, and leaving would answer the scene's menus). The
+        // hand-over steps go on as before: the aftermath may pause for it.
+        if (visit is not (Visit.Travel or Visit.SwitchJob or Visit.Leave)) return false;
+        Status = $"{client.Name}'s cutscene";
+        Wait(0.5);
+        return true;
+    }
+
+    private static string SkipperText() => DeliveryWindow.CutsceneSkipperHooked?.ToString() ?? "unknown";
+
+    /// <summary>After the hand-over: the scrip-cap question, a rank-up (cutscene, rewards), the client's thanks; done once the game counts it.</summary>
+    private void TickAfter(PlannedDelivery d, int count)
+    {
+        var client = d.Client;
         if (DeliveryWindow.SceneBusy) { Wait(0.2); return; }
         if (Interact.Ready("SelectYesno") != null)
         {
@@ -649,7 +710,6 @@ internal sealed unsafe class DeliveryRun
             Wait(1);
             return;
         }
-        if (DeliveryWindow.RankUpReady) { DeliveryWindow.AcceptRankUp(); Wait(1); return; }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         // Whatever plays, the aftermath of one hand-over gets a few minutes at most.
         if (DateTime.UtcNow - handedAt > TimeSpan.FromMinutes(4)) { FailVisit("the delivery's aftermath didn't end."); return; }
@@ -676,8 +736,10 @@ internal sealed unsafe class DeliveryRun
 
         if (rankedUp)
         {
-            // The count can come before the cutscene: go on only after two quiet seconds (the delivery window back counts as quiet).
-            var calm = !Interact.IsOpen("SatisfactionSupplyResult") && Interact.Ready("Talk") == null
+            // The count comes before the cutscene and its rewards: go on once the rewards are accepted (or a good while
+            // has passed without a rewards window) and two quiet seconds follow (the delivery window back counts as quiet).
+            var rewardsDone = rewardsAccepted || DateTime.UtcNow - rankedAt > TimeSpan.FromSeconds(45);
+            var calm = rewardsDone && !Interact.IsOpen("SatisfactionSupplyResult") && Interact.Ready("Talk") == null
                        && (!Services.Condition[ConditionFlag.OccupiedInEvent] || DeliveryWindow.SupplyReady(client.Id));
             if (!calm) { calmSince = default; }
             else if (calmSince == default) calmSince = DateTime.UtcNow;
@@ -697,6 +759,7 @@ internal sealed unsafe class DeliveryRun
             {
                 Log($"{client.Name} reached level {Deliver.Rank(client.Id)}: their requests change, so the run plans again after this round.", false);
                 rankedUp = true;
+                rankedAt = DateTime.UtcNow;
                 calmSince = default;
                 deadline = DateTime.UtcNow.AddSeconds(90);
                 Wait(1);
