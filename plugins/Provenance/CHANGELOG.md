@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.1
+
+- Fixed: trips walked instead of flying in A Realm Reborn zones (North Shroud, Coerthas and the others). Flying
+  was judged by the zone's aether currents, and those zones have none: their flight comes with the story.
+  Provenance now asks the game whether you can take off, so orders, Custom Deliveries and Tribes fly there too.
+- Tribes: the Ixal have one giver per rank, standing side by side, so the run fetched their dailies one giver
+  at a time, doing each quest before going to the next giver. Givers of one society close together are now all
+  visited for their dailies first, then the quests are done.
+
 ## 0.22.0
 
 - New: **Tribes** (Expeditions), the allied society quests. Nothing here has been tried in game yet, so please

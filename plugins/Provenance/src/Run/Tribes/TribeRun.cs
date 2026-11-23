@@ -74,6 +74,8 @@ internal sealed unsafe class TribeRun
     private readonly Queue<PlannedQuest> queue = new();
     private readonly List<PlannedQuest> acceptedHere = new();
     private readonly HashSet<uint> skippedHere = new();
+    /// <summary>Givers taken into this visit for their accepts (close by, same society: the Ixal have one per rank).</summary>
+    private readonly HashSet<uint> chainedGivers = new();
     private PlannedQuest? pendingAccept;
     private DateTime pendingSince;
     private int visits;
@@ -87,6 +89,8 @@ internal sealed unsafe class TribeRun
 
     /// <summary>Trips back to the giver while accepting, per visit, before the giver is given up on for the day.</summary>
     private const int MaxGiverTrips = 2;
+    /// <summary>Givers of one society this close together (yalms, same zone) are all visited for their accepts before the quests start.</summary>
+    private const float NearbyGivers = 80f;
 
     // The quest under way.
     private PlannedQuest? quest;
@@ -556,6 +560,8 @@ internal sealed unsafe class TribeRun
         queue.Clear();
         acceptedHere.Clear();
         skippedHere.Clear();
+        chainedGivers.Clear();
+        chainedGivers.Add(v.Giver.NpcId);
         pendingAccept = null;
         quest = null;
         tries = 0;
@@ -777,6 +783,20 @@ internal sealed unsafe class TribeRun
             if (pendingAccept != null) { Wait(0.3); return; }
             // The list closed before the quests start (the stepper would take it for a menu of the quest's).
             if (DateTime.UtcNow < deadline && CloseGiverWindows()) return;
+            // Another giver of the society close by with dailies to accept: those first, then all the quests.
+            if (Game.AllowancesLeft > 0 && NextNearby(v) is { } more)
+            {
+                chainedGivers.Add(more.Giver.NpcId);
+                Log($"Also to {more.Giver.Name} close by: accept {string.Join(", ", more.ToAccept.Select(q => $"\"{q.Quest.Name}\""))} as {ClassJobs.Abbreviation(more.ClassJob)}.", false);
+                DebugLog.Write("tribes", $"visit goes on to giver {more.Giver.NpcId} ({Vector3.Distance(more.Giver.Position, v.Giver.Position):0} yalms away) to accept [{string.Join(",", more.ToAccept.Select(q => q.Quest.Number))}] "
+                                         + $"before the quests; accepted so far [{string.Join(",", acceptedHere.Select(q => q.Quest.Number))}]");
+                visit = more;
+                skippedHere.Clear();
+                pendingAccept = null;
+                giverTrips = 0;
+                TravelToGiver(Visit.SwitchJob);
+                return;
+            }
             queue.Clear();
             foreach (var q in acceptedHere) queue.Enqueue(q);
             To(queue.Count > 0 ? Visit.New : Visit.Leave);
@@ -880,6 +900,26 @@ internal sealed unsafe class TribeRun
         }
         Wait(0.8);
         return true;
+    }
+
+    /// <summary>
+    /// The next visit of the plan to the same society whose giver stands close by in the same zone (the Ixal have one
+    /// giver per rank, side by side), with dailies to accept and nothing of its own in the journal: its accepts join
+    /// this visit, so the quests aren't fetched one giver at a time.
+    /// </summary>
+    private TribeVisit? NextNearby(TribeVisit v)
+    {
+        var after = false;
+        foreach (var w in plan.Visits)
+        {
+            if (!after) { after = ReferenceEquals(w, v); continue; }
+            if (chainedGivers.Contains(w.Giver.NpcId) || excludedGivers.ContainsKey(w.Giver.NpcId)) continue;
+            if (w.Tribe.Id != v.Tribe.Id || w.Giver.Territory != v.Giver.Territory) continue;
+            if (Vector3.Distance(w.Giver.Position, v.Giver.Position) > NearbyGivers) continue;
+            if (w.InJournal.Any() || !w.ToAccept.Any(q => !QuestSteps.Accepted(q.Quest.RowId) && !excluded.ContainsKey(q.Quest.RowId))) continue;
+            return w;
+        }
+        return null;
     }
 
     /// <summary>The society dailies in the journal left over from before the reset (Quest sheet rows).</summary>

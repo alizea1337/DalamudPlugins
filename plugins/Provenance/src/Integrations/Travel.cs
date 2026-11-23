@@ -478,7 +478,8 @@ internal sealed unsafe class Travel
                 pathFailNoted = false;
                 // A line per new target, not per re-issue.
                 if (lastPath is not { } lp || Vector3.Distance(lp, target) > 3)
-                    Note($"{what}: {(flying ? "flying" : "walking")} to {Where(target)}, {Vector3.Distance(me, target):0} yalms from {Where(me)}");
+                    Note($"{what}: {(flying ? "flying" : "walking")} to {Where(target)}, {Vector3.Distance(me, target):0} yalms from {Where(me)}"
+                         + (!flying && Services.Condition[ConditionFlag.Mounted] ? $" (mounted, flight: {FlightStatus()})" : ""));
                 lastPath = target;
             }
             else if (!pathFailNoted)
@@ -581,15 +582,43 @@ internal sealed unsafe class Travel
         return am->UseAction(ActionType.GeneralAction, MountRoulette);
     }
 
-    /// <summary>Mounted in a zone whose aether currents are all attuned.</summary>
+    /// <summary>
+    /// Mounted where the game lets you take off. The game's own answer comes first: it knows the zones whose flight
+    /// comes with the story (A Realm Reborn's, which have no aether currents to attune) as well as those opened by
+    /// aether currents, and mounts that can't fly. When it gives no clear answer, all the zone's aether currents attuned.
+    /// </summary>
     private static bool CanFlyHere()
     {
         if (Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return true;
         if (!Services.Condition[ConditionFlag.Mounted]) return false;
+        try
+        {
+            var status = FFXIVClientStructs.FFXIV.Client.Game.Control.Control.GetFlightAllowedStatus();
+            if (status == FFXIVClientStructs.FFXIV.Client.Game.Control.Control.FlightAllowedStatus.CanFly) return true;
+            if (status is FFXIVClientStructs.FFXIV.Client.Game.Control.Control.FlightAllowedStatus.MountedButCannotFly
+                or FFXIVClientStructs.FFXIV.Client.Game.Control.Control.FlightAllowedStatus.IncompleteMountFlyingConditionQuest
+                or FFXIVClientStructs.FFXIV.Client.Game.Control.Control.FlightAllowedStatus.NotMounted)
+                return false;
+        }
+        catch (Exception e)
+        {
+            if (!flightCheckFailed) Services.Log.Debug("The game's flight check failed, aether currents decide: {Message}", e.Message);
+            flightCheckFailed = true;
+        }
         var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(Services.ClientState.TerritoryType);
         var set = row?.AetherCurrentCompFlgSet.RowId ?? 0;
         var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
         return set != 0 && ps != null && ps->IsAetherCurrentZoneComplete(set);
+    }
+
+    private static bool flightCheckFailed;
+
+    /// <summary>The game's flight answer, for the debug log ("NoFly" when the trip itself doesn't fly).</summary>
+    private string FlightStatus()
+    {
+        if (NoFly) return "NoFly";
+        try { return FFXIVClientStructs.FFXIV.Client.Game.Control.Control.GetFlightAllowedStatus().ToString(); }
+        catch { return "unknown"; }
     }
 
     /// <summary>At the crystal: talk to it and pick the stop.</summary>
