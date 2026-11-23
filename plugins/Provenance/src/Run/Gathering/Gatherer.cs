@@ -303,7 +303,7 @@ internal sealed unsafe class Gatherer
         // A quest's own node, in its area: searched for there (the node data doesn't know it).
         foreach (var t in targets)
         {
-            if (left(t) <= 0 || !areas.TryGetValue(t.ItemId, out var a)) continue;
+            if (!areas.TryGetValue(t.ItemId, out var a) || left(t) <= 0) continue;
             if (abandoned.Contains(a.PointBase) || (a.Territory != here && !CanReach(a.Territory)))
             {
                 if (unreachable.Add(t.ItemId))

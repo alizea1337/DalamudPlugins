@@ -36,6 +36,11 @@ internal sealed unsafe class RetainerRun
     private readonly Queue<(ulong Retainer, string Name, List<(uint Item, int Amount)> Items)> work = new();
     private (ulong Retainer, string Name, List<(uint Item, int Amount)> Items)? current;
     private Dictionary<uint, int> movedThisRetainer = new();
+    /// <summary>
+    /// The current retainer's place in the bell's list (1 = the first), which the log and the status name it by: they
+    /// go into bug reports, which carry no retainer names.
+    /// </summary>
+    private int number;
     private Step step = Step.Idle;
     private DateTime waitUntil;
     private DateTime deadline;
@@ -157,6 +162,7 @@ internal sealed unsafe class RetainerRun
         {
             if (!work.TryDequeue(out var next)) { step = Step.CloseList; return; }
             current = next;
+            number = 0;
             movedThisRetainer = new Dictionary<uint, int>();
         }
         var list = Interact.Ready("RetainerList");
@@ -171,13 +177,14 @@ internal sealed unsafe class RetainerRun
         {
             var r = rm->GetRetainerBySortedIndex(i);
             if (r == null || r->RetainerId != current.Value.Retainer) continue;
-            Status = "Calling " + current.Value.Name;
+            number = (int)i + 1;
+            Status = $"Calling retainer {number}";
             new AddonMaster.RetainerList((nint)list).Retainers[i].Select();
             Go(Step.RetainerMenu, 10);
             Wait(1);
             return;
         }
-        log($"Retainer {current.Value.Name} wasn't found at the bell; skipped.", true);
+        log("One of the retainers wasn't found at the bell; skipped.", true);
         current = null;
     }
 
@@ -186,14 +193,14 @@ internal sealed unsafe class RetainerRun
         if (Interact.Ready("InventoryRetainerLarge") != null || Interact.Ready("InventoryRetainer") != null) { Go(Step.Withdraw, 30); return; }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (Interact.Choose(ItemsEntry)) { Wait(1); return; }
-        if (DateTime.UtcNow > deadline) { Fail($"{current?.Name}'s menu didn't open."); return; }
+        if (DateTime.UtcNow > deadline) { Fail($"Retainer {number}'s menu didn't open."); return; }
         Wait(0.3);
     }
 
     /// <summary>Moves whole stacks of each wanted item into the bags until the amount is covered.</summary>
     private void Withdraw()
     {
-        var (_, name, items) = current!.Value;
+        var items = current!.Value.Items;
         var inv = InventoryManager.Instance();
         foreach (var (item, amount) in items)
         {
@@ -210,11 +217,11 @@ internal sealed unsafe class RetainerRun
                     if (slot == null || slot->GetBaseItemId() != item || slot->GetQuantity() == 0) continue;
                     var (dstType, dstSlot) = crystal ? (InventoryType.Crystals, (int)item - 2) : EmptyBagSlot();
                     if (dstSlot < 0) { Fail("Your bags are full; make room and start again."); return; }
-                    Status = $"Taking {plugin.Plans.Catalog!.ItemName(item)} from {name}";
+                    Status = $"Taking {plugin.Plans.Catalog!.ItemName(item)} from retainer {number}";
                     var qty = (int)slot->GetQuantity();
                     inv->MoveItemSlot(page, (ushort)s, dstType, (ushort)dstSlot, true);
                     movedThisRetainer[item] = movedThisRetainer.GetValueOrDefault(item) + qty;
-                    log($"Took {qty}× {plugin.Plans.Catalog!.ItemName(item)} from {name}.", false);
+                    log($"Took {qty}× {plugin.Plans.Catalog!.ItemName(item)} from retainer {number}.", false);
                     Wait(0.6);
                     return; // one move per tick, so the game keeps up
                 }

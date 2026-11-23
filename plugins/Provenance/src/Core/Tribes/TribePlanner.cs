@@ -106,7 +106,9 @@ public sealed class TribePlanInput
 /// Decided with the user (Tribes build plan): Rank up takes societies below their top rank first, the lowest rank first;
 /// a society whose bar is full (its rank quest pending) is skipped with a notice and its allowances go to the others,
 /// while Currency and Levelling keep it. Reputation past a full bar is lost (allied-society research), so under Rank up
-/// a society takes only the dailies that fill its bar, as the custom deliveries' Rank up stops at the next level. The
+/// a society first takes only the dailies that fill its bar (counting the dailies in the journal); the allowances still
+/// left after every society's go to the dailies the bars didn't need, which still pay currency, gil, crystals and
+/// experience. Under Currency the Ixal givers below Respected, whose dailies pay no currency, get allowances last. The
 /// class: the current one when it qualifies, otherwise the best-geared one; Levelling the lowest one that qualifies
 /// (<see cref="TribeClasses"/>).
 /// </remarks>
@@ -165,7 +167,13 @@ public static class TribePlanner
         }
 
         // ---------------------------------------------------------------- new dailies, society by society
+        // Each giver is a stop of the tour, in the tour's order. Most get their dailies straight away; those that come
+        // last (Ixal givers that pay no currency, under Currency) and the spare dailies (Rank up) are given what's left
+        // afterwards, but keep their place in the tour.
         var allowances = Math.Max(0, input.Allowances);
+        var stops = new List<Stop>();
+        var late = new List<Stop>();
+        var spare = new List<(Stop Stop, TribeQuest Quest, uint Job, QuestRecipe? Recipe)>();
         foreach (var day in Order(taking, goal, input.Territory))
         {
             var tribe = day.Tribe;
@@ -174,68 +182,61 @@ public static class TribePlanner
                     ? $"Rank quest ready: do it yourself for now (\"{ready.Name}\"). Until it's done its dailies give no reputation, so the run takes others."
                     : $"Rank quest ready: do it yourself for now (\"{ready.Name}\")."));
             var newOnes = blocked == null && !(goal == TribeGoal.RankUp && day.BarFull);
-            // Rank up: only the dailies that fill the bar (counting the ones already taken today).
+            // Rank up: first the dailies that fill the bar, counting every daily in the journal (today's, and those left
+            // over from before the reset: handed in today, their reputation counts too).
             var forRank = goal == TribeGoal.RankUp && !day.AtTop && !day.BarFull && day.Needed > 0;
-            var projected = day.Value + input.Accepted.Where(a => a.Quest.TribeId == tribe.Id && a.Quest.IsDaily && !a.Leftover).Sum(a => a.Quest.Reputation);
+            var projected = day.Value + input.Accepted.Where(a => a.Quest.TribeId == tribe.Id && a.Quest.IsDaily).Sum(a => a.Quest.Reputation);
 
             foreach (var giver in day.Givers.OrderByDescending(g => g.Giver.MaxRank))
             {
-                var here = new List<TribeVisit>();
-                if (newOnes)
+                var stop = new Stop(day, giver);
+                stops.Add(stop);
+                if (!newOnes) continue;
+                if (goal == TribeGoal.Currency && !PaysCurrency(tribe, giver.Giver))
                 {
-                    var room = Math.Max(0, day.CapPerGiver - giver.Taken);
-                    var fresh = new List<(TribeQuest Quest, List<ClassInfo> Ok)>();
-                    foreach (var offer in giver.Offers.Where(o => o.State == OfferState.Open))
-                    {
-                        var q = offer.Quest;
-                        if (NewReason(q, tribe, giver.Giver, input, levelling) is { } why)
-                        {
-                            left.Add(new LeftOutQuest(tribe, q, why));
-                            continue;
-                        }
-                        fresh.Add((q, input.Classes.Where(c => TribeClasses.Qualifies(c, q, input.CurrentJob)).ToList()));
-                    }
-                    // One class per visit: the one that takes the most of them (the preferred one among equals); the
-                    // others, if any, are another visit on their own class.
-                    while (fresh.Count > 0)
-                    {
-                        var job = Preferred(fresh.SelectMany(f => f.Ok).GroupBy(c => c.ClassJob).Select(g => g.First()), input.CurrentJob, levelling)
-                            .OrderByDescending(c => fresh.Count(f => f.Ok.Any(o => o.ClassJob == c.ClassJob)))
-                            .First().ClassJob;
-                        var group = fresh.Where(f => f.Ok.Any(c => c.ClassJob == job)).ToList();
-                        fresh.RemoveAll(f => group.Contains(f));
-                        var taken = new List<PlannedQuest>();
-                        foreach (var (q, _) in group)
-                        {
-                            var recipe = RecipeFor(q, job);
-                            string? why = null;
-                            if (recipe is { EquipItem: not 0 } r && !input.Owns(r.EquipItem))
-                                why = $"Needs {input.ItemName(r.EquipItem)} equipped to craft it (the society's vendor sells it)";
-                            else if (room <= 0) why = $"{giver.Giver.Name} gives no more dailies today";
-                            else if (allowances <= 0) why = "No allowances left for it today";
-                            else if (forRank && projected >= day.Needed)
-                                why = "Not needed for the next rank: the dailies before it fill the bar, and reputation past a full bar is lost until the rank quest is done";
-                            if (why != null)
-                            {
-                                left.Add(new LeftOutQuest(tribe, q, why));
-                                continue;
-                            }
-                            taken.Add(new PlannedQuest(q, job, false, false, recipe, recipe == null ? 0 : QuestCraft.MostCrafts));
-                            room--;
-                            allowances--;
-                            projected += q.Reputation;
-                        }
-                        if (taken.Count > 0) here.Add(new TribeVisit(tribe, giver.Giver, job, taken));
-                    }
+                    late.Add(stop);
+                    continue;
                 }
-                // This giver's quests in the journal go with its first visit, done before the accepts.
-                if (inJournal.Remove(giver.Giver.NpcId, out var journal))
-                {
-                    if (here.Count > 0) here[0] = here[0] with { Quests = journal.Concat(here[0].Quests).ToList() };
-                    else here.Add(new TribeVisit(tribe, giver.Giver, journal[0].ClassJob, journal));
-                }
-                visits.AddRange(here);
+                Fill(stop, forRank, ref projected, lastPass: false);
             }
+        }
+
+        // Under Currency: the givers whose dailies pay no currency get what's left.
+        foreach (var stop in late)
+        {
+            var none = 0;
+            Fill(stop, false, ref none, lastPass: true);
+        }
+
+        // Under Rank up: the allowances still left go to the dailies the bars didn't need. They give no reputation past
+        // the full bar, but still pay currency, gil, crystals and experience (decided with the user).
+        foreach (var (stop, q, job, recipe) in spare)
+        {
+            string? why = null;
+            if (stop.Room <= 0) why = $"{stop.Giver.Giver.Name} gives no more dailies today";
+            else if (allowances <= 0)
+                why = "Not needed for the next rank (the dailies before it fill the bar), and the day's allowances went to dailies that are";
+            if (why != null)
+            {
+                left.Add(new LeftOutQuest(stop.Day.Tribe, q, why));
+                continue;
+            }
+            stop.Add(job, new PlannedQuest(q, job, false, false, recipe, recipe == null ? 0 : QuestCraft.MostCrafts));
+            allowances--;
+        }
+
+        foreach (var stop in stops)
+        {
+            var tribe = stop.Day.Tribe;
+            var giver = stop.Giver.Giver;
+            var here = stop.Visits.Select(v => new TribeVisit(tribe, giver, v.Job, v.Quests)).ToList();
+            // This giver's quests in the journal go with its first visit, done before the accepts.
+            if (inJournal.Remove(giver.NpcId, out var journal))
+            {
+                if (here.Count > 0) here[0] = here[0] with { Quests = journal.Concat(here[0].Quests).ToList() };
+                else here.Add(new TribeVisit(tribe, giver, journal[0].ClassJob, journal));
+            }
+            visits.AddRange(here);
         }
         // Quests in the journal of a giver the society list didn't cover (shouldn't happen): at the end.
         foreach (var journal in inJournal.Values)
@@ -246,7 +247,98 @@ public static class TribePlanner
         }
 
         return new TribePlan(goal, visits, left, notices, input.Allowances, blocked);
+
+        // A giver's open offers that the run can take, by class (one class per visit), within its room and the
+        // allowances. Under Rank up, the dailies its bar doesn't need wait for the spare pass.
+        void Fill(Stop stop, bool forRank, ref int projected, bool lastPass)
+        {
+            var day = stop.Day;
+            var tribe = day.Tribe;
+            var giver = stop.Giver;
+            var fresh = new List<(TribeQuest Quest, List<ClassInfo> Ok)>();
+            foreach (var offer in giver.Offers.Where(o => o.State == OfferState.Open))
+            {
+                var q = offer.Quest;
+                if (NewReason(q, tribe, giver.Giver, input, levelling) is { } why)
+                {
+                    left.Add(new LeftOutQuest(tribe, q, why));
+                    continue;
+                }
+                fresh.Add((q, input.Classes.Where(c => TribeClasses.Qualifies(c, q, input.CurrentJob)).ToList()));
+            }
+            // One class per visit: the one that takes the most of them (the preferred one among equals); the others, if
+            // any, are another visit on their own class.
+            while (fresh.Count > 0)
+            {
+                var job = Preferred(fresh.SelectMany(f => f.Ok).GroupBy(c => c.ClassJob).Select(g => g.First()), input.CurrentJob, levelling)
+                    .OrderByDescending(c => fresh.Count(f => f.Ok.Any(o => o.ClassJob == c.ClassJob)))
+                    .First().ClassJob;
+                var group = fresh.Where(f => f.Ok.Any(c => c.ClassJob == job)).ToList();
+                fresh.RemoveAll(f => group.Contains(f));
+                foreach (var (q, _) in group)
+                {
+                    var recipe = RecipeFor(q, job);
+                    string? why = null;
+                    if (recipe is { EquipItem: not 0 } r && !input.Owns(r.EquipItem))
+                        why = $"Needs {input.ItemName(r.EquipItem)} equipped to craft it (the society's vendor sells it)";
+                    else if (stop.Room <= 0) why = $"{giver.Giver.Name} gives no more dailies today";
+                    else if (allowances <= 0)
+                        why = lastPass
+                            ? "No allowances left for it today: this giver's dailies pay no Ixali Oaknots, so they come last under Currency"
+                            : "No allowances left for it today";
+                    else if (forRank && projected >= day.Needed)
+                    {
+                        spare.Add((stop, q, job, recipe));
+                        continue;
+                    }
+                    if (why != null)
+                    {
+                        left.Add(new LeftOutQuest(tribe, q, why));
+                        continue;
+                    }
+                    stop.Add(job, new PlannedQuest(q, job, false, false, recipe, recipe == null ? 0 : QuestCraft.MostCrafts));
+                    allowances--;
+                    projected += q.Reputation;
+                }
+            }
+        }
     }
+
+    /// <summary>One giver on the tour: its dailies to accept, a visit per class, and the room it has left today.</summary>
+    private sealed class Stop
+    {
+        public Stop(TribeToday day, GiverToday giver)
+        {
+            Day = day;
+            Giver = giver;
+            Room = Math.Max(0, day.CapPerGiver - giver.Taken);
+        }
+
+        public TribeToday Day { get; }
+        public GiverToday Giver { get; }
+        public int Room { get; private set; }
+        public List<(uint Job, List<PlannedQuest> Quests)> Visits { get; } = new();
+
+        /// <summary>Takes a daily on a class: into the visit on that class, or a new one after the others.</summary>
+        public void Add(uint job, PlannedQuest quest)
+        {
+            var visit = Visits.FirstOrDefault(v => v.Job == job);
+            if (visit.Quests == null) Visits.Add((job, new List<PlannedQuest> { quest }));
+            else visit.Quests.Add(quest);
+            Room--;
+        }
+    }
+
+    /// <summary>The Ixal giver of Respected: from it up, the Ixal dailies pay Ixali Oaknots.</summary>
+    public const int IxalCurrencyRank = 5;
+
+    /// <summary>
+    /// The giver's dailies pay the society's currency. All do but the Ixal givers below Respected: only the Respected and
+    /// Honored givers' dailies pay Ixali Oaknots (one and two).
+    /// </summary>
+    /// <remarks>Allied-society research (rewards table, game data 7.58): Ixal "Respected/Honored quests add Ixali Oaknot ×1/×2".</remarks>
+    public static bool PaysCurrency(Tribe tribe, TribeGiver giver)
+        => tribe.Id != QuestPolicy.IxalId || giver.MaxRank >= IxalCurrencyRank;
 
     /// <summary>
     /// The societies in the order the tour takes them. Rank up: below the top rank first, the lowest rank first, then

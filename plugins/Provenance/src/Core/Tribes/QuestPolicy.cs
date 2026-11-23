@@ -69,10 +69,16 @@ public static class QuestPolicy
     private const string Minigame = "A shooting minigame: Provenance doesn't fake its result";
     private const string Fate = "A FATE quest: the run doesn't take part in FATEs";
 
+    /// <summary>
+    /// The society quests with a snipe or bow minigame: Namazu's daily, three battle dailies, two rank quests. Not all of
+    /// them name it in their script (2991 and 3707 have no <c>SNP</c> argument), so the data reads the minigame from here too.
+    /// </summary>
+    public static readonly IReadOnlySet<ushort> Minigames = new HashSet<ushort> { 3124, 2991, 3060, 3707, 2974, 3100 };
+
     /// <summary>Quests that are never accepted by a run, by quest number, with the reason.</summary>
     public static readonly IReadOnlyDictionary<ushort, string> Never = new Dictionary<ushort, string>
     {
-        // Snipe and bow minigames: Namazu's daily, three battle dailies, two rank quests.
+        // Snipe and bow minigames (Minigames).
         [3124] = Minigame, [2991] = Minigame, [3060] = Minigame, [3707] = Minigame, [2974] = Minigame, [3100] = Minigame,
         // The nine ARR FATE dailies (Amalj'aa, Sylphs, Kobolds, Sahagin).
         [1245] = Fate, [1264] = Fate, [1284] = Fate, [1336] = Fate, [1364] = Fate, [1372] = Fate, [1379] = Fate, [1396] = Fate, [1409] = Fate,

@@ -23,7 +23,10 @@ public enum TribeGoal
 {
     /// <summary>Societies below their top rank first, the lowest first.</summary>
     RankUp,
-    /// <summary>Society currency (every daily pays the same, so: as many dailies as the day allows).</summary>
+    /// <summary>
+    /// Society currency (and gil and crystals): as many dailies as the day allows. Most societies pay the same for every
+    /// daily; the Ixal pay Ixali Oaknots only at their Respected and Honored givers, so their lower givers come last.
+    /// </summary>
     Currency,
     /// <summary>Class levels: the lowest class that qualifies takes each quest.</summary>
     Levelling,
@@ -166,7 +169,7 @@ public sealed record TribeGiver(uint NpcId, string Name, uint Territory, string 
 
 /// <summary>A quest on the way to unlocking a society, with where to get it.</summary>
 /// <param name="Npc">The NPC who offers it, and where (zone name and map coordinates).</param>
-/// <param name="Requirement">The class it needs, as the game words it, with the level ("Disciple of the Hand, level 50").</param>
+/// <param name="Requirement">The class it needs, in plain words with the level ("a crafter at level 50"); empty when any class does.</param>
 /// <param name="Previous">Quests that must be done before it's offered.</param>
 public sealed record TribeUnlockStep(uint QuestId, string Name, uint Npc, string NpcName, uint Territory, string Place, Vector2 MapPosition,
     string Requirement, IReadOnlyList<(uint QuestId, string Name)> Previous);

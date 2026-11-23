@@ -104,15 +104,74 @@ public class TribePlannerTests
     }
 
     [Fact]
-    public void RankUpTakesOnlyTheDailiesThatFillTheBar()
+    public void RankUpGivesTheAllowancesToTheDailiesThatFillABarFirst()
     {
-        // 60 reputation each, 70 to go: two fill it; the third would be lost.
-        var day = Three(1, 3, value: 930, needed: 1000);
-        var plan = Plan(new[] { day }, goal: TribeGoal.RankUp);
-        Assert.Equal(2, plan.ToAccept);
-        Assert.Contains(plan.LeftOut, l => l.Reason.StartsWith("Not needed for the next rank"));
-        // Currency takes all three.
-        Assert.Equal(3, Plan(new[] { day }, goal: TribeGoal.Currency).ToAccept);
+        // Society 1: 60 reputation each, 50 to go, so one fills it. Society 2 needs all three.
+        var near = Three(1, 2, value: 950, needed: 1000);
+        var far = Three(2, 3);
+        var plan = Plan(new[] { near, far }, allowances: 4, goal: TribeGoal.RankUp);
+        Assert.Equal(1, plan.Visits.Where(v => v.Tribe.Id == 1).Sum(v => v.ToAccept.Count()));
+        Assert.Equal(3, plan.Visits.Where(v => v.Tribe.Id == 2).Sum(v => v.ToAccept.Count()));
+        Assert.Equal(2, plan.LeftOut.Count(l => l.Tribe.Id == 1 && l.Reason.StartsWith("Not needed for the next rank")));
+    }
+
+    [Fact]
+    public void RankUpGivesTheSpareAllowancesToTheDailiesTheBarDoesntNeed()
+    {
+        var near = Three(1, 2, value: 950, needed: 1000);
+        var far = Three(2, 3);
+        var plan = Plan(new[] { near, far }, allowances: 12, goal: TribeGoal.RankUp);
+        Assert.Equal(6, plan.ToAccept);
+        Assert.Empty(plan.LeftOut);
+        // The spare ones join the society's visit (same giver, same class), after the one that fills the bar.
+        Assert.Equal(new uint[] { 1, 2 }, plan.Visits.Select(v => v.Tribe.Id).ToArray());
+        Assert.Equal(new ushort[] { 11, 12, 13 }, plan.Visits[0].Quests.Select(q => q.Quest.Number).ToArray());
+        // Currency takes all three too.
+        Assert.Equal(3, Plan(new[] { near }, goal: TribeGoal.Currency).ToAccept);
+    }
+
+    [Fact]
+    public void RankUpCountsTheDailiesLeftOverFromBeforeTheResetTowardsTheBar()
+    {
+        // 900 of 1000, and a 60-reputation daily from before the reset in the journal: one new daily fills the bar.
+        var near = Three(1, 2, value: 900, needed: 1000);
+        var far = Three(2, 3);
+        var leftover = Daily(1, 19, near.Tribe.Givers[0].NpcId);
+        var plan = Plan(new[] { near, far }, allowances: 4, goal: TribeGoal.RankUp,
+            accepted: new[] { new AcceptedTribeQuest(leftover, 1, 8, false) });
+        Assert.Null(plan.Blocked);
+        Assert.True(plan.Visits[0].Leftover);
+        Assert.Equal(1, plan.Visits.Where(v => v.Tribe.Id == 1).Sum(v => v.ToAccept.Count()));
+        Assert.Equal(3, plan.Visits.Where(v => v.Tribe.Id == 2).Sum(v => v.ToAccept.Count()));
+    }
+
+    [Fact]
+    public void UnderCurrencyTheIxalGiversThatPayNoOaknotsComeLastButKeepTheirPlace()
+    {
+        var low = Giver(501, 1, 1);
+        var respected = Giver(505, 5, 5);
+        var ixal = Society(QuestPolicy.IxalId, 7, 100, TribeKind.Crafter, low, respected);
+        var ixalDay = new TribeToday(ixal, 6, false, 0, 1000, false, new[]
+        {
+            new GiverToday(low, new[] { Open(Daily(5, 1501, 501)), Open(Daily(5, 1502, 501)), Open(Daily(5, 1503, 501)) }, 0),
+            new GiverToday(respected, new[] { Open(Daily(5, 1551, 505)), Open(Daily(5, 1552, 505)), Open(Daily(5, 1553, 505)) }, 0),
+        });
+        var other = Three(1, 3);
+
+        // Six allowances: the Respected giver's three and the other society's three; the low giver's wait.
+        var plan = Plan(new[] { ixalDay, other }, allowances: 6, goal: TribeGoal.Currency);
+        Assert.Equal(6, plan.ToAccept);
+        Assert.DoesNotContain(plan.Quests, q => q.Quest.Giver == 501);
+        Assert.Equal(3, plan.LeftOut.Count(l => l.Quest.Giver == 501 && l.Reason.Contains("Ixali Oaknots")));
+
+        // With allowances for all, the low giver's dailies are taken where the Ixal are on the tour.
+        plan = Plan(new[] { ixalDay, other }, allowances: 12, goal: TribeGoal.Currency);
+        Assert.Equal(9, plan.ToAccept);
+        Assert.Equal(new uint[] { 505, 501, 100 }, plan.Visits.Select(v => v.Giver.NpcId).ToArray());
+
+        // Other goals take them in the usual order (the giver of the highest rank first, then the others).
+        Assert.Equal(new uint[] { 505, 501, 100 },
+            Plan(new[] { ixalDay, other }, allowances: 12, goal: TribeGoal.Levelling).Visits.Select(v => v.Giver.NpcId).ToArray());
     }
 
     [Fact]
@@ -206,6 +265,20 @@ public class TribePlannerTests
         var classes = Crafters().Select(c => c.ClassJob == 12 ? c with { HasGearset = false } : c).ToList();
         var plan = Plan(new[] { day }, classes: classes, accepted: new[] { new AcceptedTribeQuest(mine, 1, 12, true) });
         Assert.Contains(plan.LeftOut, l => l.Quest.RowId == mine.RowId && l.Reason.Contains("no saved gearset"));
+    }
+
+    [Fact]
+    public void AGiverThatListsNoneOfItsOpenDailiesHoldsThemBackForTheLeftovers()
+    {
+        // Allowances left, room at the giver, open offers, dailies in the journal, and none listed: held back.
+        Assert.True(TribeLeftovers.HeldBack(allowances: 8, listed: 0, open: 3, room: 3, inJournal: 2));
+        // Any of these explains an empty list without a leftover.
+        Assert.False(TribeLeftovers.HeldBack(allowances: 0, listed: 0, open: 3, room: 3, inJournal: 2));
+        Assert.False(TribeLeftovers.HeldBack(allowances: 8, listed: 0, open: 0, room: 3, inJournal: 2));
+        Assert.False(TribeLeftovers.HeldBack(allowances: 8, listed: 0, open: 3, room: 0, inJournal: 2));
+        Assert.False(TribeLeftovers.HeldBack(allowances: 8, listed: 0, open: 3, room: 3, inJournal: 0));
+        // Dailies listed: nothing's held back.
+        Assert.False(TribeLeftovers.HeldBack(allowances: 8, listed: 2, open: 3, room: 3, inJournal: 2));
     }
 
     // ------------------------------------------------------------------ the class
