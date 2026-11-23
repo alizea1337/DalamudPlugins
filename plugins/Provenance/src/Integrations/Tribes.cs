@@ -244,7 +244,8 @@ internal static unsafe class Tribes
         {
             if (data == null || data.Tribes.Count == 0 || !Ready || TitleText.Value.Length == 0) return;
             var addon = Interact.Ready("SelectIconString");
-            if (addon == null || addon->AtkValuesCount < 1 || Clean(Text(addon->AtkValues[0])) != TitleText.Value) return;
+            if (addon == null || addon->AtkValuesCount < 1
+                || !string.Equals(Clean(Text(addon->AtkValues[0])), TitleText.Value, StringComparison.OrdinalIgnoreCase)) return;
             if (GiverInFront(data) is not { } at) return;
             var (tribe, giver) = at;
             var (rank, rankedUp, _) = Reputation(tribe.Id);
@@ -261,11 +262,14 @@ internal static unsafe class Tribes
             var today = Today(data, tribe);
             var mine = today.Givers.FirstOrDefault(g => g.Giver.NpcId == giver.NpcId)?.Offers ?? Array.Empty<TribeOffer>();
             var worked = mine.Select(o => names[o.Quest.RowId]).ToList();
-            var open = mine.Where(o => o.State == OfferState.Open).Select(o => names[o.Quest.RowId]).ToList();
+            // With no allowances left, or a daily left over from before the reset, the giver may list no dailies at all:
+            // then only what it does list is checked.
+            var blocked = AllowancesLeft == 0 || Accepted(data).Any(a => a.Leftover);
+            var open = blocked ? new List<string>() : mine.Where(o => o.State == OfferState.Open).Select(o => names[o.Quest.RowId]).ToList();
             var match = gameDailies.All(n => worked.Contains(n, StringComparer.OrdinalIgnoreCase))
                         && open.All(n => gameDailies.Contains(n, StringComparer.OrdinalIgnoreCase));
             Checked[giver.NpcId] = (day, seed, rank, rankedUp, match);
-            DebugLog.Write("tribes", $"{(match ? "" : "[!] ")}{tribe.Name} giver {giver.NpcId} ({giver.Name}) rank {rank}{(rankedUp ? " (ranked up today)" : "")}, seed {seed}: "
+            DebugLog.Write("tribes", $"{(match ? "" : "[!] ")}{tribe.Name} giver {giver.NpcId} ({giver.Name}) rank {rank}{(rankedUp ? " (ranked up today)" : "")}, seed {seed}{(blocked ? ", nothing can be taken" : "")}: "
                                      + $"game [{string.Join(" | ", gameDailies)}], worked out [{string.Join(" | ", mine.Select(o => $"{names[o.Quest.RowId]} ({o.State})"))}]"
                                      + (others.Count > 0 ? $", other entries [{string.Join(" | ", others)}]" : "") + ": " + (match ? "match" : "MISMATCH"));
         }
