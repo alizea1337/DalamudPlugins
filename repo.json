@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Aetherial reduction no longer counts on timed fish (fish that only bite in a time window or in certain\n  weather): waiting for their window held a run up for the sake of a reduction. Gathered collectables and\n  fish without a window are used as before; an item that only comes from timed fish is one to get\n  yourself, and the plan says so.\r\n",
+    "Changelog": "- Custom Deliveries: a client's level-up rewards are now accepted, and the level-up cutscene is skipped.\n  The game counts the delivery a moment before the cutscene starts, so the run had already moved on to\n  leaving the client, and neither the skip nor the rewards were looked after from there. Both are now\n  handled at any point of the tour, and the run doesn't travel on while a cutscene plays.\n- After a level-up, the run waits until the rewards have been accepted before it goes on.\n- The debug log notes whether the cutscene skip could hook into the game, and each cutscene and rewards\n  window it meets.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.21.4.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.4/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.4/latest.zip",
+    "AssemblyVersion": "0.21.5.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.5/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.5/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795438183
+    "LastUpdate": 1795441594
   }
 ]
