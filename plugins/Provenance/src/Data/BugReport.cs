@@ -194,6 +194,21 @@ internal static class BugReport
                     }
                 }
             }
+
+            // The run: its state, the plan it goes by (or would), the stepper, and its log.
+            Section("Tribes run");
+            var loop = plugin.TribeLoop;
+            foreach (var l in loop.Describe()) Line(l);
+            var tribePlan = loop.Active ? loop.Plan : ready ? plugin.TribePlanning.Build() : Core.Tribes.TribePlan.Empty;
+            Line($"Plan{(loop.Active ? "" : " (if started now)")}: goal {tribePlan.Goal}, {tribePlan.Allowances} allowances, {tribePlan.ToAccept} to accept, {tribePlan.Count} in all"
+                 + (tribePlan.Blocked != null ? $"; no new dailies: {tribePlan.Blocked}" : ""));
+            foreach (var v in tribePlan.Visits)
+                Line($"- {v.Tribe.Name}, giver {v.Giver.NpcId}, as {ClassJobs.Abbreviation(v.ClassJob)}: "
+                     + string.Join("; ", v.Quests.Select(q => $"{q.Quest.Number}{(q.Accepted ? $" in the journal as {ClassJobs.Abbreviation(q.ClassJob)}" : "")}{(q.Leftover ? " (left over)" : "")}"
+                                                              + (q.Crystals.Count > 0 ? $", crystals {string.Join("+", q.Crystals.Select(c => $"{c.Amount}x{c.ItemId}"))}" : ""))));
+            foreach (var l in tribePlan.LeftOut) Line($"  left out {l.Quest.Number} ({l.Tribe.Name}): {l.Reason}");
+            foreach (var n in tribePlan.Notices) Line($"  notice {n.Tribe.Name}: {n.Text}");
+            foreach (var e in loop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
         }
 
         // ---------------------------------------------------------------- Cosmic Exploration

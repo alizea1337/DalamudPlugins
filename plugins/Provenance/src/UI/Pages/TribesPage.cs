@@ -10,6 +10,7 @@ using Provenance.Data;
 using Provenance.UI.Theme;
 using Game = Provenance.Integrations.Tribes;
 using Tribe = Provenance.Core.Tribes.Tribe;
+using TribeRun = Provenance.Run.Tribes.TribeRun;
 
 namespace Provenance.UI.Pages;
 
@@ -26,17 +27,57 @@ internal sealed class TribesPage : Page
     private List<DropdownItem>? goalItems;
     private Snapshot? snapshot;
     private DateTime snapshotAt;
+    private string? startProblem;
 
     public TribesPage(Plugin plugin) : base(plugin) { }
 
     private TribeSettings S => Config.Tribes;
+    private TribeRun Loop => Plugin.TribeLoop;
     private TribeData? Data => Plans.Catalog?.Tribes;
 
     public override string Title => "Tribes";
     public override FontAwesomeIcon Icon => FontAwesomeIcon.Handshake;
 
     public override (string Text, Vector4 Color)? Status
-        => Data is { Tribes.Count: > 0 } && Game.Ready ? ($"{Game.AllowancesLeft} of {Game.DailyAllowance} allowances left today", Palette.TextMuted) : null;
+        => Loop.Active
+            ? Loop.Waiting != null
+                ? (Loop.WaitingForCutscene ? "Paused for a quest cutscene" : "Waiting for you: see the top of the page", Palette.Warn)
+                : (Loop.Status, Loop.Paused || Loop.Pausing ? Palette.Warn : Palette.Accent)
+            : Loop.Problem != null ? ("The run stopped with a problem; see below", Palette.Warn)
+            : Data is { Tribes.Count: > 0 } && Game.Ready ? ($"{Game.AllowancesLeft} of {Game.DailyAllowance} allowances left today", Palette.TextMuted) : null;
+
+    public override (Vector4 Color, bool Pulse)? Live
+        => Loop.Active ? (Loop.Paused || Loop.Pausing ? Palette.Warn : Palette.Accent, Loop.Working) : null;
+
+    public override IEnumerable<FooterAction> Actions
+    {
+        get
+        {
+            if (Loop.Active)
+            {
+                foreach (var a in TribeRunActions(Loop)) yield return a;
+                yield break;
+            }
+            yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => startProblem = Loop.Start(),
+                Tooltip: "Accepts today's planned dailies at each society and does them: the crafting, the gathering and the errands.");
+        }
+    }
+
+    /// <summary>The run's buttons while it goes: Stop, and Pause / Resume (also on the compact strip).</summary>
+    public static IEnumerable<FooterAction> TribeRunActions(TribeRun loop)
+    {
+        yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(),
+            Tooltip: (loop.Paused ? "Ends the run." : "Stops once the item being crafted is finished; anything else stops right away.")
+                     + " Dailies already accepted stay in your journal.");
+        if (loop.Paused)
+            yield return new FooterAction("Resume", Ui.Kind.Primary, FontAwesomeIcon.Play, loop.Resume,
+                Tooltip: loop.Waiting != null && !loop.WaitingForCutscene ? "Carries on once you've done what it asked." : "Carries on where it paused.");
+        else if (loop.Pausing)
+            yield return new FooterAction("Keep going", Ui.Kind.Secondary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Never mind the pause.");
+        else
+            yield return new FooterAction("Pause", Ui.Kind.Secondary, FontAwesomeIcon.Pause, loop.Pause,
+                Tooltip: "Pauses after the item being crafted or the node being gathered, otherwise right away.");
+    }
 
     /// <summary>What the page shows, read from the game at most twice a second.</summary>
     private sealed record Snapshot(List<TribeToday> Days, List<AcceptedTribeQuest> Accepted, int Allowances, List<ClassInfo> Classes, uint Current);
@@ -59,6 +100,13 @@ internal sealed class TribesPage : Page
         Ui.Heading("Tribes", "The allied societies' daily quests: twelve a day between them, three per society. Open a society for "
                              + "today's quests, how far its next rank is, and what its ranks open.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        if (startProblem != null && !Loop.Active)
+        {
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped("Can't start: " + startProblem, Palette.Warn, w);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+        }
         if (Data is not { Tribes.Count: > 0 } data)
         {
             Ui.Wrapped(Plans.Catalog == null ? "Reading the game data…" : "The game data has no allied societies.", Palette.TextMuted);
@@ -106,10 +154,173 @@ internal sealed class TribesPage : Page
     /// </summary>
     private void DrawRun(Snapshot snap, float w)
     {
-        // The run's progress and live log: here.
+        if (Loop.Active && Loop.Waiting != null) DrawWaiting(w);
+        if (Loop.Active || Loop.Lines.Count > 0) DrawProgress(w);
         DrawSettings(snap, w);
-        // The day's plan: here.
+        DrawPlan(Plugin, w, false);
     }
+
+    /// <summary>
+    /// The run waits for the player: what to do, in the run's words, and Resume right under it. A cutscene the options
+    /// pause for reads the same, quieter.
+    /// </summary>
+    private void DrawWaiting(float w)
+    {
+        var s = Ui.S;
+        var cutscene = Loop.WaitingForCutscene;
+        var tint = cutscene ? Palette.Accent : Palette.Warn;
+        Ui.BeginCard(Palette.WithAlpha(tint, 0.08f), width: w);
+        Ui.Icon(cutscene ? FontAwesomeIcon.Film : FontAwesomeIcon.UserCheck, tint);
+        ImGui.SameLine(0, 10 * s);
+        ImGui.BeginGroup();
+        using (Ui.F.Strong.Push()) Ui.Text(cutscene ? "Paused for the cutscene" : "Waiting for you");
+        Ui.Wrapped(cutscene ? "Watch it, then Resume carries on with the quest." : Loop.Waiting ?? "", Palette.Text);
+        if (Loop.Doing is { } quest)
+            using (Ui.F.Small.Push())
+                Ui.Wrapped(Loop.Visiting is { } tribe ? $"\"{quest.Name}\", {tribe.Name}" : $"\"{quest.Name}\"", Palette.TextMuted);
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        if (Ui.Button("Resume", Ui.Kind.Primary, FontAwesomeIcon.Play, id: "##tribesresume",
+                tooltip: cutscene ? "Carries on with the quest." : "Carries on from the step you did.")) Loop.Resume();
+        ImGui.EndGroup();
+        Ui.EndCard();
+    }
+
+    /// <summary>The run going (or the last one): what it does now, how far it got, and its log.</summary>
+    private void DrawProgress(float w)
+    {
+        var s = Ui.S;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text(Loop.Active ? "Under way" : "Last run");
+        if (Loop.Active && Loop.Waiting == null) Ui.Wrapped(Loop.Status, Palette.Text);
+        if (Loop.Active && Loop.Visiting is { } tribe) Ui.Chip(tribe.Name, Palette.Accent, FontAwesomeIcon.Handshake);
+        using (Ui.F.Small.Push())
+        {
+            var done = $"{Loop.Completed} {(Loop.Completed == 1 ? "daily" : "dailies")} done, {Loop.AcceptedCount} accepted";
+            Ui.Muted(Loop.Active ? $"{done}, {Loop.Plan.Count} still planned" : done);
+        }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var (at, text, problem) in Loop.Lines.Reverse().Take(8))
+        {
+            using (Ui.F.Small.Push())
+            {
+                Ui.Text(at.ToString("HH:mm"), Palette.TextFaint);
+                ImGui.SameLine(0, 10 * s);
+                Ui.Wrapped(text, problem ? Palette.Warn : Palette.TextMuted);
+            }
+        }
+        Ui.EndCard();
+    }
+
+    // ------------------------------------------------------------------ the day's plan
+
+    /// <summary>
+    /// The day's plan: the dailies in tour order with the class each is taken on, the crystals they may use, notices
+    /// (a rank quest ready) and what's left out and why. Also on the Plan page when there's no order.
+    /// </summary>
+    public static void DrawPlan(Plugin plugin, float w, bool fromPlanPage)
+    {
+        var s = Ui.S;
+        if (plugin.Plans.Catalog is not { } catalog || catalog.Tribes is not { Tribes.Count: > 0 } || !Game.Ready) return;
+        var loop = plugin.TribeLoop;
+        var plan = loop.Active ? loop.Plan : plugin.TribePlanning.Current;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Today's plan");
+        if (plan.Count == 0)
+        {
+            Ui.Wrapped(plan.Blocked ?? (Game.AllowancesLeft == 0 ? "No allowances left today." : "Nothing for the run today with the current options."), Palette.TextMuted);
+        }
+        else
+        {
+            var societies = plan.Visits.Select(v => v.Tribe.Id).Distinct().Count();
+            var inJournal = plan.Count - plan.ToAccept;
+            var parts = new List<string>();
+            if (plan.ToAccept > 0) parts.Add($"{plan.ToAccept} {(plan.ToAccept == 1 ? "daily" : "dailies")} to accept");
+            if (inJournal > 0) parts.Add($"{inJournal} in your journal");
+            Ui.Wrapped($"{GoalName(plan.Goal)}: {Join(parts)} at {societies} {(societies == 1 ? "society" : "societies")}, "
+                       + $"with {plan.Allowances} of {Game.DailyAllowance} allowances left.", Palette.TextMuted);
+            if (plan.Blocked != null) Ui.Wrapped(plan.Blocked, Palette.Warn);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+            foreach (var v in plan.Visits)
+            foreach (var q in v.Quests)
+                DrawPlanned(catalog, v, q);
+            DrawCrystals(plugin, catalog, plan);
+        }
+        if (plan.Notices.Count > 0)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            foreach (var n in plan.Notices) Ui.Wrapped($"{n.Tribe.Name}: {n.Text}", Palette.Text);
+        }
+        if (plan.LeftOut.Count > 0)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            Ui.Muted("Not this time:");
+            const int shown = 6;
+            foreach (var l in plan.LeftOut.Take(shown))
+                using (Ui.F.Small.Push()) Ui.Wrapped($"\"{l.Quest.Name}\" ({l.Tribe.Name}): {l.Reason}.", Palette.TextMuted);
+            if (plan.LeftOut.Count > shown)
+                using (Ui.F.Small.Push())
+                    Ui.Wrapped($"And {plan.LeftOut.Count - shown} more. Open a society on the Tribes page for each quest's reason.", Palette.TextFaint);
+        }
+        if (fromPlanPage)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            if (Ui.LinkButton("Open Tribes", Palette.Accent, FontAwesomeIcon.Handshake)) plugin.Main.Select<TribesPage>();
+        }
+        Ui.EndCard();
+    }
+
+    private static string GoalName(TribeGoal goal) => Goals.First(g => g.Goal == goal).Label;
+
+    /// <summary>One planned daily: its item or errand glyph, its name over its society and what it asks, and the class chip.</summary>
+    private static void DrawPlanned(GameCatalog catalog, TribeVisit v, PlannedQuest q)
+    {
+        var s = Ui.S;
+        var start = ImGui.GetCursorScreenPos();
+        var width = Ui.CardInnerWidth;
+        var h = 40 * s;
+        var dl = ImGui.GetWindowDrawList();
+        DrawQuestIcon(dl, catalog, q.Quest, q.ClassJob, start + new Vector2(0, (h - 28 * s) / 2));
+
+        var (chip, color, icon, job) = q.Leftover
+            ? ("Left over from yesterday", Palette.Warn, FontAwesomeIcon.ExclamationTriangle, 0u)
+            : q.Accepted
+                ? ($"Accepted as {ClassJobs.Abbreviation(q.ClassJob)}", Palette.ClassJobColor(q.ClassJob), (FontAwesomeIcon?)null, q.ClassJob)
+                : (ClassJobs.Abbreviation(q.ClassJob), Palette.ClassJobColor(q.ClassJob), null, q.ClassJob);
+        var chipW = Ui.ChipWidth(chip, icon, job);
+        var x = start.X + 38 * s;
+        var textRight = start.X + width - chipW - 12 * s;
+        dl.PushClipRect(start, new Vector2(textRight, start.Y + h), true);
+        dl.AddText(new Vector2(x, start.Y + 3 * s), Palette.U32(Palette.Text), q.Quest.Name);
+        using (Ui.F.Small.Push())
+            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted), $"{v.Tribe.Name}. {What(catalog, q.Quest, q.ClassJob)}");
+        dl.PopClipRect();
+        ImGui.SetCursorScreenPos(new Vector2(start.X + width - chipW, start.Y + (h - 20 * s) / 2));
+        Ui.Chip(chip, color, icon, job);
+        ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
+        ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    /// <summary>
+    /// The crystals the plan's crafting dailies may use (counted for the most crafts a daily asks), with what's in the
+    /// bags; when some are short, where the rest comes from.
+    /// </summary>
+    private static void DrawCrystals(Plugin plugin, GameCatalog catalog, TribePlan plan)
+    {
+        var s = Ui.S;
+        var crystals = plugin.TribePlanning.Crystals(plan);
+        if (crystals.Count == 0) return;
+        ImGui.Dummy(new Vector2(0, 4 * s));
+        Ui.Wrapped("Crystals, for up to " + QuestCraft.MostCrafts + " crafts a daily: "
+                   + Join(crystals.Select(c => $"{c.Needed:N0} {catalog.ItemNamePlural(c.ItemId)} (you have {c.OnHand:N0})")) + ".", Palette.TextMuted);
+        var shortOnes = crystals.Where(c => c.Short > 0).ToList();
+        if (shortOnes.Count == 0) return;
+        var fromRetainers = shortOnes.Where(c => c.Retainers > 0).ToList();
+        var text = fromRetainers.Count > 0
+            ? $"Before the tour the run takes what's short from your retainers ({Join(fromRetainers.Select(c => $"{c.Retainers:N0} {catalog.ItemNamePlural(c.ItemId)}"))}) and gathers the rest. "
+            : "Before the tour the run gathers what's short. ";
+        using (Ui.F.Small.Push()) Ui.Wrapped(text + "A daily the crystals still don't cover is left out.", Palette.TextFaint);
+    }
+
 
     private void DrawSettings(Snapshot snap, float w)
     {

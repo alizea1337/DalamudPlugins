@@ -544,7 +544,8 @@ internal sealed class MainWindow : Window
         // Buttons: the same ones the Run page offers (the Cosmic loop's while that's what's going, or set up with no order).
         var run = pages.OfType<Pages.RunPage>().FirstOrDefault();
         if (run == null) return;
-        var actions = DeliveryCompact ? DeliveryCompactActions()
+        var actions = TribeCompact ? TribeCompactActions()
+            : DeliveryCompact ? DeliveryCompactActions()
             : CosmicCompact ? CosmicCompactActions() : run.Actions.ToList();
         var bx = pos.X + size.X - pad;
         var by = pos.Y + size.Y - pad - 34 * s;
@@ -560,11 +561,15 @@ internal sealed class MainWindow : Window
 
     /// <summary>The compact strip shows the Cosmic loop: it's going, or it's set up, there's no order run or order, and it was run last (or nothing else was).</summary>
     private bool CosmicCompact => plugin.CosmicLoop.Active
-        || !DeliveryCompact && plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.Order.IsEmpty && plugin.Config.Cosmic.Classes.Any(c => c is >= 8 and <= 15);
+        || !DeliveryCompact && !TribeCompact && plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.Order.IsEmpty && plugin.Config.Cosmic.Classes.Any(c => c is >= 8 and <= 15);
 
     /// <summary>The compact strip shows the custom deliveries: they're going, or they were run last and nothing else is going.</summary>
     private bool DeliveryCompact => plugin.DeliveryLoop.Active
-        || !plugin.CosmicLoop.Active && plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.LastLoop == "deliveries";
+        || !plugin.CosmicLoop.Active && !plugin.TribeLoop.Active && plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.LastLoop == "deliveries";
+
+    /// <summary>The compact strip shows the allied society run: it's going, or it was run last and nothing else is going.</summary>
+    private bool TribeCompact => plugin.TribeLoop.Active
+        || !plugin.CosmicLoop.Active && !plugin.DeliveryLoop.Active && plugin.Runs.Phase == Run.RunPhase.Idle && plugin.Config.LastLoop == "tribes";
 
     private List<Pages.FooterAction> CosmicCompactActions()
     {
@@ -618,8 +623,37 @@ internal sealed class MainWindow : Window
             $"{loop.Delivered} delivered, {Integrations.Deliveries.Remaining} left this week");
     }
 
+    private List<Pages.FooterAction> TribeCompactActions()
+    {
+        var loop = plugin.TribeLoop;
+        if (loop.Active) return Pages.TribesPage.TribeRunActions(loop).ToList();
+        return new List<Pages.FooterAction>
+        {
+            new("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () =>
+            {
+                if (loop.Start() is { } why) Services.Chat.PrintError("[Provenance] Can't start the allied society run: " + why);
+            }, Tooltip: "Accepts today's planned dailies at each society and does them."),
+        };
+    }
+
+    /// <summary>The compact strip for the allied society run: the society visited (or that it waits for you), and the dailies done.</summary>
+    private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) TribeCompactState()
+    {
+        var loop = plugin.TribeLoop;
+        var left = $"{Integrations.Tribes.AllowancesLeft} of {Integrations.Tribes.DailyAllowance} allowances left today";
+        if (!loop.Active)
+            return (Palette.TextFaint, "Tribes", "not running", null, Integrations.Tribes.Ready ? left : "");
+        var detail = loop.Waiting != null ? loop.WaitingForCutscene ? "paused for a cutscene" : "waiting for you"
+            : loop.Paused ? "paused" : loop.Pausing ? "pausing after this craft or node" : loop.Visiting is { } t ? t.Name : loop.Status;
+        var total = loop.Completed + loop.Plan.Count;
+        float? fraction = total > 0 ? Math.Clamp(loop.Completed / (float)total, 0f, 1f) : null;
+        return (loop.Paused || loop.Pausing ? Palette.Warn : Palette.Accent, "Tribes", detail, fraction,
+            $"{loop.Completed} of {total} {(total == 1 ? "daily" : "dailies")} done, {left}");
+    }
+
     private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) CompactState()
     {
+        if (TribeCompact) return TribeCompactState();
         if (DeliveryCompact) return DeliveryCompactState();
         if (CosmicCompact) return CosmicCompactState();
         var runs = plugin.Runs;
