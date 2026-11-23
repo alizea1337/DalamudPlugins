@@ -86,6 +86,27 @@ public sealed record TribeToday(Tribe Tribe, int Rank, bool RankedUpToday, int V
     }
 }
 
+/// <summary>
+/// Telling the dailies left over from before the reset, besides the game's slots. <c>Integrations.Tribes</c> takes a
+/// daily in the journal without one of today's slots as left over, which rests on the game clearing the slots at the
+/// reset while the quest stays in the journal (not checked in game yet). This is the fallback for when it doesn't.
+/// </summary>
+public static class TribeLeftovers
+{
+    /// <summary>
+    /// A giver's "Daily Quests" list shows none of its dailies although allowances are left, the giver has room today,
+    /// some of what it offers today is open, and society dailies are in the journal: the game holds new dailies back,
+    /// which it does only while a daily from before the reset is in the journal. Then every society daily in the
+    /// journal is from before the reset: one accepted today couldn't have been while any was left over.
+    /// </summary>
+    /// <param name="listed">Dailies the giver's list shows (rank quests and small talk not counted).</param>
+    /// <param name="open">Of the giver's worked-out offers, those not taken today.</param>
+    /// <param name="room">Dailies the giver may still give today (its 3, or 6 on a rank-up day, less those taken).</param>
+    /// <param name="inJournal">Society dailies in the journal.</param>
+    public static bool HeldBack(int allowances, int listed, int open, int room, int inJournal)
+        => allowances > 0 && listed == 0 && open > 0 && room > 0 && inJournal > 0;
+}
+
 /// <summary>The goal in effect for the day's run.</summary>
 public static class TribeGoals
 {

@@ -23,7 +23,10 @@ public enum TribeGoal
 {
     /// <summary>Societies below their top rank first, the lowest first.</summary>
     RankUp,
-    /// <summary>Society currency (every daily pays the same, so: as many dailies as the day allows).</summary>
+    /// <summary>
+    /// Society currency (and gil and crystals): as many dailies as the day allows. Most societies pay the same for every
+    /// daily; the Ixal pay Ixali Oaknots only at their Respected and Honored givers, so their lower givers come last.
+    /// </summary>
     Currency,
     /// <summary>Class levels: the lowest class that qualifies takes each quest.</summary>
     Levelling,

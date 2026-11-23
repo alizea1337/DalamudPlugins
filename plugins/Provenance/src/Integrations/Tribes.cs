@@ -35,6 +35,11 @@ namespace Provenance.Integrations;
 /// so it's today's slots whose quest belongs to the society; a daily accepted before the reset blocks new ones until
 /// it's handed in or abandoned; the giver's list is a <c>SelectIconString</c> titled "Daily Quests" (Addon 102442).
 /// </para>
+/// <para>
+/// Not checked in game yet: that the reset clears the slots while a daily stays in the journal (the slots carry no
+/// date, so a daily without one is taken as left over). The first read of each day goes to the debug log to show it,
+/// and a giver that lists none of its dailies when nothing else explains it marks the journal's dailies as left over.
+/// </para>
 /// </remarks>
 internal static unsafe class Tribes
 {
@@ -87,20 +92,65 @@ internal static unsafe class Tribes
         return list;
     }
 
-    /// <summary>Society quests in the journal, with their step and the class they're locked to.</summary>
+    /// <summary>
+    /// Society quests in the journal, with their step and the class they're locked to. A daily without one of today's
+    /// slots is left over from before the reset, and so is every daily in the journal on a day a giver held new ones back
+    /// (<see cref="TribeLeftovers.HeldBack"/>: the fallback, in case the game keeps the slots past the reset).
+    /// </summary>
     public static List<AcceptedTribeQuest> Accepted(TribeData data)
     {
         var list = new List<AcceptedTribeQuest>();
         var m = Manager;
         if (m == null) return list;
-        var today = DailySlots().Select(s => s.Row).ToHashSet();
+        var slots = DailySlots();
+        var today = slots.Select(s => s.Row).ToHashSet();
+        var day = DayNumber;
+        var stale = heldBack is { } h && h.Day == day ? h.Rows : null;
         foreach (ref var q in m->NormalQuests)
         {
             if (q.QuestId == 0 || data.Quest(0x10000u + q.QuestId) is not { } quest) continue;
-            list.Add(new AcceptedTribeQuest(quest, q.Sequence, q.AcceptClassJob, today.Contains(quest.RowId)));
+            var todays = today.Contains(quest.RowId) && !(stale?.Contains(quest.RowId) ?? false);
+            list.Add(new AcceptedTribeQuest(quest, q.Sequence, q.AcceptClassJob, todays));
         }
+        FirstLook(day, slots, list);
         return list;
     }
+
+    /// <summary>The day the slots were last read, and the slots seen that day.</summary>
+    private static (long Day, HashSet<uint> Rows) seenSlots = (-1, new HashSet<uint>());
+
+    /// <summary>
+    /// The first read of a day (after the reset, or since Provenance started) goes to the debug log: the slots, the
+    /// society quests in the journal with whether each has a slot, and which slots were already there before the reset
+    /// (when Provenance saw them). Bug reports then show whether the game clears the slots at the reset while a daily
+    /// stays in the journal, which the leftover check rests on.
+    /// </summary>
+    private static void FirstLook(long day, List<(uint Row, bool Done)> slots, List<AcceptedTribeQuest> journal)
+    {
+        var rows = slots.Select(s => s.Row).ToHashSet();
+        if (seenSlots.Day == day)
+        {
+            seenSlots.Rows.UnionWith(rows);
+            return;
+        }
+        var before = seenSlots.Day >= 0 ? rows.Where(seenSlots.Rows.Contains).Select(r => r - 0x10000).ToList() : null;
+        var since = seenSlots.Day >= 0 ? "since the reset" : "since Provenance started";
+        seenSlots = (day, rows);
+        // Nothing to show for players who don't do society quests.
+        if (slots.Count == 0 && journal.Count == 0) return;
+        DebugLog.Write("tribes", $"Day {day}, first look {since}: {AllowancesLeft} allowances left, "
+                                 + $"slots [{string.Join(", ", slots.Select(s => $"{s.Row - 0x10000}{(s.Done ? " done" : "")}"))}]"
+                                 + (before != null ? $", already there before the reset [{string.Join(", ", before)}]" : "")
+                                 + $"; society quests in the journal [{string.Join(", ", journal.Select(a => $"{a.Quest.Number} {a.Quest.Kind} step {a.Sequence} "
+                                     + $"as {Core.Character.ClassJobs.Abbreviation(a.AcceptClassJob)}, {(rows.Contains(a.Quest.RowId) ? "has a slot" : "no slot")}"
+                                     + (a.Leftover ? ", left over" : "")))}]");
+    }
+
+    /// <summary>
+    /// The society dailies in the journal on the day a giver held new ones back (<see cref="TribeLeftovers.HeldBack"/>):
+    /// they're from before the reset, whatever the slots say. Dailies accepted later that day aren't among them.
+    /// </summary>
+    private static (long Day, HashSet<uint> Rows)? heldBack;
 
     /// <summary>
     /// A society today: rank and reputation, and per giver today's offers (worked out from the seed) with what's taken.
@@ -259,12 +309,29 @@ internal static unsafe class Tribes
             var gameDailies = listed.Where(dailyNames.Contains).ToList();
             var others = listed.Where(t => !dailyNames.Contains(t)).ToList();
 
-            var today = Today(data, tribe);
-            var mine = today.Givers.FirstOrDefault(g => g.Giver.NpcId == giver.NpcId)?.Offers ?? Array.Empty<TribeOffer>();
+            var accepted = Accepted(data);
+            var today = Today(data, tribe, accepted);
+            var giverToday = today.Givers.FirstOrDefault(g => g.Giver.NpcId == giver.NpcId);
+            var mine = giverToday?.Offers ?? Array.Empty<TribeOffer>();
             var worked = mine.Select(o => names[o.Quest.RowId]).ToList();
+            var allowances = AllowancesLeft;
+
+            // The fallback for leftovers: none of its dailies listed, though nothing else explains it.
+            var room = giverToday == null ? 0 : Math.Max(0, today.CapPerGiver - giverToday.Taken);
+            var journal = accepted.Where(a => a.Quest.IsDaily).ToList();
+            if (heldBack is not { } held || held.Day != day)
+                if (TribeLeftovers.HeldBack(allowances, gameDailies.Count, mine.Count(o => o.State == OfferState.Open), room, journal.Count)
+                    && journal.Any(a => !a.Leftover))
+                {
+                    heldBack = (day, journal.Select(a => a.Quest.RowId).ToHashSet());
+                    DebugLog.Write("tribes", $"[!] {tribe.Name} giver {giver.NpcId} lists none of its dailies with {allowances} allowances left and room for {room}: "
+                                             + $"the dailies in the journal [{string.Join(", ", journal.Select(a => a.Quest.Number))}] are taken as left over from before the reset");
+                    accepted = Accepted(data);
+                }
+
             // With no allowances left, or a daily left over from before the reset, the giver may list no dailies at all:
             // then only what it does list is checked.
-            var blocked = AllowancesLeft == 0 || Accepted(data).Any(a => a.Leftover);
+            var blocked = allowances == 0 || accepted.Any(a => a.Leftover);
             var open = blocked ? new List<string>() : mine.Where(o => o.State == OfferState.Open).Select(o => names[o.Quest.RowId]).ToList();
             var match = gameDailies.All(n => worked.Contains(n, StringComparer.OrdinalIgnoreCase))
                         && open.All(n => gameDailies.Contains(n, StringComparer.OrdinalIgnoreCase));
