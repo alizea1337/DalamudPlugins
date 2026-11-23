@@ -785,7 +785,7 @@ internal sealed class TribesPage : Page
     private static string What(GameCatalog catalog, TribeQuest q, uint job)
     {
         if (q.Craft is { } c && (job == 0 || ClassJobs.IsCrafter(job)))
-            return $"Crafts {catalog.ItemName(c.Product)}{(job != 0 ? $" as {ClassName(job)}" : "")}, up to {QuestCraft.MostCrafts}";
+            return $"Crafts {catalog.ItemName(c.Product)}{(job != 0 ? $" as {ClassName(job)}" : "")}, up to {QuestCraft.MostCrafts}{(c.NeedsHq ? ", high quality only" : "")}";
         if (q.Gather.Count > 0 && (job == 0 || job is 16 or 17))
         {
             var g = q.GatherFor(job) ?? q.Gather[0];

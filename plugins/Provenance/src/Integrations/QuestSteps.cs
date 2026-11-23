@@ -164,6 +164,7 @@ internal static unsafe class QuestSteps
             Todos = todos,
             Product = product,
             Materials = materials,
+            ProductHq = product != 0 && facts.WantsHq,
             CraftStatus = craftStatus,
             CraftEquip = craftEquip,
             GatherItems = gather,
@@ -356,6 +357,10 @@ internal static unsafe class QuestSteps
         foreach (var g in q.GatherItems.Values) Count(g);
         foreach (var k in q.KeyItems) Count(k.Id);
         foreach (var t in todos) Count(t.ItemId);
+        // The high-quality copies on their own, for a product (or a line's item) only they count for.
+        if (q.Product != 0) items[q.Product + 1_000_000] = ItemCountHq(q.Product);
+        foreach (var t in todos)
+            if (t.WantsHq && t.ItemId != 0) items[t.ItemId + 1_000_000] = ItemCountHq(t.ItemId);
 
         var chara = (Character*)player.Address;
         var statuses = new HashSet<uint>();
@@ -462,6 +467,14 @@ internal static unsafe class QuestSteps
     }
 
     /// <summary>How many of an item the character holds: key items in their own bag, other items NQ and HQ in the bags.</summary>
+    /// <summary>High-quality copies of an item in the bags.</summary>
+    public static int ItemCountHq(uint itemId)
+    {
+        var inv = InventoryManager.Instance();
+        if (inv == null || itemId == 0 || itemId >= 2_000_000) return 0;
+        return inv->GetInventoryItemCount(itemId % 1_000_000, true, false, false, 0);
+    }
+
     public static int ItemCount(uint itemId)
     {
         var inv = InventoryManager.Instance();
@@ -812,7 +825,11 @@ internal static unsafe class QuestSteps
     /// Open the slot's picker even though the game still has a slot selected: a picker closed without a pick (an item
     /// not found) leaves the selection behind, and the next window would wait on it for good.
     /// </param>
-    public static TradeStep Trade(ref int slot, bool settled, bool forceOpen, out string detail)
+    /// <param name="hqItem">
+    /// An item to hand over high quality when there's a choice (the quest counts only high-quality copies of what it had
+    /// made, though the window takes either); 0 for none: normal quality first then.
+    /// </param>
+    public static TradeStep Trade(ref int slot, bool settled, bool forceOpen, uint hqItem, out string detail)
     {
         detail = "";
         if (!settled) return TradeStep.Wait;
@@ -843,7 +860,8 @@ internal static unsafe class QuestSteps
                 if (item->GetBaseItemId() != wanted && StepRules.BaseItem(item->ItemId) != wanted) continue;
                 var hq = item->IsHighQuality();
                 if (want.WantHQ && !hq) continue;
-                if (pick < 0 || (pickHq && !hq)) { pick = i; pickHq = hq; }
+                var preferHq = hqItem != 0 && wanted == hqItem;
+                if (pick < 0 || (preferHq ? !pickHq && hq : pickHq && !hq)) { pick = i; pickHq = hq; }
             }
             if (pick < 0)
             {

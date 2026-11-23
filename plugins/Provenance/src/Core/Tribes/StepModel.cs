@@ -64,6 +64,11 @@ public sealed class QuestScript
     /// <summary>The crafted item the quest asks for (0 when it crafts nothing), and the materials it's made from.</summary>
     public uint Product { get; init; }
     public uint Materials { get; init; }
+    /// <summary>
+    /// Only high-quality copies of the product count (the quest's script counts with the "high quality only" filter):
+    /// normal-quality ones serve no purpose, as the game itself says at the hand-in.
+    /// </summary>
+    public bool ProductHq { get; init; }
     /// <summary>The status the crafting needs (the Ixal facility access), 0 when none.</summary>
     public uint CraftStatus { get; init; }
     /// <summary>An item to wear while crafting (the Ixal's Ehcatl wristgloves), 0 when none.</summary>
@@ -127,6 +132,8 @@ public sealed record StepMarker(uint Territory, Vector3 Position, float Radius, 
 public sealed record TodoProgress(int Index, bool Checked, uint Have, uint Needed, uint Item)
 {
     public uint ItemId => Item % 1_000_000;
+    /// <summary>The line counts only high-quality copies of its item (the id carries the high-quality mark).</summary>
+    public bool WantsHq => Item is >= 1_000_000 and < 2_000_000;
 }
 
 /// <summary>What the game shows about the quest and the character right now.</summary>
@@ -166,6 +173,9 @@ public sealed class StepSnapshot
     public IReadOnlySet<uint> Expiring { get; init; } = new HashSet<uint>();
 
     public int Count(uint item) => item == 0 ? 0 : Items.GetValueOrDefault(item);
+
+    /// <summary>How many high-quality copies of an item the bags hold (kept under the id with the high-quality mark).</summary>
+    public int CountHq(uint item) => item == 0 ? 0 : Items.GetValueOrDefault(item % 1_000_000 + 1_000_000);
 
     /// <summary>
     /// The quest's progress in one line: sequence, variables, what each to-do line counts and the quest's items. When

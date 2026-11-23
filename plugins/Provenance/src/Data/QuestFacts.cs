@@ -40,8 +40,13 @@ internal sealed class QuestFacts
     public IReadOnlyList<QuestTodo> Todos { get; private init; } = Array.Empty<QuestTodo>();
 
     private readonly Lazy<IReadOnlyDictionary<string, string>> text;
+    private readonly Lazy<bool> wantsHq;
 
-    private QuestFacts() => text = new Lazy<IReadOnlyDictionary<string, string>>(ReadText, LazyThreadSafetyMode.ExecutionAndPublication);
+    private QuestFacts()
+    {
+        text = new Lazy<IReadOnlyDictionary<string, string>>(ReadText, LazyThreadSafetyMode.ExecutionAndPublication);
+        wantsHq = new Lazy<bool>(ReadWantsHq, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
 
     /// <summary>The quest's facts; null when the row doesn't exist. Row ids are the sheet's (65536 + the quest number).</summary>
     public static QuestFacts? Of(uint rowId)
@@ -109,6 +114,34 @@ internal sealed class QuestFacts
     /// when the sheet can't be read. Read the first time it's asked for, once, whichever thread asks.
     /// </summary>
     public IReadOnlyDictionary<string, string> Text => text.Value;
+
+    /// <summary>
+    /// The quest counts only high-quality copies of the item it has made: its script
+    /// (<c>game_script/quest/&lt;3 digits&gt;/&lt;Id&gt;.luab</c>) counts items with the game's "high quality only" filter
+    /// (<c>NUM_OF_ITEMS_FILTER_HQ</c>; the others use <c>..._NQ_OR_HQ</c>). The sheets don't say it, and the journal
+    /// shows it only as a small mark after the item's name. 59 of the societies' crafting dailies are so (most of the
+    /// Ixal's, and some of the Moogles', Namazu's, Dwarves', Loporrits' and Yok Huy's), found by reading the scripts.
+    /// Only the name of the filter is looked for in the file; nothing of the script is run or parsed.
+    /// </summary>
+    public bool WantsHq => wantsHq.Value;
+
+    private static readonly byte[] HqFilter = System.Text.Encoding.ASCII.GetBytes("NUM_OF_ITEMS_FILTER_HQ\0");
+
+    private bool ReadWantsHq()
+    {
+        try
+        {
+            var underscore = Key.LastIndexOf('_');
+            if (underscore < 0 || Key.Length < underscore + 4) return false;
+            var file = Services.Data.GetFile($"game_script/quest/{Key.Substring(underscore + 1, 3)}/{Key}.luab");
+            return file != null && file.Data.AsSpan().IndexOf(HqFilter) >= 0;
+        }
+        catch (Exception e)
+        {
+            Services.Log.Debug("Quest script {Key} couldn't be read: {Message}", Key, e.Message);
+            return false;
+        }
+    }
 
     /// <summary>Reads the text sheet into a dictionary of its own, which is only handed out once it's complete.</summary>
     private IReadOnlyDictionary<string, string> ReadText()

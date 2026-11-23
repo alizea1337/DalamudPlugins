@@ -279,6 +279,15 @@ to the next rank and to the society's top rank: Bloodsworn for most, Sworn for t
 (a minigame, a FATE, a rank quest and the like). "Needs …" says what's missing first: crystals, a class level, a
 saved gearset, or an item to wear (the Ixal's Ehcatl Wristgloves, sold by their vendor).
 
+### Why does it craft some dailies for high quality?
+
+Some crafting dailies only count their item made high quality (the journal shows a small mark after the item's
+name, and the Tribes page says "high quality only"). The quest's own script says so, and the run reads it:
+those are crafted for full quality, counted and handed in high quality, and the others with the fastest
+rotation. When a craft comes out normal quality all the same, the run fetches new materials and tries again;
+after two tries it asks you, since gear that can't fill the quality bar won't do better next time (food,
+medicine or better gear help). The game itself says to discard the normal-quality ones: they serve no purpose.
+
 ### Where do the crystals for crafting dailies come from?
 
 From your bags, then your retainers, then gathering. A quest the crystals still don't cover is left out, with

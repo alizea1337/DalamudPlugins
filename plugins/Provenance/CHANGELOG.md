@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.4
+
+- Tribes: some crafting dailies only count their item made high quality: 59 of them, most of the Ixal's and
+  some of the Moogles', Namazu's, Dwarves', Loporrits' and Yok Huy's. The run crafted every daily the fastest
+  way, so the item came out normal quality unless the recipe was easy enough to fill the quality bar by
+  accident, and the run then talked to the giver over and over (The Heart of Tankiness). It now reads from
+  the quest's own script which dailies want that, crafts those for full quality, and counts and hands in only
+  the high-quality ones. When one comes out normal quality all the same, it fetches new materials and tries
+  again; after two tries it asks you.
+- The Tribes page says "high quality only" on those dailies.
+
 ## 0.22.3
 
 - Tribes: talk windows inside an event scene weren't clicked through (the quest mounts' actions play one, like

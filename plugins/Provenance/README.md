@@ -140,7 +140,9 @@ keeps it from sliding things around.
     until it's handed in. The run does the errands too: talking, handing items over, emotes, `/say`, key
     items, quest mounts and so on. A `/say` is the quest's own phrase, said once; if the game doesn't take it,
     the run hands that step to you. An emote gets one more try after 15 seconds when nothing changed.
-    Crafting quests are crafted with a Raphael rotation (quality never matters for them), with crystals from
+    Crafting quests are crafted with a Raphael rotation: the fastest one, or one for full quality when the
+    quest only counts its item made high quality (the page says "high quality only"; a normal-quality one
+    doesn't count, so after two tries without one the run asks you). Crystals come from
     your bags, then retainers, then gathering; otherwise the quest is left out, with the reason. The crystal
     check assumes up to 4 crafts a quest, since the game only says how many once it's accepted. Gathering
     quests are done as Miner or Botanist at the society's own nodes. Today's plan shows on the page, and on

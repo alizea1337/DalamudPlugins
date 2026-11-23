@@ -1058,11 +1058,12 @@ internal sealed unsafe class TribeRun
             Wait(1.5);
             return;
         }
-        crafter.Begin(new[] { new CraftJob(recipe, Math.Max(1, need.Remaining), false, Quality: 0, UseConsumables: false, LiveRecipe: true) });
+        // The fastest rotation, unless the quest only counts the item made high quality: then full quality.
+        crafter.Begin(new[] { new CraftJob(recipe, Math.Max(1, need.Remaining), need.Hq, Quality: need.Hq ? null : 0, UseConsumables: false, LiveRecipe: true) });
         crafting = true;
         yielding = false;
-        Log($"Crafting {need.Remaining}x {name} as {ClassJobs.Abbreviation(need.ClassJob)}.", false);
-        DebugLog.Write("tribes", $"craft: recipe {recipe.RecipeId}, {need.Remaining}x {need.Product} from {need.Materials}, status {need.RequiredStatus}, wear {need.RequiredEquip}");
+        Log($"Crafting {need.Remaining}x {name}{(need.Hq ? " (high quality)" : "")} as {ClassJobs.Abbreviation(need.ClassJob)}.", false);
+        DebugLog.Write("tribes", $"craft: recipe {recipe.RecipeId}, {need.Remaining}x {need.Product} from {need.Materials}, status {need.RequiredStatus}, wear {need.RequiredEquip}, high quality {need.Hq}");
     }
 
     private void TickCrafting()

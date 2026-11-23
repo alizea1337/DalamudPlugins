@@ -59,6 +59,8 @@ public sealed record StepPlan(StepKind Kind, string What)
     public bool NoFly { get; init; }
     /// <summary>Crafting and gathering: how many are still wanted (the materials, for crafting).</summary>
     public int Count { get; init; }
+    /// <summary>Crafting: only high-quality copies count, so the craft goes for full quality.</summary>
+    public bool Hq { get; init; }
     /// <summary>Crafting: the materials item; gathering: the to-do line's item.</summary>
     public uint Other { get; init; }
     /// <summary>The Level row of the spot gone to (to note it was looked at), 0 for none.</summary>
@@ -130,6 +132,8 @@ public sealed class StepMemory
     public int Pickups { get; set; }
     /// <summary>Teleports taken to drop a quest mount that wouldn't let go (each costs gil).</summary>
     public int DropTeleports { get; set; }
+    /// <summary>Rounds of crafting that brought no high-quality copy of an item only those count for.</summary>
+    public int HqMisses { get; set; }
 
     private string decoyLines = "";
     private readonly HashSet<ulong> decoys = new();
@@ -299,6 +303,11 @@ public static class StepRules
     public const int MaxRegains = 2;
     /// <summary>Teleports to drop a quest mount that won't let go (each costs gil), per quest.</summary>
     public const int MaxDropTeleports = 1;
+    /// <summary>
+    /// Rounds of crafting an item that only counts high quality which may come out normal quality before the player is
+    /// asked (each takes new materials and crystals; gear that can't fill the quality bar won't do better next time).
+    /// </summary>
+    public const int MaxHqMisses = 2;
     /// <summary>A status the crafting needs (the Ixal facility access) is renewed before crafting when it has less than this left.</summary>
     public static readonly TimeSpan StatusRenewBelow = TimeSpan.FromSeconds(60);
 
@@ -334,6 +343,8 @@ public static class StepRules
                         return Talk(giver, s.Statuses.Contains(q.CraftStatus) ? "renew the facility access (it runs out soon) before crafting" : "get the facility access back before crafting");
                     return Ask("The crafting needs the facility access status; talk to the supervisor for it, then resume.");
                 }
+                if (craft.Hq && m.HqMisses >= MaxHqMisses)
+                    return Ask($"The quest only counts its item made high quality, and {m.HqMisses} tries came out normal quality; craft it high quality yourself (food, medicine or better gear help), then resume.");
                 return craft;
             }
             craftShort = true;
@@ -438,14 +449,36 @@ public static class StepRules
     {
         // Accepted as a gatherer (the Namazu quests take either), the quest gathers instead.
         if (q.Product == 0 || s.AcceptJob is >= 16 and <= 18) return null;
-        var have = s.Count(q.Product);
+        var hq = WantsHq(q, s);
+        var have = Made(q, s);
         var line = s.Todos.FirstOrDefault(t => t.ItemId == q.Product && t.Needed > 0);
         int needed;
         if (line != null) needed = (int)line.Needed;
         else if (s.Count(q.Materials) > 0 && q.TodosAt(s.Sequence).Any()) needed = have + s.Count(q.Materials);
         else return null;
-        return new StepPlan(StepKind.Craft, "craft the quest's item") { Id = q.Product, Other = q.Materials, Count = Math.Max(0, needed - have) };
+        return new StepPlan(StepKind.Craft, hq ? "craft the quest's item, high quality (only that counts)" : "craft the quest's item")
+        {
+            Id = q.Product, Other = q.Materials, Count = Math.Max(0, needed - have), Hq = hq,
+        };
     }
+
+    /// <summary>
+    /// Only high-quality copies of the quest's product count: its script says so, or the to-do line's item carries the
+    /// high-quality mark. Normal-quality ones "serve no purpose", as the game puts it at the hand-in.
+    /// </summary>
+    public static bool WantsHq(QuestScript q, StepSnapshot s)
+        => q.Product != 0 && (q.ProductHq || s.Todos.Any(t => t.ItemId == q.Product && t.WantsHq));
+
+    /// <summary>The quest's products in the bags that count: the high-quality ones when only those do.</summary>
+    public static int Made(QuestScript q, StepSnapshot s) => WantsHq(q, s) ? s.CountHq(q.Product) : s.Count(q.Product);
+
+    /// <summary>
+    /// The game's own count of the crafting: the to-do line about the product, else (older quests name no item on it)
+    /// the crafting line when it counts something.
+    /// </summary>
+    private static TodoProgress? CraftCount(QuestScript q, StepSnapshot s)
+        => s.Todos.FirstOrDefault(t => t.ItemId == q.Product && t.Needed > 0)
+           ?? (CraftLine(q, s) is { } line ? s.Todos.FirstOrDefault(t => t.Index == line.Index && t.Item == 0 && t.Needed > 0) : null);
 
     /// <summary>
     /// The gather step, when the current to-do line is about the item for the class the quest was accepted as; with
@@ -580,8 +613,8 @@ public static class StepRules
         var item = crafts ? q.Product : q.GatherItems.GetValueOrDefault(s.AcceptJob);
         if (item == 0) return false;
         if ((crafts ? Craft(q, s) : Gather(q, s))?.Count > 0) return false;
-        var line = s.Todos.FirstOrDefault(t => t.ItemId == item && t.Needed > 0);
-        return line != null ? line.Have >= line.Needed : s.Count(item) > 0;
+        var line = crafts ? CraftCount(q, s) : s.Todos.FirstOrDefault(t => t.ItemId == item && t.Needed > 0);
+        return line != null ? line.Have >= line.Needed : (crafts ? Made(q, s) : s.Count(item)) > 0;
     }
 
     /// <summary>
@@ -623,7 +656,9 @@ public static class StepRules
     private static StepPlan? Source(QuestScript q, StepSnapshot s, StepMemory m, bool craftShort)
     {
         if (q.Materials == 0 || s.AcceptJob is >= 16 and <= 18 || s.Count(q.Materials) > 0) return null;
-        if (!craftShort && s.Count(q.Product) > 0) return null;
+        // Short: by the game's own count when it has one (it counts only what counts: high quality where that's wanted).
+        var counted = CraftCount(q, s);
+        if (!craftShort && !(counted != null ? counted.Have < counted.Needed : Made(q, s) == 0)) return null;
         if (CraftLine(q, s) is not { } line) return null;
         var from = line.Spots[1];
         var lines = LineKey(q, s);

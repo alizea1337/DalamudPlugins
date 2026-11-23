@@ -407,6 +407,139 @@ public class StepRulesTests
         Assert.Null(StepRules.CraftLine(Quest(Line(0, 1, "Deliver.", Npc(5, 1), Npc(6, 2))), Snap(1)));
     }
 
+    // ------------------------------------------------------------------ items that only count high quality
+
+    // Quest 3911 "The Heart of Tankiness" (Dwarves, the live log): the engine component only counts high quality (the
+    // to-do line's item carries the mark, and the quest's script counts with the "high quality only" filter). The
+    // crafting line is in the report sequence: Regitt, whom it goes to, first; the Fetchomatic Mechatoad with the
+    // materials second.
+    private const uint Mechatoad = 1033749, Engine = 31161, EngineMaterials = 31160;
+
+    private static QuestScript Tankiness(bool scriptSaysHq = true) => new()
+    {
+        Quest = 65536 + 3911, Name = "The Heart of Tankiness", Giver = Giver, TargetEnd = Giver, GiverSpot = Npc(Giver, 2, 8368176),
+        Product = Engine, Materials = EngineMaterials, ProductHq = scriptSaysHq,
+        Todos = new[]
+        {
+            Line(0, 1, "Speak with Shigitt.", Npc(1033767, 13, 8373453)),
+            Line(1, 255, "Synthesize .", Npc(Giver, 2, 8368176), Npc(Mechatoad, 13, 8371199)),
+        },
+    };
+
+    private static StepObject[] RegittAndTheMechatoad() => new[]
+    {
+        Obj(1, Giver, 2, icon: 71235, name: "Regitt"),
+        Obj(2, Mechatoad, 13, icon: 0, name: "Fetchomatic Mechatoad"),
+    };
+
+    [Fact]
+    public void AnItemThatOnlyCountsHighQualityIsCraftedForFullQuality()
+    {
+        var s = Snap(255, RegittAndTheMechatoad(), new[] { new TodoProgress(1, false, 0, 1, 1_000_000 + Engine) }, new() { [EngineMaterials] = 1 });
+        var plan = Decide(Tankiness(), s);
+        Assert.Equal(StepKind.Craft, plan.Kind);
+        Assert.True(plan.Hq);
+        Assert.Equal(1, plan.Count);
+        // The to-do line's mark alone says it too (a quest whose script wasn't read).
+        Assert.True(Decide(Tankiness(scriptSaysHq: false), s).Hq);
+    }
+
+    [Fact]
+    public void ANormalQualityCopyDoesntCountAndTheMaterialsAreFetchedAgain()
+    {
+        // The live log: one made, normal quality; the game still counts 0 of 1. The run talked to Regitt over and over.
+        var s = Snap(255, RegittAndTheMechatoad(), new[] { new TodoProgress(1, false, 0, 1, 1_000_000 + Engine) }, new() { [Engine] = 1 });
+        Assert.False(StepRules.Supplied(Tankiness(), s));
+        var plan = Decide(Tankiness(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Mechatoad, plan.Target!.BaseId);
+
+        // With new materials: crafted again, for full quality.
+        var again = Snap(255, RegittAndTheMechatoad(), new[] { new TodoProgress(1, false, 0, 1, 1_000_000 + Engine) }, new() { [Engine] = 1, [EngineMaterials] = 1 });
+        var craft = Decide(Tankiness(), again);
+        Assert.Equal(StepKind.Craft, craft.Kind);
+        Assert.True(craft.Hq);
+        Assert.Equal(1, craft.Count);
+    }
+
+    [Fact]
+    public void TheHighQualityCopyIsReported()
+    {
+        // One normal quality left over from before, one high quality: the game counts 1 of 1.
+        var s = Snap(255, RegittAndTheMechatoad(), new[] { new TodoProgress(1, false, 1, 1, 1_000_000 + Engine) },
+            new() { [Engine] = 2, [1_000_000 + Engine] = 1 });
+        Assert.True(StepRules.Supplied(Tankiness(), s));
+        var plan = Decide(Tankiness(), s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Giver, plan.Target!.BaseId);
+    }
+
+    [Fact]
+    public void AfterTwoRoundsWithoutAHighQualityCopyThePlayerIsAsked()
+    {
+        var q = Tankiness();
+        var s = Snap(255, RegittAndTheMechatoad(), new[] { new TodoProgress(1, false, 0, 1, 1_000_000 + Engine) }, new() { [Engine] = 2, [EngineMaterials] = 1 });
+        var m = new StepMemory { HqMisses = 1 };
+        m.Observe(s.Signature(), T0);
+        Assert.Equal(StepKind.Craft, StepRules.Decide(q, s, m, T0).Kind);
+        m.HqMisses = StepRules.MaxHqMisses;
+        var plan = StepRules.Decide(q, s, m, T0);
+        Assert.Equal(StepKind.AskUser, plan.Kind);
+        Assert.Contains("high quality", plan.What);
+    }
+
+    [Fact]
+    public void OlderQuestsThatOnlyCountHighQualityGoByTheGamesCount()
+    {
+        // Ixal and Moogle lines name no item: the script says high quality only, and the crafting line's own count
+        // (0 of 3 here, though three normal-quality ones are in the bags) says they don't count.
+        var q = new QuestScript
+        {
+            Quest = 65536 + 1523, Name = "A High Wind in Ishgard", Giver = IxalGiver, TargetEnd = IxalGiver, GiverSpot = IxalGiverSpot,
+            Product = 8123, Materials = 8081, ProductHq = true,
+            Todos = new[] { new ScriptTodo(3, 255, 1, new[] { IxalGiverSpot, NorbettauxSpot }, "Synthesize isolator components .") },
+        };
+        var s = new StepSnapshot
+        {
+            Quest = q.Quest, Accepted = true, Sequence = 255, AcceptJob = Crp, Job = Crp, Territory = Coerthas, Player = new Vector3(200, 302, -252),
+            Objects = new[] { Norbettaux_() }, Todos = new[] { new TodoProgress(3, false, 0, 3, 0) },
+            Items = new Dictionary<uint, int> { [8123] = 3 },
+        };
+        Assert.False(StepRules.Supplied(q, s));
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Talk, plan.Kind);
+        Assert.Equal(Norbettaux, plan.Target!.BaseId);
+        Assert.Contains("materials", plan.What);
+
+        // Three high-quality ones: the game counts them, and the quest is reported.
+        var done = new StepSnapshot
+        {
+            Quest = q.Quest, Accepted = true, Sequence = 255, AcceptJob = Crp, Job = Crp, Territory = Coerthas, Player = new Vector3(200, 302, -252),
+            Objects = new[] { Norbettaux_() }, Todos = new[] { new TodoProgress(3, false, 3, 3, 0) },
+            Items = new Dictionary<uint, int> { [8123] = 3, [1_008_123] = 3 },
+        };
+        Assert.True(StepRules.Supplied(q, done));
+        Assert.Equal(StepKind.Go, Decide(q, done).Kind);
+    }
+
+    [Fact]
+    public void QuestsThatTakeAnyQualityArentCraftedForHighQuality()
+    {
+        var s = Snap(2, new[] { Obj(1, 1034104, 21) }, new[] { new TodoProgress(1, false, 1, 3, 31147) }, new() { [31147] = 1, [31146] = 2 });
+        var plan = Decide(CraftQuest(), s);
+        Assert.Equal(StepKind.Craft, plan.Kind);
+        Assert.False(plan.Hq);
+        Assert.False(StepRules.WantsHq(CraftQuest(), s));
+    }
+
+    [Theory]
+    [InlineData(1_031_161u, true)]
+    [InlineData(31_161u, false)]
+    [InlineData(2_001_982u, false)]
+    [InlineData(0u, false)]
+    public void ALinesItemCarriesTheHighQualityMark(uint item, bool wantsHq)
+        => Assert.Equal(wantsHq, new TodoProgress(1, false, 0, 1, item).WantsHq);
+
     [Fact]
     public void KeyItemsKeepTheirIdWholeAndHighQualityLosesItsMark()
     {

@@ -36,7 +36,8 @@ internal sealed record StepOptions(bool PauseForCutscenes, bool LeaveOutSay);
 /// <param name="RequiredStatus">A status the recipe needs (the Ixal facility access), 0 for none. Lost mid-run, or
 /// about to run out: the stepper leaves NeedsCraft to get it renewed.</param>
 /// <param name="RequiredEquip">An item to wear while crafting (the Ixal's Ehcatl wristgloves), 0 for none.</param>
-internal sealed record CraftNeed(uint Product, uint Materials, int Remaining, uint ClassJob, uint RequiredStatus, uint RequiredEquip);
+/// <param name="Hq">Only high-quality copies count: craft for full quality.</param>
+internal sealed record CraftNeed(uint Product, uint Materials, int Remaining, uint ClassJob, uint RequiredStatus, uint RequiredEquip, bool Hq = false);
 
 /// <summary>What the quest wants gathered, and where.</summary>
 /// <param name="PointBase">The gathering point base that holds the item (0 when unknown).</param>
@@ -134,6 +135,11 @@ internal sealed unsafe class QuestStepper
     /// <summary>While crafting or gathering: the item, and how many of it the bags should hold when it's enough.</summary>
     private uint needItem;
     private int needTarget;
+    /// <summary>Crafting an item only high-quality copies count of: those are counted, and how many there were before.</summary>
+    private bool needHq;
+    private int needBefore;
+    /// <summary>The quest's product, when only high-quality copies of it count (handed over high quality when there's a choice); else 0.</summary>
+    private uint hqProduct;
 
     public QuestStepper(Plugin plugin, Action<string, bool> log)
     {
@@ -231,6 +237,14 @@ internal sealed unsafe class QuestStepper
     {
         if (State is not (StepperState.NeedsCraft or StepperState.NeedsGather)) return;
         Note($"supplied ({State})");
+        // Only high-quality copies count, and the round brought none: noted (the rules ask the player after a few).
+        if (State == StepperState.NeedsCraft && needHq && QuestSteps.ItemCountHq(needItem) <= needBefore)
+        {
+            memory.HqMisses++;
+            var name = QuestSteps.ItemName(needItem);
+            Note($"[!] no high-quality {name} came of this round (miss {memory.HqMisses} of {StepRules.MaxHqMisses}); a normal-quality one doesn't count");
+            Log($"The {name} came out normal quality, and the quest only counts high quality.", true);
+        }
         BackToWork();
     }
 
@@ -287,6 +301,9 @@ internal sealed unsafe class QuestStepper
         cutsceneNoted = false;
         needItem = 0;
         needTarget = 0;
+        needHq = false;
+        needBefore = 0;
+        hqProduct = 0;
     }
 
     // ------------------------------------------------------------------ the tick
@@ -371,6 +388,7 @@ internal sealed unsafe class QuestStepper
     private void Decide(StepSnapshot snap, DateTime now)
     {
         var next = StepRules.Decide(script!, snap, memory, now, options.LeaveOutSay);
+        hqProduct = StepRules.WantsHq(script!, snap) ? script!.Product : 0;
         var text = next.ToString();
         if (text != lastPlan)
         {
@@ -398,11 +416,13 @@ internal sealed unsafe class QuestStepper
                 AskUser(next.What);
                 return;
             case StepKind.Craft:
-                Craft = new CraftNeed(next.Id, next.Other, next.Count, snap.AcceptJob, script!.CraftStatus, script.CraftEquip);
+                Craft = new CraftNeed(next.Id, next.Other, next.Count, snap.AcceptJob, script!.CraftStatus, script.CraftEquip, next.Hq);
                 needItem = next.Id;
-                needTarget = snap.Count(next.Id) + next.Count;
+                needHq = next.Hq;
+                needBefore = next.Hq ? snap.CountHq(next.Id) : snap.Count(next.Id);
+                needTarget = needBefore + next.Count;
                 State = StepperState.NeedsCraft;
-                Status = $"Crafting {next.Count}x {QuestSteps.ItemName(next.Id)}";
+                Status = $"Crafting {next.Count}x {QuestSteps.ItemName(next.Id)}{(next.Hq ? " (high quality)" : "")}";
                 Note($"needs craft: {Craft}");
                 return;
             case StepKind.Gather:
@@ -419,6 +439,7 @@ internal sealed unsafe class QuestStepper
                 var centre = next.Spot ?? (place is { } pl ? new Vector3(pl.Centre.X, snap.Player.Y, pl.Centre.Y) : snap.Player);
                 Gather = new GatherNeed(next.Id, next.Count, place?.Base ?? 0, snap.Territory, centre, next.Spot != null ? next.Within : place?.Radius ?? 0, snap.AcceptJob);
                 needItem = next.Id;
+                needHq = false;
                 needTarget = snap.Count(next.Id) + next.Count;
                 State = StepperState.NeedsGather;
                 Status = $"Gathering {next.Count}x {QuestSteps.ItemName(next.Id)}";
@@ -724,7 +745,7 @@ internal sealed unsafe class QuestStepper
     private void TickNeeds(DateTime now)
     {
         memory.Touch(now);
-        var remaining = Math.Max(0, needTarget - QuestSteps.ItemCount(needItem));
+        var remaining = Math.Max(0, needTarget - (needHq ? QuestSteps.ItemCountHq(needItem) : QuestSteps.ItemCount(needItem)));
         if (remaining <= 0)
         {
             Note(State == StepperState.NeedsCraft ? "enough crafted" : "enough gathered");
@@ -737,7 +758,7 @@ internal sealed unsafe class QuestStepper
             if (script!.CraftStatus != 0 && !QuestSteps.StatusLasts(script.CraftStatus, StepRules.StatusRenewBelow))
             {
                 Note($"the crafting status {script.CraftStatus} is gone or runs out within {StepRules.StatusRenewBelow.TotalSeconds:0} seconds; renewing it");
-                Supplied();
+                BackToWork();
             }
             return;
         }
@@ -931,7 +952,7 @@ internal sealed unsafe class QuestStepper
             // by one closed without a pick) is asked for again.
             var settled = now - tradeSince >= TradeSettle;
             var reopen = tradeOpened == 0 || now - tradeOpenedAt >= TradeReopen;
-            var step = QuestSteps.Trade(ref tradeSlot, settled, reopen, out var detail);
+            var step = QuestSteps.Trade(ref tradeSlot, settled, reopen, hqProduct, out var detail);
             switch (step)
             {
                 case QuestSteps.TradeStep.HandedOver:

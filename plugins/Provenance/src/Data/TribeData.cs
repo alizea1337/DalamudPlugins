@@ -249,7 +249,7 @@ internal sealed class TribeData
         foreach (var item in craftCandidates)
         {
             if (!recipes.TryGetValue(item, out var rows) || rows.Count == 0) continue;
-            craft = Craft(item, rows);
+            craft = Craft(item, rows) with { NeedsHq = facts?.WantsHq ?? false };
             steps |= StepKinds.Craft;
             break;
         }

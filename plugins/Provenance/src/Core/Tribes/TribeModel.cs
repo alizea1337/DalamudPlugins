@@ -98,7 +98,11 @@ public sealed record QuestRecipe(uint RecipeId, uint ClassJob, int Level, IReadO
 
 /// <summary>What a crafting daily makes: its product, the materials item the quest hands out (one per craft), and a recipe per crafter.</summary>
 /// <param name="CanHq">The product can come out high quality (the hand-over then asks a yes/no question).</param>
-public sealed record QuestCraft(uint Product, uint Materials, IReadOnlyList<QuestRecipe> Recipes, bool CanHq)
+/// <param name="NeedsHq">
+/// Only high-quality copies of the product count (the quest's script says so): the run crafts it for full quality,
+/// which takes a crafter whose gear fills the recipe's quality bar.
+/// </param>
+public sealed record QuestCraft(uint Product, uint Materials, IReadOnlyList<QuestRecipe> Recipes, bool CanHq, bool NeedsHq = false)
 {
     /// <summary>
     /// The most crafts a society daily asks for. The count isn't in the game data (the quest says it once accepted), so
