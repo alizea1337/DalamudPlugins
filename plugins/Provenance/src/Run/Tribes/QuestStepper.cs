@@ -3,6 +3,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Types;
+using Provenance.Core.Run;
 using Provenance.Core.Tribes;
 using Provenance.Integrations;
 
@@ -425,7 +426,7 @@ internal sealed unsafe class QuestStepper
     {
         plan = p;
         var zone = p.Territory != 0 ? p.Territory : snap.Territory;
-        if (zone == snap.Territory && InReach(p, snap.Player)) { Act(p, snap); return; }
+        if (zone == snap.Territory && InReach(p, snap.Player) && !WouldDropBeside(p, snap)) { Act(p, snap); return; }
         var to = p.Target?.Position ?? p.Spot ?? snap.Player;
         travel.OnFoot = p.OnFoot;
         travel.NoFly = p.NoFly;
@@ -442,7 +443,8 @@ internal sealed unsafe class QuestStepper
     {
         Status = travel.Status;
         var p = plan!;
-        if (p.Kind != StepKind.Go && p.Target != null && !travel.AtPortal && snap.Territory == (p.Territory != 0 ? p.Territory : snap.Territory) && InReach(p, snap.Player))
+        if (p.Kind != StepKind.Go && p.Target != null && !travel.AtPortal && snap.Territory == (p.Territory != 0 ? p.Territory : snap.Territory)
+            && InReach(p, snap.Player) && !WouldDropBeside(p, snap))
         {
             travel.Cancel();
             Act(p, snap);
@@ -957,6 +959,18 @@ internal sealed unsafe class QuestStepper
             StepKind.UseItem when p.Use == ItemUse.Self => flat <= p.Within,
             _ => Vector3.Distance(me, a) <= p.Within,
         };
+    }
+
+    /// <summary>
+    /// Flying on one's own mount beside the target (not right above it), for a step done on foot: getting off for it
+    /// would drop the character straight down beside the target (off a platform, into the water below). The trip comes
+    /// down first then (it knows whether the floor right below is the target's), so it isn't in reach yet.
+    /// </summary>
+    private bool WouldDropBeside(StepPlan p, StepSnapshot snap)
+    {
+        if (!snap.Flying || p.Kind is not (StepKind.Talk or StepKind.Emote or StepKind.UseItem)) return false;
+        if (script!.Mount is { } qm && snap.Mount == qm.Mount) return false;
+        return (p.Target?.Position ?? p.Spot) is { } at && !Landing.RightAboveIt(snap.Player, at);
     }
 
     /// <summary>

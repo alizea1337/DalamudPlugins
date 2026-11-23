@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Enums;
+using Provenance.Core.Run;
 using Provenance.Core.Tribes;
 using Provenance.Data;
 using Provenance.Integrations;
@@ -91,7 +92,7 @@ internal sealed class QuestTravel
                 travel.Tick();
                 Status = travel.Status;
                 if (travel.Current == Travel.State.Failed) { Fail(travel.Failure ?? "the trip failed"); return; }
-                if (travel.Current == Travel.State.Arrived) Plan();
+                if (travel.Current == Travel.State.Arrived) Plan(afterTrip: true);
                 return;
 
             case State.ToPortal:
@@ -113,16 +114,19 @@ internal sealed class QuestTravel
     }
 
     /// <summary>The next leg from where the character is: done, a portal first, or an ordinary trip.</summary>
-    private void Plan()
+    /// <param name="afterTrip">The ordinary trip just arrived (it already came down where it had to).</param>
+    private void Plan(bool afterTrip = false)
     {
         var me = Services.Objects.LocalPlayer?.Position;
         var here = Services.ClientState.TerritoryType;
         if (me == null) { Fail("no character"); return; }
         var seen = exact?.Invoke();
         var spot = seen ?? target;
-        // Up on a ledge or down below the real target isn't there (the game won't talk that far up or down).
+        // Up on a ledge or down below the real target isn't there (the game won't talk that far up or down). In the air
+        // beside it isn't either: getting off there would drop the character beside it, so the trip comes down first.
         var level = seen == null || KeepMount || Math.Abs(me.Value.Y - spot.Y) <= 3f;
-        if (here == territory && Flat(me.Value, spot) <= within + 0.5f && level)
+        var inAirBeside = !afterTrip && seen != null && !KeepMount && Services.Condition[ConditionFlag.InFlight] && !Landing.RightAboveIt(me.Value, spot);
+        if (here == territory && Flat(me.Value, spot) <= within + 0.5f && level && !inAirBeside)
         {
             Current = State.Arrived;
             Status = "Arrived at " + what;
