@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed (Custom Deliveries): under the Rank up goal, the plan gave the week's deliveries to the top-level\n  clients' bonus requests first, so the clients still below the top level got none. Ranking up now serves\n  the clients below the top level first (the lowest first); the deliveries left over go to the top-level\n  clients, bonus requests first. Under Scrips and Gil, bonus requests still come first.\r\n",
+    "Changelog": "- Fixed: trips in the Firmament walked all the way (200 to 350 yalms, getting stuck on the way) instead of\n  taking its aethernet. The Firmament's aethernet isn't in the game's usual aetheryte data, so Provenance\n  didn't know it was there; now it does (its eight shards), and takes it when walking to the nearest shard\n  and from the one nearest the target is clearly quicker. A destination the shard doesn't offer yet (not\n  attuned) means walking, as before.\n- After \"Travel to the Firmament\" the trip can now take that aethernet too (it counted as a hop already).\n- The debug log says when a trip walks a long way and why (no aethernet hop is quicker there).\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.21.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.1/latest.zip",
+    "AssemblyVersion": "0.21.2.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.21.2/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795435536
+    "LastUpdate": 1795436267
   }
 ]
