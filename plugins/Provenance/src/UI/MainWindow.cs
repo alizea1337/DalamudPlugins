@@ -544,7 +544,8 @@ internal sealed class MainWindow : Window
         // Buttons: the same ones the Run page offers (the Cosmic loop's while that's what's going, or set up with no order).
         var run = pages.OfType<Pages.RunPage>().FirstOrDefault();
         if (run == null) return;
-        var actions = CosmicCompact ? CosmicCompactActions() : run.Actions.ToList();
+        var actions = plugin.DeliveryLoop.Active ? Pages.DeliveriesPage.DeliveryRunActions(plugin.DeliveryLoop).ToList()
+            : CosmicCompact ? CosmicCompactActions() : run.Actions.ToList();
         var bx = pos.X + size.X - pad;
         var by = pos.Y + size.Y - pad - 34 * s;
         for (var i = actions.Count - 1; i >= 0; i--)
@@ -588,8 +589,19 @@ internal sealed class MainWindow : Window
         return (loop.Paused || loop.Pausing ? Palette.Warn : Palette.Accent, "Cosmic Exploration", detail, fraction, $"{goal}, {parts}");
     }
 
+    /// <summary>The compact strip while the custom-delivery run goes.</summary>
+    private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) DeliveryCompactState()
+    {
+        var loop = plugin.DeliveryLoop;
+        var detail = loop.Paused ? "paused" : loop.Pausing ? "pausing after this craft" : loop.Visiting is { } c ? c.Name : loop.Status;
+        float? fraction = loop.Planned > 0 ? Math.Clamp(loop.DeliveredThisRound / (float)loop.Planned, 0f, 1f) : null;
+        return (loop.Paused || loop.Pausing ? Palette.Warn : Palette.Accent, "Custom Deliveries", detail, fraction,
+            $"{loop.Delivered} delivered, {Integrations.Deliveries.Remaining} left this week");
+    }
+
     private (Vector4 Dot, string Headline, string Detail, float? Fraction, string Progress) CompactState()
     {
+        if (plugin.DeliveryLoop.Active) return DeliveryCompactState();
         if (CosmicCompact) return CosmicCompactState();
         var runs = plugin.Runs;
         var catalog = plugin.Plans.Catalog;

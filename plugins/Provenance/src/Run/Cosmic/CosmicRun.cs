@@ -180,6 +180,7 @@ internal sealed unsafe class CosmicRun
     {
         if (Active) return null;
         if (plugin.Runs.Active) return "An order run is going; stop it first.";
+        if (plugin.DeliveryLoop.Active) return "The custom deliveries are going; stop them first.";
         if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null) return "Log in first.";
         if (!Vnav.Available) return "vnavmesh isn't loaded; it walks to the aetheryte, Cruisingway and the trader.";
         if (Data == null) return "Still reading the game data.";

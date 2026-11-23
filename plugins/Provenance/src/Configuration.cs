@@ -23,6 +23,7 @@ public sealed class Configuration : IPluginConfiguration
     public WindowSettings Window { get; set; } = new();
     /// <summary>The Cosmic Exploration loop: planet, classes, goal, extras, shopping list, and what runs of each mission came to.</summary>
     public CosmicSettings Cosmic { get; set; } = new();
+    public DeliverySettings Deliveries { get; set; } = new();
     public ConsumableSettings Consumables { get; set; } = new();
     public CraftingSettings Crafting { get; set; } = new();
     public RunSettings Run { get; set; } = new();
@@ -395,6 +396,24 @@ public sealed class CosmicWish
 {
     public uint ItemId { get; set; }
     public int Count { get; set; } = 1;
+}
+
+/// <summary>Custom deliveries (Expeditions): what the week's deliveries aim for, which clients, and how.</summary>
+[Serializable]
+public sealed class DeliverySettings
+{
+    /// <summary>The goal picked; null: "Rank up" while any client is below the top level, otherwise "Scrips".</summary>
+    public Core.Deliveries.DeliveryGoal? Goal { get; set; }
+    /// <summary>Clients left out (SatisfactionNpc rows); every other client takes part.</summary>
+    public HashSet<uint> LeftOut { get; set; } = new();
+    /// <summary>Fish only when neither the crafted nor the gathered request can be done.</summary>
+    public bool PreferCraftGather { get; set; } = true;
+    /// <summary>Under "Rank up", deliver to clients below the top level even when the scrips would go over the cap.</summary>
+    public bool DeliverAnywayWhileRanking { get; set; }
+    /// <summary>Pause the run for a client's rank-up cutscene, so it can be watched; otherwise the run carries on after it.</summary>
+    public bool PauseForCutscenes { get; set; }
+    /// <summary>Food and medicine may be used to reach a higher collectability tier (not when ranking up: any tier does).</summary>
+    public bool UseConsumables { get; set; } = true;
 }
 
 [Serializable]

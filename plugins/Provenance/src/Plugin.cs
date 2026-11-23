@@ -28,6 +28,10 @@ public sealed class Plugin : IDalamudPlugin
     internal Data.CosmicPlanner CosmicPlanner { get; }
     /// <summary>The Cosmic Exploration mission loop.</summary>
     internal Run.Cosmic.CosmicRun CosmicLoop { get; }
+    /// <summary>The custom-delivery run.</summary>
+    internal Run.Deliveries.DeliveryRun DeliveryLoop { get; }
+    /// <summary>The week's custom-delivery plan (for the page and the run).</summary>
+    internal Data.DeliveryPlanning DeliveryPlanning { get; }
     internal RunEngine Runs { get; }
     private readonly Run.Guard guard;
     internal MainWindow Main { get; }
@@ -49,6 +53,8 @@ public sealed class Plugin : IDalamudPlugin
         Runs = new RunEngine(this);
         CosmicPlanner = new Data.CosmicPlanner(this);
         CosmicLoop = new Run.Cosmic.CosmicRun(this);
+        DeliveryPlanning = new Data.DeliveryPlanning(this);
+        DeliveryLoop = new Run.Deliveries.DeliveryRun(this);
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
         guard = new Run.Guard(this);
@@ -146,6 +152,8 @@ public sealed class Plugin : IDalamudPlugin
         var walking = Vnav.Available && Vnav.Busy;
         if (walking) Vnav.Stop();
         if (Runs.Active) Runs.Stop();
+        else if (CosmicLoop.Active) CosmicLoop.Stop();
+        else if (DeliveryLoop.Active) DeliveryLoop.Stop();
         else if (walking) Services.Chat.Print("[Provenance] Stopped moving.");
         else Services.Chat.Print("[Provenance] Nothing to stop.");
     }
@@ -168,6 +176,7 @@ public sealed class Plugin : IDalamudPlugin
             Plans.Tick();
             Runs.Tick();
             CosmicLoop.Tick();
+            DeliveryLoop.Tick();
             guard.Tick();
             Integrations.Deliveries.Observe(Plans.Catalog?.Deliveries);
         }
@@ -197,6 +206,8 @@ public sealed class Plugin : IDalamudPlugin
         // The run owns the fishing hooks; whatever happens there, the rest still unloads.
         try { CosmicLoop.Stop("Provenance was unloaded."); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the Cosmic loop on unload failed"); }
+        try { DeliveryLoop.Stop("Provenance was unloaded.", true); }
+        catch (Exception e) { Services.Log.Error(e, "Stopping the custom deliveries on unload failed"); }
         try { Runs.Dispose(); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the run on unload failed"); }
         Plans.Dispose();

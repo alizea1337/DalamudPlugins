@@ -98,12 +98,13 @@ internal sealed partial class PlanPage : Page
         if (ShowsCosmic)
         {
             DrawCosmic(catalog);
-            if (Config.Order.IsEmpty) return;
+            if (Config.Order.IsEmpty) { DrawDeliveries(); return; }
             ImGui.Dummy(new Vector2(0, 8 * Ui.S));
         }
         if (Config.Order.IsEmpty)
         {
             DrawEmpty();
+            DrawDeliveries();
             return;
         }
 
@@ -137,6 +138,14 @@ internal sealed partial class PlanPage : Page
     }
 
     // ------------------------------------------------------------------ header and checks
+
+    /// <summary>With no order: this week's custom-delivery plan, when there is one (or the run is going).</summary>
+    private void DrawDeliveries()
+    {
+        if (!Integrations.Deliveries.Loaded || !(Plugin.DeliveryLoop.Active || Plugin.DeliveryPlanning.Current.Count > 0)) return;
+        ImGui.Dummy(new Vector2(0, 8 * Ui.S));
+        DeliveriesPage.DrawPlan(Plugin, MathF.Min(ImGui.GetContentRegionAvail().X, 760 * Ui.S), true);
+    }
 
     private void DrawEmpty()
     {

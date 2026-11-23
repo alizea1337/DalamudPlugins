@@ -153,6 +153,15 @@ internal static class BugReport
             }
         }
 
+        if (catalog?.Deliveries is { Clients.Count: > 0 })
+        {
+            var d = plugin.Config.Deliveries;
+            Line($"Settings: goal {d.Goal?.ToString() ?? "automatic"}, left out [{string.Join(",", d.LeftOut)}], prefer craft/gather {d.PreferCraftGather}, "
+                 + $"anyway {d.DeliverAnywayWhileRanking}, pause for cutscenes {d.PauseForCutscenes}, consumables {d.UseConsumables}");
+            Line($"Run: {(plugin.DeliveryLoop.Active ? "running" : "idle")}, {plugin.DeliveryLoop.Status}; delivered {plugin.DeliveryLoop.Delivered}, planned {plugin.DeliveryLoop.Planned}");
+            foreach (var e in plugin.DeliveryLoop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
+        }
+
         // ---------------------------------------------------------------- Cosmic Exploration
         var cosmic = plugin.Config.Cosmic;
         if (cosmic.Classes.Count > 0 || plugin.CosmicLoop.Lines.Count > 0)

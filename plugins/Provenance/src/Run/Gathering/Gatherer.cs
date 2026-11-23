@@ -99,6 +99,12 @@ internal sealed unsafe class Gatherer
     }
 
     public string Status { get; private set; } = "";
+
+    /// <summary>
+    /// Collectability to aim for when the gathering window shows no tiers for an item (0: none). Custom deliveries set
+    /// it; the order run never does.
+    /// </summary>
+    public Func<uint, int>? FallbackCollectability { get; set; }
     /// <summary>Why the gatherer gave up (a missing gearset, nothing reachable); the run stops on it.</summary>
     public string? Failure { get; private set; }
     /// <summary>Nothing can be gathered right now (only closed timed nodes, or nothing reachable).</summary>
@@ -858,8 +864,10 @@ internal sealed unsafe class Gatherer
         if (w.Integrity <= 0) { Wait(0.2); return; }
         if (!collectableFull) collectableFull = p.CurrentGp >= CollectableRotation.FullRotationGp;
         var itemsLeft = current is { } cur ? left(cur) : 1;
+        var (low, mid, high) = (w.Low, w.Mid, w.High);
+        if (low == 0 && mid == 0 && high == 0 && FallbackCollectability?.Invoke(w.ItemId) is > 0 and var aim) low = mid = high = aim;
         var state = new CollectableState(w.Collectability, w.Integrity, w.MaxIntegrity, w.ScourGain, w.MeticulousGain, w.BrazenGainMax,
-            w.Low, w.Mid, w.High, (int)p.CurrentGp, level,
+            low, mid, high, (int)p.CurrentGp, level,
             GatherActions.HasStatus(GatherActions.EurekaMoment), GatherActions.HasStatus(GatherActions.Status(GatherAction.Scrutiny)),
             GatherActions.HasStatus(GatherActions.CollectorsHighStandard), GatherActions.HasStatus(GatherActions.CollectorsStandard), itemsLeft);
         var acts = new CollectableActions(

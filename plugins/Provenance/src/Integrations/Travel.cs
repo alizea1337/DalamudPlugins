@@ -15,12 +15,19 @@ namespace Provenance.Integrations;
 /// </summary>
 internal sealed unsafe class Travel
 {
-    public enum State { Idle, Teleporting, ToCrystal, Aethernet, Arriving, WaitingForMap, Walking, Arrived, Failed }
+    public enum State { Idle, Teleporting, ToCrystal, Aethernet, Arriving, WaitingForMap, Walking, Arrived, Failed, ToFirmament, FirmamentMenu }
+
+    /// <summary>The Firmament: no aetheryte of its own; reached from Foundation's aetheryte ("Travel to the Firmament").</summary>
+    public const uint Firmament = 886;
+    private const uint Foundation = 418;
+    private const uint FoundationAetheryte = 70;
 
     /// <summary>The aetheryte menu's aethernet entry, should the game's own text for it not be readable.</summary>
     private static readonly string[] AethernetEntry = { "Aethernet", "Ätherytennetz", "Réseau de transport urbain", "都市転送網" };
     /// <summary>How close to walk to a main aetheryte (big, with a wide base) and to an aethernet shard (small).</summary>
     private const float MainCrystalRange = 6f;
+    /// <summary>On the way to the Firmament (a retry goes back to Foundation's aetheryte menu).</summary>
+    private bool viaFoundation;
     private const float ShardRange = 3.5f;
     /// <summary>The aethernet window open this long without the destination in it: give up.</summary>
     private static readonly TimeSpan ListPatience = TimeSpan.FromSeconds(6);
@@ -93,16 +100,42 @@ internal sealed unsafe class Travel
         hopped = false;
         aethernetOnly = false;
         crystalTrip = null;
+        viaFoundation = false;
         lastPath = null;
         pathFailNoted = false;
         Current = State.Idle;
         Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
         if (Services.ClientState.TerritoryType == territory) { Enter(State.WaitingForMap); return; }
+        if (territory == Firmament) { StartFirmament(); return; }
         if (Teleporter.NearestTo(territory, null) != null) { Enter(State.Teleporting); return; }
         if (Teleporter.AethernetRoute(territory) is not { } r) { Fail($"No unlocked aetheryte or aethernet shard leads to {Place(territory)}."); return; }
         aethernetOnly = true;
         hopped = true;
         StartHop(r.Main.TerritoryId, r.Main.AetheryteId, r.Shard);
+    }
+
+    /// <summary>To the Firmament: to Foundation's aetheryte (teleporting there if need be), then its "Travel to the Firmament".</summary>
+    private void StartFirmament()
+    {
+        viaFoundation = true;
+        hopped = true;
+        var crystal = Teleporter.Position(FoundationAetheryte) ?? Vector3.Zero;
+        Note($"{what}: to the Firmament through Foundation's aetheryte");
+        crystalTrip = new Travel { hopped = true };
+        crystalTrip.GoTo("Foundation's aetheryte", Foundation, new Vector2(crystal.X, crystal.Z), MainCrystalRange, () => Interact.Crystal(FoundationAetheryte)?.Position);
+        crystalTrip.hopped = true;
+        Enter(State.ToFirmament, 180);
+    }
+
+    /// <summary>The menu entry of Foundation's aetheryte that goes to the Firmament: it names the place, in the client's language.</summary>
+    private static string FirmamentName
+    {
+        get
+        {
+            var place = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(Firmament)?.PlaceName.ValueNullable;
+            var name = place?.NameNoArticle.ExtractText() is { Length: > 0 } bare ? bare : place?.Name.ExtractText() ?? "Firmament";
+            return name.StartsWith("the ", StringComparison.OrdinalIgnoreCase) ? name[4..] : name;
+        }
     }
 
     /// <summary>Walk (or teleport) to a crystal, then take the aethernet to a shard.</summary>
@@ -162,6 +195,42 @@ internal sealed unsafe class Travel
                 if (crystalTrip.Current == State.Arrived) { StartAethernet(); }
                 return;
 
+            case State.ToFirmament:
+                crystalTrip!.Tick();
+                Status = crystalTrip.Status;
+                if (crystalTrip.Current == State.Failed) { Fail(crystalTrip.Failure!); return; }
+                if (crystalTrip.Current == State.Arrived) { tries = 0; Enter(State.FirmamentMenu, 25); }
+                return;
+
+            case State.FirmamentMenu:
+            {
+                Status = "Travelling to the Firmament";
+                if (DateTime.UtcNow < nextTry) return;
+                if (Interact.Menu() is { Count: > 0 } options)
+                {
+                    var name = FirmamentName;
+                    var entry = options.FindIndex(e => e.Text.Contains(name, StringComparison.CurrentCultureIgnoreCase));
+                    if (entry < 0)
+                    {
+                        Note($"{what}: Foundation's aetheryte menu has no Firmament entry: {string.Join(" / ", options.Select(e => e.Text.Trim()))}");
+                        Interact.Close("SelectString");
+                        Fail("Foundation's aetheryte doesn't offer the Firmament (it opens once Ishgard's restoration has begun).");
+                        return;
+                    }
+                    MoveIntent.Expect(40, "to the Firmament");
+                    Note($"{what}: \"{options[entry].Text.Trim()}\"");
+                    options[entry].Select();
+                    sawLoading = false;
+                    Enter(State.Arriving, 40);
+                    return;
+                }
+                if (Interact.SkipTalk()) { nextTry = DateTime.UtcNow.AddSeconds(0.3); return; }
+                if (DateTime.UtcNow > deadline || ++tries > 6) { Fail("Foundation's aetheryte didn't open its menu."); return; }
+                if (Interact.Crystal(FoundationAetheryte) is { } crystal) Interact.With(crystal, travels: true);
+                nextTry = DateTime.UtcNow.AddSeconds(1.5);
+                return;
+            }
+
             case State.Aethernet:
                 Status = "Taking the aethernet";
                 if (DateTime.UtcNow < nextTry) return;
@@ -216,7 +285,8 @@ internal sealed unsafe class Travel
                 {
                     // Nothing happened (cast interrupted, window closed); try again.
                     Note($"{what}: no loading screen came (cast interrupted or window closed); trying again");
-                    if (hopTo != 0) StartAethernet();
+                    if (viaFoundation && Services.ClientState.TerritoryType == Foundation) { tries = 0; Enter(State.FirmamentMenu, 25); }
+                    else if (hopTo != 0) StartAethernet();
                     else Enter(State.Teleporting, 20);
                     return;
                 }

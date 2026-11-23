@@ -39,6 +39,11 @@ internal sealed unsafe class Shopper
     }
 
     public string Status { get; private set; } = "";
+
+    /// <summary>Gil this shopper may still spend (null: no limit). The order run's limit by default; another loop gives its own.</summary>
+    public Func<long?>? GilBudget { get; set; }
+
+    private long? BudgetLeft => GilBudget != null ? GilBudget() : plugin.Runs.GilLeft;
     public string? Failure { get; private set; }
     public bool Finished => step is Step.Done or Step.Failed;
     public bool IsPaused { get; private set; }
@@ -184,14 +189,14 @@ internal sealed unsafe class Shopper
         var left = next.Amount - Bought(next.ItemId);
         var amount = Math.Min(99, left);
         long gil = GameState.BagCount(1);
-        if (plugin.Runs.GilLeft is { } budget) gil = Math.Min(gil, budget);
+        if (BudgetLeft is { } budget) gil = Math.Min(gil, budget);
         var cost = (long)items[index].CostAmount * amount;
         if (cost > gil)
         {
             amount = (int)Math.Min(amount, gil / Math.Max(1, items[index].CostAmount));
             if (amount <= 0)
             {
-                Fail(plugin.Runs.GilLeft is { } budgetLeft && budgetLeft < GameState.BagCount(1)
+                Fail(BudgetLeft is { } budgetLeft && budgetLeft < GameState.BagCount(1)
                     ? $"The run reached its gil limit (Security tab) before buying {plugin.Plans.Catalog!.ItemName(next.ItemId)}."
                     : $"Not enough gil for {plugin.Plans.Catalog!.ItemName(next.ItemId)}.");
                 return;

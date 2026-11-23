@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.21.0
+
+- **Custom Deliveries, step 2: the delivery run** (crafted and gathered requests; fish come later).
+  - Start plans the week's deliveries, makes what isn't in your bags yet (the components bought from the
+    vendor next to the client, crafted at the tier the goal wants, or gathered as collectables), then
+    takes one tour through the clients and hands everything in. A rank-up changes a client's requests,
+    so the run plans again afterwards while deliveries are left (up to three rounds).
+  - Goal: Rank up (the clients below the top level first, the lowest first, the lowest tier), Scrips or
+    Gil (the best tier your gear reliably reaches). Picked for you until you choose: Rank up while a
+    client is below the top level, then Scrips. Bonus requests always come first.
+  - Options: prefer crafting and gathering; deliver anyway while ranking up (past the scrip cap); pause
+    for rank-up cutscenes (otherwise the run carries on after them); food and medicine for a higher tier.
+    Each client has "Include in the run" when opened; left-out clients say so.
+  - This week's plan shows on the page and on the Plan page (with no order): what goes to whom, made by
+    which class, at which collectability, and who gets nothing this time and why.
+  - Pause, Resume and Stop in the action bar and the compact strip; the Tripwire, /prov stop and the bug
+    report cover the run, and YesAlready is asked to stand aside while handing in.
+  - The Firmament: Provenance now travels there through Foundation's aetheryte.
+  - Locked clients no longer show a level and deliveries.
+
 ## 0.20.0
 
 - New: **Custom Deliveries** (Expeditions), the first step: where you stand, no deliveries made yet.

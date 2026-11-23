@@ -10,25 +10,62 @@ using Provenance.Core.Planning;
 using Provenance.Data;
 using Provenance.UI.Theme;
 using Deliver = Provenance.Integrations.Deliveries;
+using DeliveryRun = Provenance.Run.Deliveries.DeliveryRun;
 
 namespace Provenance.UI.Pages;
 
 /// <summary>
-/// Custom Deliveries (Expeditions): the week (deliveries left, the reset, bonus clients) and every client with its
-/// level, deliveries this week and status; a client opens to this week's three requests, what they pay, whether they
-/// match what the game showed, and what the next level, story quests and achievements bring. Information only for now.
+/// Custom Deliveries (Expeditions): the run (progress, goal and options, this week's plan), the week (deliveries left,
+/// the reset, bonus clients) and every client with its level, deliveries this week and status; a client opens to this
+/// week's three requests, what they pay, whether they match what the game showed, and what's ahead.
 /// </summary>
 internal sealed unsafe class DeliveriesPage : Page
 {
     private readonly HashSet<uint> open = new();
+    private string? startProblem;
 
     public DeliveriesPage(Plugin plugin) : base(plugin) { }
+
+    private DeliveryRun Loop => Plugin.DeliveryLoop;
+    private DeliverySettings S => Config.Deliveries;
 
     public override string Title => "Custom Deliveries";
     public override FontAwesomeIcon Icon => FontAwesomeIcon.BoxOpen;
 
     public override (string Text, Vector4 Color)? Status
-        => Deliver.Loaded ? ($"{Deliver.Remaining} of {Deliver.WeeklyAllowance} deliveries left this week", Palette.TextMuted) : null;
+        => Loop.Active ? (Loop.Status, Palette.Accent)
+            : Loop.Problem != null ? ("The run stopped with a problem; see below", Palette.Warn)
+            : Deliver.Loaded ? ($"{Deliver.Remaining} of {Deliver.WeeklyAllowance} deliveries left this week", Palette.TextMuted) : null;
+
+    public override (Vector4 Color, bool Pulse)? Live => Loop.Active ? (Palette.Accent, true) : null;
+
+    public override IEnumerable<FooterAction> Actions
+    {
+        get
+        {
+            if (Loop.Active)
+            {
+                foreach (var a in DeliveryRunActions(Loop)) yield return a;
+                yield break;
+            }
+            yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => startProblem = Loop.Start(),
+                Tooltip: "Makes what this week's plan needs (crafted and gathered requests), then hands it all in.");
+        }
+    }
+
+    /// <summary>The run's buttons while it goes: Stop, and Pause / Resume.</summary>
+    public static IEnumerable<FooterAction> DeliveryRunActions(DeliveryRun loop)
+    {
+        yield return new FooterAction("Stop", Ui.Kind.Danger, FontAwesomeIcon.Stop, () => loop.Stop(),
+            Tooltip: loop.Paused ? "Ends the run." : "Stops once the item being crafted is finished; anything else stops right away.");
+        if (loop.Paused)
+            yield return new FooterAction("Resume", Ui.Kind.Primary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Carries on where it paused.");
+        else if (loop.Pausing)
+            yield return new FooterAction("Keep going", Ui.Kind.Secondary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Never mind the pause.");
+        else
+            yield return new FooterAction("Pause", Ui.Kind.Secondary, FontAwesomeIcon.Pause, loop.Pause,
+                Tooltip: "Pauses after the item being crafted, otherwise right away. Resume plans again from what's in your bags.");
+    }
 
     private DeliveryData? Data => Plans.Catalog?.Deliveries;
 
@@ -36,9 +73,16 @@ internal sealed unsafe class DeliveriesPage : Page
     {
         var s = Ui.S;
         var w = MathF.Min(ImGui.GetContentRegionAvail().X, 760 * s);
-        Ui.Heading("Custom Deliveries", "Collectables for the clients below, 12 a week between them. This page shows where you stand with each; "
-                                        + "making and delivering the requests comes in a later version.");
+        Ui.Heading("Custom Deliveries", "Collectables for the clients below, 12 a week between them. Start makes what this week's plan needs "
+                                        + "(crafted and gathered requests for now), then hands it all in.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        if (startProblem != null && !Loop.Active)
+        {
+            Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
+            ImGui.SameLine(0, 8 * s);
+            Ui.Wrapped("Can't start: " + startProblem, Palette.Warn, w);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+        }
         if (Data is not { Clients.Count: > 0 } data)
         {
             Ui.Wrapped(Plans.Catalog == null ? "Reading the game data…" : "The game data has no custom deliveries.", Palette.TextMuted);
@@ -46,9 +90,160 @@ internal sealed unsafe class DeliveriesPage : Page
         }
 
         var weeks = data.Clients.Select(c => Deliver.Week(data, c)).ToList();
+        if (Loop.Active || Loop.Lines.Count > 0) DrawProgress(w);
         if (Deliver.Loaded) DrawWeek(weeks, w);
         else DrawNotLoaded(w);
+        if (Deliver.Loaded)
+        {
+            DrawSettings(weeks, w);
+            DrawPlan(Plugin, w, false);
+        }
         DrawClients(data, weeks, w);
+    }
+
+    // ------------------------------------------------------------------ progress
+
+    private void DrawProgress(float w)
+    {
+        var s = Ui.S;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text(Loop.Active ? "Under way" : "Last run");
+        if (Loop.Active) Ui.Wrapped(Loop.Status, Palette.Text);
+        if (Loop.Visiting is { } client) Ui.Chip(client.Name, Palette.Accent, FontAwesomeIcon.BoxOpen);
+        using (Ui.F.Small.Push())
+            Ui.Muted(Loop.Active
+                ? $"{Loop.DeliveredThisRound} of {Loop.Planned} delivered this round, {Loop.Delivered} in all"
+                : $"{Loop.Delivered} {(Loop.Delivered == 1 ? "delivery" : "deliveries")}");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        foreach (var (at, text, problem) in Loop.Lines.Reverse().Take(8))
+        {
+            using (Ui.F.Small.Push())
+            {
+                Ui.Text(at.ToString("HH:mm"), Palette.TextFaint);
+                ImGui.SameLine(0, 10 * s);
+                Ui.Wrapped(text, problem ? Palette.Warn : Palette.TextMuted);
+            }
+        }
+        Ui.EndCard();
+    }
+
+    // ------------------------------------------------------------------ goal and options
+
+    private static readonly string[] Goals = { "Rank up", "Scrips", "Gil" };
+
+    private void DrawSettings(List<ClientWeek> weeks, float w)
+    {
+        var s = Ui.S;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Goal");
+        var effective = Plugin.DeliveryPlanning.Goal(weeks);
+        var goal = (int)effective;
+        if (Ui.Segmented("##deliverygoal", Goals, ref goal, 360 * s)) { S.Goal = (DeliveryGoal)goal; Config.Save(); }
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        Ui.Wrapped(effective switch
+        {
+            DeliveryGoal.RankUp => "Clients below the top level first, the lowest first, up to their next level each round. The lowest collectability "
+                                   + "tier does: satisfaction is the same at every tier.",
+            DeliveryGoal.Scrips => "The most scrips per delivery, at the best collectability tier your gear reliably reaches.",
+            _ => "The most gil per delivery, at the best collectability tier your gear reliably reaches.",
+        } + " Bonus requests always come first.", Palette.TextMuted);
+        if (S.Goal == null)
+        {
+            Ui.Wrapped("Picked for you: Rank up while a client is below the top level, then Scrips. Choosing a goal keeps it.", Palette.TextFaint);
+        }
+        else if (Ui.LinkButton("Pick the goal for me again", Palette.Accent, FontAwesomeIcon.Undo, "Rank up while a client is below the top level, then Scrips."))
+        {
+            S.Goal = null;
+            Config.Save();
+        }
+
+        ImGui.Dummy(new Vector2(0, 6 * s));
+        using (Ui.F.Strong.Push()) Ui.Text("Options");
+        var v = S.PreferCraftGather;
+        if (Ui.Checkbox("Prefer crafting and gathering", ref v, "Fish only when neither the crafted nor the gathered request can be done. Fish come in a later version."))
+        { S.PreferCraftGather = v; Config.Save(); }
+        v = S.DeliverAnywayWhileRanking;
+        if (Ui.Checkbox("Deliver anyway while ranking up", ref v,
+                "Under Rank up, clients below the top level still get their deliveries when the scrips would go over the cap. The scrips over the cap are lost."))
+        { S.DeliverAnywayWhileRanking = v; Config.Save(); }
+        v = S.PauseForCutscenes;
+        if (Ui.Checkbox("Pause for rank-up cutscenes", ref v,
+                "Off: the cutscene plays and the run carries on after it. On: the run pauses so you can watch, and Resume carries on."))
+        { S.PauseForCutscenes = v; Config.Save(); }
+        v = S.UseConsumables;
+        if (Ui.Checkbox("Food and medicine for a higher tier", ref v,
+                "Crafts with the food and medicine picked on the Character page when that reaches a higher collectability tier. Never when ranking up: any tier gives the same satisfaction."))
+        { S.UseConsumables = v; Config.Save(); }
+        Ui.EndCard();
+    }
+
+    // ------------------------------------------------------------------ the plan
+
+    /// <summary>This week's plan: what goes to whom, and who gets nothing this time and why. Also on the Plan page.</summary>
+    public static void DrawPlan(Plugin plugin, float w, bool fromPlanPage)
+    {
+        var s = Ui.S;
+        if (plugin.Plans.Catalog is not { } catalog) return;
+        var planning = plugin.DeliveryPlanning;
+        var plan = planning.Current;
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("This week's plan");
+        if (planning.Pending > 0)
+            Ui.Wrapped($"Working out what your gear reaches ({planning.Pending} {(planning.Pending == 1 ? "request" : "requests")} left)…", Palette.TextMuted);
+        if (plan.Count == 0)
+        {
+            Ui.Wrapped(Deliver.Remaining == 0 ? "No deliveries left this week." : "Nothing to deliver with the current options.", Palette.TextMuted);
+        }
+        else
+        {
+            var gil = plan.Deliveries.Sum(d => d.GilEach * d.Count);
+            Ui.Wrapped($"{plan.Count} of the {Deliver.Remaining} deliveries left this week, for about {gil:N0} gil and "
+                       + string.Join(" and ", plan.Deliveries.GroupBy(d => d.ScripCurrency).Select(g => $"{g.Sum(d => d.ScripsEach * d.Count):N0} {ScripName(g.Key)}")) + ".",
+                Palette.TextMuted);
+            ImGui.Dummy(new Vector2(0, 2 * s));
+            foreach (var d in plan.Deliveries) DrawPlanned(catalog, d);
+        }
+        var skipped = plan.Skipped.Where(x => !x.Why.StartsWith("locked")).ToList();
+        if (skipped.Count > 0)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            Ui.Muted("Not this time:");
+            foreach (var (client, why) in skipped)
+                using (Ui.F.Small.Push()) Ui.Wrapped($"{client.Name}: {why}.", Palette.TextMuted);
+        }
+        if (fromPlanPage)
+        {
+            ImGui.Dummy(new Vector2(0, 4 * s));
+            if (Ui.LinkButton("Open Custom Deliveries", Palette.Accent, FontAwesomeIcon.BoxOpen)) plugin.Main.Select<DeliveriesPage>();
+        }
+        Ui.EndCard();
+    }
+
+    private static void DrawPlanned(GameCatalog catalog, PlannedDelivery d)
+    {
+        var s = Ui.S;
+        var start = ImGui.GetCursorScreenPos();
+        var width = Ui.CardInnerWidth;
+        var h = 40 * s;
+        var dl = ImGui.GetWindowDrawList();
+        Ui.DrawItemIcon(dl, catalog.ItemIcon(d.Request.Item.ItemId), start + new Vector2(0, (h - 28 * s) / 2), 28 * s);
+        var x = start.X + 38 * s;
+        dl.AddText(new Vector2(x, start.Y + 3 * s), Palette.U32(Palette.Text), $"{d.Count}x {catalog.ItemName(d.Request.Item.ItemId)}");
+        using (Ui.F.Small.Push())
+            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted),
+                $"for {d.Client.Name}, made by {ClassJobs.Abbreviation(d.ClassJob)}, collectability {d.Collectability} or more");
+        var chips = new List<(string Text, Vector4 Color, FontAwesomeIcon Icon)> { KindChip(d.Request.Item) };
+        if (d.Request.Bonus) chips.Add(("Bonus, x1.5", Palette.Gold, FontAwesomeIcon.Star));
+        var right = start.X + width;
+        foreach (var chip in Enumerable.Reverse(chips))
+        {
+            right -= Ui.ChipWidth(chip.Text, chip.Icon);
+            ImGui.SetCursorScreenPos(new Vector2(right, start.Y + (h - 20 * s) / 2));
+            Ui.Chip(chip.Text, chip.Color, chip.Icon);
+            right -= 6 * s;
+        }
+        ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + h));
+        ImGui.Dummy(new Vector2(width, 0));
     }
 
     // ------------------------------------------------------------------ the week
@@ -133,13 +328,14 @@ internal sealed unsafe class DeliveriesPage : Page
         {
             var c = week.Client;
             var state = StateOf(week, best);
+            if (state is State.Open or State.DoneThisWeek && S.LeftOut.Contains(c.Id)) state = State.LeftOut;
             DrawRow(week, state);
             if (open.Contains(c.Id)) DrawDetails(data, week, state);
         }
         Ui.EndCard();
     }
 
-    private enum State { Locked, NoData, Unknown, QuestFirst, LevelTooLow, DoneThisWeek, Open }
+    private enum State { Locked, NoData, Unknown, QuestFirst, LevelTooLow, DoneThisWeek, LeftOut, Open }
 
     private static State StateOf(ClientWeek week, int bestLevel)
     {
@@ -199,7 +395,8 @@ internal sealed unsafe class DeliveriesPage : Page
             ImGui.SetCursorScreenPos(new Vector2(chipLeft, start.Y + (h - 20 * s) / 2));
             Ui.Chip(chipText, chipColor, chipIcon);
         }
-        if (week.Rank > 0)
+        // A locked client reads as level 1 in the game: nothing to show until it's unlocked.
+        if (week.Rank > 0 && state != State.Locked)
         {
             var levelX = start.X + MathF.Max(190 * s, width * 0.42f);
             var levelText = week.Maxed ? "Level 5, the top" : $"Level {week.Rank} of 5";
@@ -232,6 +429,7 @@ internal sealed unsafe class DeliveriesPage : Page
         State.QuestFirst => ("Story quest first", Palette.Warn, FontAwesomeIcon.Book),
         State.LevelTooLow => ($"Needs level {week.Client.LevelUnlock}", Palette.Warn, null),
         State.DoneThisWeek => ("Done this week", Palette.Accent, FontAwesomeIcon.Check),
+        State.LeftOut => ("Left out", Palette.TextMuted, FontAwesomeIcon.MinusCircle),
         _ => week.Requests.Any(r => r is { Bonus: true }) ? ("Bonus", Palette.Gold, FontAwesomeIcon.Star) : (null, default, null),
     };
 
@@ -257,6 +455,19 @@ internal sealed unsafe class DeliveriesPage : Page
                 break;
         }
 
+        if (state is not (State.Locked or State.NoData or State.Unknown))
+        {
+            var include = !S.LeftOut.Contains(c.Id);
+            ImGui.PushID((int)c.Id);
+            if (Ui.Checkbox("Include in the run", ref include, "Left out, the run skips this client."))
+            {
+                if (include) S.LeftOut.Remove(c.Id);
+                else S.LeftOut.Add(c.Id);
+                Config.Save();
+            }
+            ImGui.PopID();
+        }
+
         if (week.Rank > 0 && state is not (State.Locked or State.NoData or State.Unknown))
         {
             if (state == State.QuestFirst && GatingQuest(week) is { } gate)
@@ -271,7 +482,8 @@ internal sealed unsafe class DeliveriesPage : Page
             DrawCheck(week);
         }
 
-        DrawAhead(catalog, week);
+        if (state != State.Locked) DrawAhead(catalog, week);
+        else DrawUnlockAhead(catalog, week);
         ImGui.Unindent(indent);
         ImGui.Dummy(new Vector2(0, 8 * s));
     }
@@ -403,6 +615,22 @@ internal sealed unsafe class DeliveriesPage : Page
         // The two achievement series' last steps, each with a title.
         if (c.Achievements.Rank != 0) DrawAchievement(c.Achievements.Rank + 4, "reach the top level");
         if (c.Achievements.Deliveries != 0) DrawAchievement(c.Achievements.Deliveries + 5, "150 deliveries");
+    }
+
+    /// <summary>A locked client: only the story quests and their rewards, as something to look forward to.</summary>
+    private static void DrawUnlockAhead(GameCatalog catalog, ClientWeek week)
+    {
+        var s = Ui.S;
+        var quests = week.Client.Quests.Where(q => q.Rewards.Count > 0).ToList();
+        if (quests.Count == 0) return;
+        ImGui.Dummy(new Vector2(0, 6 * s));
+        using (Ui.F.Strong.Push()) Ui.Text("What's ahead");
+        foreach (var q in quests)
+        {
+            Ui.Muted($"Story quest at level {q.Level}: \"{q.Name}\"");
+            ImGui.SameLine(0, 8 * s);
+            Icons(catalog, q.Rewards.Select(id => (id, 1, false)));
+        }
     }
 
     private static void DrawAchievement(uint id, string what)
