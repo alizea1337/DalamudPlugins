@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Fixed: trips walked instead of flying in A Realm Reborn zones (North Shroud, Coerthas and the others). Flying\n  was judged by the zone's aether currents, and those zones have none: their flight comes with the story.\n  Provenance now asks the game whether you can take off, so orders, Custom Deliveries and Tribes fly there too.\n- Tribes: the Ixal have one giver per rank, standing side by side, so the run fetched their dailies one giver\n  at a time, doing each quest before going to the next giver. Givers of one society close together are now all\n  visited for their dailies first, then the quests are done.\r\n",
+    "Changelog": "- Tribes: after crafting a quest's items, the run kept talking to the NPC who hands out the materials (he still\n  shows the quest's marker, for spare materials) instead of going to hand the quest in. Once the quest's items\n  are made or gathered, the run now only goes to the NPC the quest is handed in to.\n- Tribes: when a quest makes you choose a reward, the run picks one: a sack of gil when there is one, otherwise\n  the item that sells to vendors for the most (the first listed when they're equal), then completes the quest.\n- Tribes: trips to quest NPCs indoors or on raised floors. A run that couldn't get down to an NPC in time got off\n  its mount in mid-air and dropped straight down: into the water below a platform, or outside a building. The run\n  now checks whether a roof is over the NPC; if so, it lands on open ground nearby and walks in through the door,\n  and when it starts indoors it walks out before mounting. It only gets off in the air right above the NPC.\n  Orders, Custom Deliveries and Cosmic Exploration travel as before.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.22.1.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.1/latest.zip",
+    "AssemblyVersion": "0.22.2.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.2/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795463279
+    "LastUpdate": 1795465879
   }
 ]
