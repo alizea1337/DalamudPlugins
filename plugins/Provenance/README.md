@@ -5,7 +5,7 @@ crystals, shows where each one comes from, and then gets it all and crafts it fo
 books, vendors, monster drops, gathering, fishing and crafting in one run.
 
 Open it with `/provenance` (or `/prov`). The pages are in a sidebar: Browse and Plan on top, then
-Run under Status, Cosmic Exploration under Expeditions, Character under Tools, and the settings, one page each for General, Interface, Crafting,
+Run under Status, Cosmic Exploration, Tribes and Custom Deliveries under Expeditions, Character under Tools, and the settings, one page each for General, Interface, Crafting,
 Gathering, Fishing, Monster drops, After the order and Security. A *crafting spot* (Settings, Crafting:
 stand there and save it) is where the run goes before it crafts: a corner of your house or apartment
 (through the door), an inn room, or anywhere a teleport and a walk reach. The Interface page sets how
@@ -101,6 +101,63 @@ keeps it from sliding things around.
   Two-class missions on Sinus Ardorum (a miner, botanist or fisher gathers, the crafter makes) and Cosmic
   Fortunes (spending the planet's credits) are extras; Drone Modules can go on the shopping list. The
   gatherers' and fisher's own missions come later.
+- **Custom Deliveries** (*Expeditions*): the week's custom deliveries for crafted and gathered requests,
+  planned, made and handed in. The page shows the deliveries left of the 12 a week and when they reset, the
+  bonus requests, and each client's level, this week's requests and what the next level brings; a locked
+  client names the quest that unlocks it (the run doesn't do quests). Start plans the week for the goal:
+  *Rank up* (the clients below the top level first, the lowest first, at the lowest collectability, since
+  every tier gives the same satisfaction), *Scrips* or *Gil* (bonus requests first, at the best tier your
+  gear reliably reaches). It takes what's in your bags first, then buys the components from the vendor next
+  to the client, crafts with a Raphael rotation or gathers the collectables, and hands everything in on one
+  tour, the Firmament included (through Foundation's aetheryte and the Firmament's own aethernet; on your
+  home world only). At a rank-up the rewards are accepted and the cutscene skipped (*Pause for rank-up
+  cutscenes* pauses for it instead), and the run plans again while deliveries are left, since the client's
+  requests change. A delivery whose scrips would go over the 4,000 cap is left out, unless you're ranking up
+  with *Deliver anyway while ranking up* on (the scrips over the cap are lost). Each client has *Include in
+  the run*. The week's plan (what goes to whom, made by which class, at which collectability, and who gets
+  nothing this time and why) shows on the page and on the Plan page when no order is on it; Pause, Resume
+  and Stop are in the action bar and the compact strip (`/prov compact`). Fish and spearfishing requests
+  come later.
+- **Tribes** (*Expeditions*), **coming in the next release**: the daily allied society quests. Until then
+  the page only says what it's for.
+  - The page: all 20 allied societies; whether each is unlocked and, if not, what's missing (the run doesn't
+    do unlock quests); rank and reputation, with the days to the next rank and to Bloodsworn; a notice when
+    a rank quest is ready; today's three quests for each society, worked out in advance and checked against
+    the game, each marked "the run can do it", "do it yourself" (with the reason) or "needs X" (crystals, a
+    class level); the allowances left and the countdown to the daily reset (15:00 UTC, shown in your local
+    time); what each rank opens in the society's shop and what you already own; and the achievements and
+    titles.
+  - The run, for the crafter and gatherer societies: the Moogles, Dwarves, Loporrits, Yok Huy, Namazu,
+    Qitari, Omicrons and Mamool Ja, plus the Ixal's craft-only dailies. It takes today's quests, up to the
+    12 daily allowances and 3 per society, and does them, errands included: talking, handing items over,
+    emotes, `/say`, key items, quest mounts and so on. Crafting quests are crafted with a Raphael rotation
+    (quality never matters for them), with crystals from your bags, then retainers, then gathering; without
+    them the quest is skipped and the reason given. Gathering quests are done as Miner or Botanist at the
+    society's own nodes.
+  - Goals: *Rank up* (societies below Bloodsworn first, the lowest rank first), *Currency* (for the society
+    shops) and *Levelling* (your lowest classes first). Each society has a checkbox; a quest is accepted on
+    your current class when it qualifies, otherwise on your best-geared one. Options: *Pause for cutscenes*
+    (otherwise they're skipped) and *Leave out quests that /say in public* (off to start; the run only says
+    the quest's own phrase, once).
+  - Never done by the run: these are marked "do it yourself", with the reason, and not accepted.
+    - Shooting and bow minigames (the Namazu's bow; the Kojin, Ananta and Pixies snipes): the only known way
+      to automate them fakes the minigame's result to the game, and Provenance doesn't fake results.
+    - The nine ARR FATE dailies: they wait on a named FATE spawning, sometimes only after other FATEs, which
+      can take a long time.
+    - The Ixal's "Deliverance": it has a quota system of its own.
+    - Fisher for the gatherer dailies: the game data has no fishing spot or bait for those quest fish, so
+      gatherer dailies are taken as Miner or Botanist.
+  - Planned for later releases:
+    - Rank quests, started with *Do the rank quest*, escort and follow steps included. Three of them hold a
+      solo duty (the Kojin's "A Test of Courage", the Ananta's "Schism between Sisters", the Pixies' "As the
+      Heart Bids"): the run warns you beforehand and pauses at the duty for you to do it, then Resume
+      carries on.
+    - The battle societies, with the basic combat on the job picked under Monster drops, plus the rest of
+      the Ixal's dailies and the intersocietal quests for the "Allied" rank. For safety, *Levelling* only
+      takes a battle quest on a job at least 5 levels above the quest's level, the lowest such job: the
+      basic combat has little healing, and ARR society quests aren't level-synced, so the extra levels
+      count.
+    - A shopping list for the society shops.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
 
@@ -125,14 +182,13 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | Scrips | Buying books and materials at scrip exchanges, earning scrips with collectables (done) |
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 | Cosmic Exploration | Crafting missions (done; since 0.18), two-class missions and Cosmic Fortunes (done; since 0.19), then gathering missions with critical missions and red alerts, then fishing missions, then Master missions and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
+| Custom Deliveries | The page with the week and every client (done; since 0.20), the run for crafted and gathered requests (done; since 0.21), then fish and spearfishing requests, a shopping list for scrips at the cap and a trip after the run; later making items ahead and a Levelling goal |
+| Tribes | The page and the run for the crafter and gatherer societies' dailies (next release), then rank quests by button, then the battle societies with the rest of the Ixal and the intersocietal quests, then a shopping list for the society shops |
 
 ### To do
 
 Tracked in [Issues](https://github.com/alizea1337/DalamudPlugins/issues), where bugs and suggestions go too.
 
-- Custom deliveries: a weekly mode that makes or gathers each client's items for crafters and
-  gatherers and hands them in ([#6](https://github.com/alizea1337/DalamudPlugins/issues/6)).
-- Allied society (tribal) quests: a weekly mode for the crafter and gatherer societies ([#7](https://github.com/alizea1337/DalamudPlugins/issues/7)).
 - Ocean Fishing: the whole voyage (queueing, spectral currents, presets per zone) ([#8](https://github.com/alizea1337/DalamudPlugins/issues/8)).
 - The Diadem: gathering there, including clouded and umbral nodes ([#9](https://github.com/alizea1337/DalamudPlugins/issues/9)).
 - Several orders in a queue ([#10](https://github.com/alizea1337/DalamudPlugins/issues/10)).
@@ -156,6 +212,12 @@ Orders with fish also need:
 Fish that only live in a housing district need a house or apartment there in your teleport list
 (yours, your free company's or a shared one); Provenance doesn't travel between wards. Ocean
 Fishing and the Diadem aren't covered: their fish are listed under "Get these yourself".
+
+## Questions
+
+Why no market board? Why does it craft at a crafting spot and not out in the field? Why are some
+allied society quests "do it yourself"? These and other common questions are answered in the
+[FAQ](docs/faq.md).
 
 ## License
 
