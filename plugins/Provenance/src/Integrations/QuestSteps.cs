@@ -705,27 +705,95 @@ internal static unsafe class QuestSteps
         return ResultOwner.Unknown;
     }
 
-    /// <summary>
-    /// Completes the quest in the reward window: the Complete button when it can be pressed; when a reward has to be
-    /// picked first, the window's confirm with the reward (once, not while scene tasks are pending, and only when the
-    /// window is known to be this quest's: <paramref name="ours"/>).
-    /// </summary>
-    public static bool Complete(IReadOnlyList<uint> rewards, bool ours, ref bool rewardSent, out string how)
+    /// <summary>Completes the quest in the reward window: a click on its Complete button, only when it can be pressed.</summary>
+    public static bool PressComplete()
     {
-        how = "";
         if (Interact.Ready("JournalResult") is var a && a == null) return false;
         var j = (AddonJournalResult*)a;
-        if (j->CompleteButton != null && j->CompleteButton->IsEnabled)
-        {
-            new AddonMaster.JournalResult((nint)a).Complete();
-            how = "button";
-            return true;
-        }
-        if (!ours || rewards.Count == 0 || rewardSent || DeliveryWindow.SceneBusy) return false;
-        Callback.Fire(a, true, 0, (int)rewards[0]);
-        rewardSent = true;
-        how = $"reward {rewards[0]}";
+        if (j->CompleteButton == null || !j->CompleteButton->IsEnabled) return false;
+        new AddonMaster.JournalResult((nint)a).Complete();
         return true;
+    }
+
+    /// <summary>The reward window's slots of rewards to choose from (five at most).</summary>
+    private const int RewardSlots = 5;
+
+    /// <summary>
+    /// The rewards the reward window asks you to choose from, in the order listed; empty when there's no choice. Each
+    /// value is read only when it's there and of the expected type.
+    /// </summary>
+    /// <remarks>
+    /// Where the window keeps them, as facts from TextAdvance (no licence; facts only, own code): AtkValues 82–86 hold the
+    /// items (above 1,000,000 is high quality), 88–92 their icons (26001 is a sack of gil), 93–97 the amounts and
+    /// 98–102 the names. What a vendor pays is the item's <c>PriceLow</c> (game data).
+    /// </remarks>
+    public static List<RewardOption> RewardOptions()
+    {
+        var list = new List<RewardOption>();
+        if (Interact.Ready("JournalResult") is var a && a == null) return list;
+        var items = Services.Data.GetExcelSheet<Item>();
+        for (var i = 0; i < RewardSlots; i++)
+        {
+            if (AtkNumber(a, 82 + i) is not { } raw || raw == 0) continue;
+            var hq = raw > 1_000_000;
+            var id = hq ? raw - 1_000_000 : raw;
+            var icon = AtkNumber(a, 88 + i) ?? 0;
+            var amount = AtkNumber(a, 93 + i) ?? 1;
+            var name = AtkText(a, 98 + i) is { Length: > 0 } shown ? shown : ItemName(id);
+            var price = id == RewardChoice.GilItem ? 0 : items.GetRowOrDefault(id)?.PriceLow ?? 0;
+            list.Add(new RewardOption(i, id, hq, icon, amount, name, price));
+        }
+        return list;
+    }
+
+    /// <summary>An AtkValue that's a number (its low 32 bits), or null when it's missing or something else.</summary>
+    private static uint? AtkNumber(AtkUnitBase* a, int index)
+    {
+        if (index < 0 || index >= a->AtkValuesCount || a->AtkValues == null) return null;
+        var v = a->AtkValues[index];
+        return v.Type is AtkValueType.Int or AtkValueType.UInt or AtkValueType.Int64 or AtkValueType.UInt64 ? v.UInt : null;
+    }
+
+    /// <summary>An AtkValue that's text, or null when it's missing or something else.</summary>
+    private static string? AtkText(AtkUnitBase* a, int index)
+    {
+        if (index < 0 || index >= a->AtkValuesCount || a->AtkValues == null) return null;
+        var v = a->AtkValues[index];
+        return v.Type is AtkValueType.String or AtkValueType.ManagedString or AtkValueType.ConstString ? StepRules.Normal(v.GetValueAsString()) : null;
+    }
+
+    /// <summary>
+    /// Picks a reward in the reward window as a click on it does: the reward canvas's own click event for the slot.
+    /// Never while the game has scene tasks pending.
+    /// </summary>
+    /// <remarks>
+    /// The event (a mouse click, parameter 7 + the slot, sent to the window's journal canvas with empty event data) is a
+    /// fact from TextAdvance (no licence; facts only, own code). The canvas is <c>AddonJournalResult</c>'s
+    /// <c>AtkComponentJournalCanvas268</c> (FFXIVClientStructs, MIT).
+    /// </remarks>
+    public static bool PickReward(int slot)
+    {
+        if (slot is < 0 or >= RewardSlots || DeliveryWindow.SceneBusy) return false;
+        if (Interact.Ready("JournalResult") is var a && a == null) return false;
+        var canvas = ((AddonJournalResult*)a)->AtkComponentJournalCanvas268;
+        if (canvas == null) return false;
+        var evt = stackalloc byte[64];
+        var data = stackalloc byte[64];
+        new Span<byte>(evt, 64).Clear();
+        new Span<byte>(data, 64).Clear();
+        canvas->AtkComponentBase.AtkEventListener.ReceiveEvent(AtkEventType.MouseClick, 7 + slot, (AtkEvent*)evt, (AtkEventData*)data);
+        return true;
+    }
+
+    /// <summary>The quest's sequence as the journal holds it (no script is asked); null when it isn't in the journal.</summary>
+    public static byte? Sequence(uint questRow)
+    {
+        var qm = QuestManager.Instance();
+        if (qm == null) return null;
+        var id = (ushort)(questRow - 65536);
+        if (!qm->IsQuestAccepted(id)) return null;
+        var work = qm->GetQuestById(id);
+        return work == null ? null : work->Sequence;
     }
 
     public enum TradeStep { Wait, Opened, Picked, HandedOver, Missing }

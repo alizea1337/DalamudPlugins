@@ -58,7 +58,8 @@ internal sealed record GatherNeed(uint ItemId, int Remaining, uint PointBase, ui
 /// nothing changing, both for the whole day (<see cref="PublicAttemptStore.Shared"/>), then the step is the player's;
 /// Yes is answered only to questions on the game's own list (the high-quality hand-over, the trade confirmation, the
 /// warp the stepper is taking); the character doesn't move while a cast is under way; a menu is answered only when it's
-/// the quest's own question or its title; every wait for the game is bounded (<see cref="BlockWatch"/>).
+/// the quest's own question or its title; a reward is picked (<see cref="RewardChoice"/>) only in the quest's own reward
+/// window, three times at most; every wait for the game is bounded (<see cref="BlockWatch"/>).
 /// </remarks>
 internal sealed unsafe class QuestStepper
 {
@@ -74,6 +75,9 @@ internal sealed unsafe class QuestStepper
     private static readonly TimeSpan TradePatience = TimeSpan.FromSeconds(15);
     /// <summary>Times a hand-over slot's item picker is asked for before the window is given up on.</summary>
     private const int TradeOpens = 3;
+    /// <summary>Picks of a reward that leave Complete off before the reward window is the player's, and the wait between them.</summary>
+    private const int RewardPickTries = 3;
+    private static readonly TimeSpan RewardPickEvery = TimeSpan.FromSeconds(1.5);
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
@@ -104,7 +108,11 @@ internal sealed unsafe class QuestStepper
     private DateTime tradeSince;
     private DateTime resultSince;
     private bool resultNoted;
-    private bool rewardSent;
+    /// <summary>In the reward window: picks sent, when the next may go, the reward picked, and whether the options were logged.</summary>
+    private int rewardPicks;
+    private DateTime nextRewardPick;
+    private RewardOption? rewardTaken;
+    private bool rewardListed;
     private bool cutscenePaused;
     private bool cutsceneNoted;
     /// <summary>While crafting or gathering: the item, and how many of it the bags should hold when it's enough.</summary>
@@ -255,7 +263,10 @@ internal sealed unsafe class QuestStepper
         tradeSince = default;
         resultSince = default;
         resultNoted = false;
-        rewardSent = false;
+        rewardPicks = 0;
+        nextRewardPick = default;
+        rewardTaken = null;
+        rewardListed = false;
         cutscenePaused = false;
         cutsceneNoted = false;
         needItem = 0;
@@ -761,7 +772,14 @@ internal sealed unsafe class QuestStepper
 
         if (Interact.Ready("JournalResult") != null)
         {
-            if (resultSince == default) resultSince = now;
+            if (resultSince == default)
+            {
+                resultSince = now;
+                rewardPicks = 0;
+                nextRewardPick = default;
+                rewardTaken = null;
+                rewardListed = false;
+            }
             Status = "Completing " + script!.Name;
             var owner = QuestSteps.ResultFor(script, out var shown);
             if (owner == QuestSteps.ResultOwner.Other)
@@ -770,15 +788,26 @@ internal sealed unsafe class QuestStepper
                 AskUser($"The reward window is for another quest (“{shown}”); complete it yourself, then resume.");
                 return true;
             }
-            if (owner == QuestSteps.ResultOwner.Unknown && !resultNoted)
+            if (owner == QuestSteps.ResultOwner.Unknown && QuestSteps.Sequence(script.Quest) == 255)
+            {
+                // The title isn't among the window's texts, but the quest is at its report and the window came up after
+                // talking to whoever it's reported to: it's this quest's.
+                if (!resultNoted)
+                {
+                    resultNoted = true;
+                    Note($"reward window: \"{script.Name}\" isn't among its texts; the quest is at its report (sequence 255), so the window is taken as its own");
+                }
+                owner = QuestSteps.ResultOwner.This;
+            }
+            else if (owner == QuestSteps.ResultOwner.Unknown && !resultNoted)
             {
                 resultNoted = true;
-                Note($"reward window: \"{script.Name}\" isn't among its texts; only its Complete button is pressed (no reward is picked)");
+                Note($"reward window: \"{script.Name}\" isn't among its texts and the quest isn't at its report; only its Complete button is pressed (no reward is picked)");
             }
-            if (QuestSteps.Complete(script.OptionalRewards, owner == QuestSteps.ResultOwner.This, ref rewardSent, out var how))
+            if (QuestSteps.PressComplete())
             {
-                Note($"completed in the reward window ({how})");
-                Log($"Reported {script.Name}{(how.StartsWith("reward") ? $" and took {QuestSteps.ItemName(script.OptionalRewards[0])}" : "")}.", false);
+                Note($"completed in the reward window{(rewardTaken != null ? $", reward {rewardTaken}" : "")}");
+                Log($"Reported {script.Name}{(rewardTaken != null ? $" and took {Took(rewardTaken)}" : "")}.", false);
                 Wait(1.5);
                 return true;
             }
@@ -787,6 +816,31 @@ internal sealed unsafe class QuestStepper
                 resultSince = default;
                 AskUser("The quest's reward window didn't complete; complete it yourself, then resume.");
                 return true;
+            }
+            // The game makes you choose: Complete stays off until a reward is picked (gil first, then what sells for the most).
+            if (owner == QuestSteps.ResultOwner.This && QuestSteps.RewardOptions() is { Count: > 0 } options)
+            {
+                var pick = RewardChoice.Pick(options)!;
+                if (!rewardListed)
+                {
+                    rewardListed = true;
+                    Note($"reward window offers [{string.Join("; ", options)}] (the quest's own list [{string.Join(",", script.OptionalRewards)}]); picking {pick.Slot + 1}: {RewardChoice.Why(pick, options)}");
+                }
+                if (now < nextRewardPick) { Wait(0.3); return true; }
+                if (rewardPicks >= RewardPickTries)
+                {
+                    resultSince = default;
+                    AskUser($"Couldn't pick the quest's reward ({Took(pick)}) after {RewardPickTries} tries; pick one yourself and complete the quest, then resume.");
+                    return true;
+                }
+                // A click on a reward is the window's own event: never while the game has scene tasks pending.
+                if (!DeliveryWindow.SceneBusy && QuestSteps.PickReward(pick.Slot))
+                {
+                    rewardPicks++;
+                    rewardTaken = pick;
+                    nextRewardPick = now + RewardPickEvery;
+                    Note($"reward: picked {pick} (try {rewardPicks} of {RewardPickTries})");
+                }
             }
             Wait(0.3);
             return true;
@@ -930,6 +984,10 @@ internal sealed unsafe class QuestStepper
         StepKind.Go => p.What,
         _ => p.What,
     };
+
+    /// <summary>A reward as the run's log names it ("1,500 gil", "Craftsman's Competence Materia IV").</summary>
+    private static string Took(RewardOption r)
+        => r.IsGil ? $"{r.Amount:N0} gil" : r.Amount > 1 ? $"{r.Amount} {r.Name}" : r.Name;
 
     private static string Abbreviation(uint job)
         => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(job)?.Abbreviation.ExtractText() is { Length: > 0 } a ? a : $"class {job}";

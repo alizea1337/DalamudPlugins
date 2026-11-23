@@ -240,11 +240,15 @@ internal static class QuestWatch
         var q = QuestSteps.Question() is { } text ? $"question \"{text}\" (on the known list: {StepRules.KnownQuestion(text, QuestSteps.KnownQuestions)})" : "";
         if (q != question) { question = q; if (q.Length > 0) Write(q); }
 
-        var reward = Interact.IsOpen("JournalResult");
+        // Once it's ready, so its choices can be read: what it offers and what the run would take.
+        var reward = Interact.Ready("JournalResult") != null;
         if (reward && !rewardOpen)
         {
             var list = string.Join(" | ", watched.Values.Where(w => w.Script.OptionalRewards.Count > 0).Select(w => $"{w.Script.Quest - 65536}: [{string.Join(",", w.Script.OptionalRewards)}]"));
-            Write($"reward window open; optional rewards: {(list.Length > 0 ? list : "none")}");
+            var options = QuestSteps.RewardOptions();
+            var pick = RewardChoice.Pick(options);
+            Write($"reward window open; optional rewards: {(list.Length > 0 ? list : "none")}; the window offers "
+                  + (options.Count == 0 ? "no choice" : $"[{string.Join("; ", options)}], the run would pick {pick!.Slot + 1}: {RewardChoice.Why(pick, options)}"));
         }
         rewardOpen = reward;
 
