@@ -316,7 +316,7 @@ internal sealed unsafe class Homecoming
         }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (DateTime.UtcNow > deadline || ++tries > 8) { Fail($"{i.NpcName} didn't let you in."); return; }
-        if (Interact.Nearest(ObjectKind.EventNpc, id => id == i.NpcId) is { } npc) Interact.With(npc);
+        if (Interact.Nearest(ObjectKind.EventNpc, id => id == i.NpcId) is { } npc) Interact.With(npc, travels: true);
         Wait(1.5);
     }
 
@@ -336,7 +336,7 @@ internal sealed unsafe class Homecoming
         }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (DateTime.UtcNow > deadline || ++tries > 8) { Fail("The door didn't open (no access to this house any more?)."); return; }
-        if (CraftingSpots.Door(s) is { } door) Interact.With(door);
+        if (CraftingSpots.Door(s) is { } door) Interact.With(door, travels: true);
         Wait(1.5);
     }
 

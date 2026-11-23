@@ -60,8 +60,10 @@ internal static unsafe class Interact
     public static float Distance(IGameObject o)
         => Services.Objects.LocalPlayer is { } p ? Vector3.Distance(p.Position, o.Position) : float.MaxValue;
 
-    public static bool With(IGameObject o)
+    /// <param name="travels">Talking to it can take the character elsewhere (an aetheryte, a door, an innkeeper, a ferry NPC).</param>
+    public static bool With(IGameObject o, bool travels = false)
     {
+        if (travels) MoveIntent.Expect(30);
         var ts = TargetSystem.Instance();
         if (ts == null) return false;
         ts->Target = (GameObjectStruct*)o.Address;

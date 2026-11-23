@@ -88,7 +88,7 @@ internal sealed unsafe class PlanetTrip
         }
         if (Interact.SkipTalk()) { Wait(0.3); return; }
         if (DateTime.UtcNow > deadline || ++tries > 6) { Fail("Couldn't use the Bestways Burrow aetheryte."); return; }
-        if (Interact.Crystal(CosmicData.BestwaysBurrow) is { } crystal) Interact.With(crystal);
+        if (Interact.Crystal(CosmicData.BestwaysBurrow) is { } crystal) Interact.With(crystal, travels: true);
         Status = "Using the aetheryte";
         Wait(1.5);
     }
@@ -146,7 +146,7 @@ internal sealed unsafe class PlanetTrip
         var here = Integrations.Cosmic.CurrentPlanet;
         var npc = here == null ? null : Interact.Nearest(ObjectKind.EventNpc, id => id == CosmicData.Cruiser(here.Value).Id);
         if (npc == null) { Fail("Couldn't find Cruisingway here."); return; }
-        Interact.With(npc);
+        Interact.With(npc, travels: true);
         Status = "Talking to Cruisingway";
         Wait(1.2);
     }

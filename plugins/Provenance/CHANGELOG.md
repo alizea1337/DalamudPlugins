@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.11
+
+- New option (Security): *Stop everything when the character is moved* (on by default). While a run or the
+  Cosmic loop works, a move it didn't make stops everything at once, even a craft under way: another
+  zone, or a jump far across the zone in an instant, with no teleport, aethernet, door, ferry, knock-out,
+  duty or cutscene just before it (a game master can summon a character, for example). Your own
+  teleports and Provenance's own trips don't count. The chat says where the character was taken, and the
+  debug log notes it.
+
 ## 0.19.10
 
 - Expeditions: placeholder pages for Tribes, Custom Deliveries, The Diadem and Ocean Fishing. They only say

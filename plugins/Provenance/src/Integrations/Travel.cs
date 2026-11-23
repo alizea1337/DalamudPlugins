@@ -190,7 +190,7 @@ internal sealed unsafe class Travel
                 if (Interact.Crystal(hopFrom) is { } crystalObj)
                 {
                     var away = Interact.Distance(crystalObj);
-                    aethernetSaw = Interact.With(crystalObj)
+                    aethernetSaw = Interact.With(crystalObj, travels: true)
                         ? $"talking to the crystal ({away:0.0} yalms away) opened nothing"
                         : $"the crystal ({away:0.0} yalms away) couldn't be talked to";
                 }

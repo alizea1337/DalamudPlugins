@@ -101,6 +101,8 @@ internal sealed unsafe class CosmicRun
     }
 
     public bool Active => step is not (Step.Idle or Step.Finished);
+    /// <summary>The loop acts on its own right now (not paused).</summary>
+    public bool Working => Active && !Paused;
     /// <summary>Paused: nothing moves until <see cref="Resume"/>.</summary>
     public bool Paused { get; private set; }
     /// <summary>Asked to pause while crafting: it pauses once the item under way is finished.</summary>

@@ -353,6 +353,8 @@ internal sealed class RunEngine : IDisposable
     public TimeSpan? NextWindow { get; private set; }
 
     public bool Active => Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Paused or RunPhase.Stopping;
+    /// <summary>The run acts on its own right now: not paused, not waiting out a duty or a knock-out.</summary>
+    public bool Working => Phase is RunPhase.Running or RunPhase.Pausing or RunPhase.Stopping && !pausedForDuty && !knockedOut;
     /// <summary>The crafter is the one working right now (craft stage, or crafting between timed nodes).</summary>
     public bool Crafting => Stage == RunStage.Craft || (Stage == RunStage.Gather && craftingBetween);
     /// <summary>The fisher is the one working in the gathering stage (fishing, on its way, or waiting at the water).</summary>

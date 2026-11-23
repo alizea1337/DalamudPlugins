@@ -6,7 +6,7 @@ using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
 
-/// <summary>Getting unstuck, trades from other players, and limits that keep a run from going too far.</summary>
+/// <summary>Getting unstuck, trades from other players, being moved by someone else, and limits that keep a run from going too far.</summary>
 internal sealed class SecurityPage : Page
 {
     public SecurityPage(Plugin plugin) : base(plugin) { }
@@ -47,6 +47,18 @@ internal sealed class SecurityPage : Page
             v = c.TradesOnlyDuringRuns;
             if (Ui.Checkbox("Only while a run is going", ref v)) { c.TradesOnlyDuringRuns = v; Save(); }
         }
+        Ui.EndCard();
+
+        // Being moved
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Being moved");
+        Ui.Wrapped("While a run or the Cosmic loop works, a move it didn't make stops everything at once: walking, flying, gathering, fishing and "
+                   + "even a craft under way. That's another zone, or far across this one in an instant, with no teleport, aethernet, door or "
+                   + "knock-out before it. A game master can summon a character, for example. Your own teleports don't count, and the chat says "
+                   + "where the character was taken.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        v = c.StopWhenMoved;
+        if (Ui.Checkbox("Stop everything when the character is moved", ref v)) { c.StopWhenMoved = v; Save(); }
         Ui.EndCard();
 
         // Limits

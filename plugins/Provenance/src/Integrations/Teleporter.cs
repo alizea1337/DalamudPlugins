@@ -181,6 +181,7 @@ internal static unsafe class Teleporter
         {
             if (data->Entries[i].AetheryteId != shardId) continue;
             if (data->Entries[i].IsLocked) return AethernetPick.Locked;
+            MoveIntent.Expect(30);
             agent->TeleportToAetheryte(i);
             return AethernetPick.Taken;
         }
@@ -278,6 +279,7 @@ internal static unsafe class Teleporter
         if (Blocked() is { } why) return why;
         var telepo = Telepo.Instance();
         if (telepo == null) return "the teleport menu isn't available";
+        MoveIntent.Expect(40);
         return telepo->Teleport(d.AetheryteId, d.SubIndex) ? null : "the game refused the teleport";
     }
 }

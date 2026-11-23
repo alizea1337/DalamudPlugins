@@ -194,6 +194,11 @@ public sealed class SecuritySettings
     public bool DeclineTrades { get; set; } = true;
     /// <summary>Only while a run is going (otherwise always).</summary>
     public bool TradesOnlyDuringRuns { get; set; } = true;
+    /// <summary>
+    /// While a run or the Cosmic loop works: the character moved to another zone, or far within the zone in an instant,
+    /// with nothing explaining it (a cast, an interaction, a knock-out, a duty, Provenance's own trip) stops everything.
+    /// </summary>
+    public bool StopWhenMoved { get; set; } = true;
     /// <summary>Most gil a run may spend at vendors. 0: no limit (besides the price cap per item).</summary>
     public int MaxGilPerRun { get; set; }
     /// <summary>Stop a run after this many minutes (after the craft under way). 0: no limit.</summary>
