@@ -298,19 +298,23 @@ internal sealed unsafe class QuestStepper
                 Note($"needs craft: {Craft}");
                 return;
             case StepKind.Gather:
-                if (next.Territory != 0 && next.Territory != snap.Territory && next.Spot != null)
+            {
+                var place = QuestSteps.GatherPlace(next.Id);
+                if (next.Territory != 0 && next.Territory != snap.Territory)
                 {
-                    // The gathering area is in a sub-zone (Elysion): get there first.
-                    Approach(next with { Kind = StepKind.Go, What = "the gathering area" }, snap);
+                    // The gathering area is in another zone (Elysion): get there first.
+                    var spot = next.Spot ?? (place is { } at ? new Vector3(at.Centre.X, 0, at.Centre.Y) : null);
+                    if (spot == null) { AskUser($"Couldn't tell where to gather {QuestSteps.ItemName(next.Id)}; gather it yourself, then resume."); return; }
+                    Approach(next with { Kind = StepKind.Go, What = "the gathering area", Spot = spot, Within = Math.Max(10f, next.Within) }, snap);
                     return;
                 }
-                var place = QuestSteps.GatherPlace(next.Id);
                 var centre = next.Spot ?? (place is { } pl ? new Vector3(pl.Centre.X, snap.Player.Y, pl.Centre.Y) : snap.Player);
                 Gather = new GatherNeed(next.Id, next.Count, place?.Base ?? 0, snap.Territory, centre, next.Spot != null ? next.Within : place?.Radius ?? 0, snap.AcceptJob);
                 State = StepperState.NeedsGather;
                 Status = $"Gathering {next.Count}x {QuestSteps.ItemName(next.Id)}";
                 Note($"needs gather: {Gather}");
                 return;
+            }
             case StepKind.SwitchJob:
                 phase = Phase.SwitchJob;
                 return;

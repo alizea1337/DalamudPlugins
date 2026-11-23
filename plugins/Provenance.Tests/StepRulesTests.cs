@@ -191,6 +191,22 @@ public class StepRulesTests
     }
 
     [Fact]
+    public void GatheringWithoutAnAreaGoesWhereTheScriptSends()
+    {
+        var q = new QuestScript
+        {
+            Quest = 65536 + 4611, Giver = 1043417, GiverSpot = new ScriptSpot(9308276, 960, new Vector3(315, 482, 148), 1043417, false),
+            GatherItems = new Dictionary<uint, uint> { [Min] = 38282 }, Territories = new uint[] { 1073 },
+            Todos = new[] { new ScriptTodo(0, 1, 1, new[] { new ScriptSpot(9357477, 960, new Vector3(195, 568, 251), 1043936, false) }, "Mine  from the Elysian fields.") },
+        };
+        var s = Snap(1, todos: new[] { new TodoProgress(0, false, 0, 3, 38282) }, job: Min, accept: Min);
+        var plan = Decide(q, s);
+        Assert.Equal(StepKind.Gather, plan.Kind);
+        Assert.Equal(1073u, plan.Territory);
+        Assert.Null(plan.Spot);
+    }
+
+    [Fact]
     public void GatheredItemsGoBackToTheGiver()
     {
         var s = Snap(255, new[] { Obj(1, 1043417, 400) }, new[] { new TodoProgress(1, false, 0, 0, 0) }, new() { [38281] = 3 }, job: Min, accept: Min);

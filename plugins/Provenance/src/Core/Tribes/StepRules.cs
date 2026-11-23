@@ -311,7 +311,12 @@ public static class StepRules
         if (area != null) return plan with { Spot = area.Position, Territory = area.Territory, Within = Math.Max(5f, area.Radius) };
         var spot = q.Todos.Where(t => t.Index == line.Index).SelectMany(t => t.Spots).Where(p => p.Area)
             .OrderBy(p => p.Territory == s.Territory ? 0 : 1).ThenBy(p => Vector3.DistanceSquared(p.Position, s.Player)).FirstOrDefault();
-        return spot != null ? plan with { Spot = spot.Position, Territory = spot.Territory, Within = 30f, Level = spot.Level } : plan with { Territory = s.Territory };
+        if (spot != null) return plan with { Spot = spot.Position, Territory = spot.Territory, Within = 30f, Level = spot.Level };
+        // No area to go by: a zone the script sends the character to (Elysion for the Omicrons) when it isn't the giver's,
+        // else here. The run finds the place from the game's gathering data.
+        var giverZone = q.GiverSpot?.Territory ?? s.Territory;
+        var away = q.Territories.FirstOrDefault(t => t != giverZone);
+        return plan with { Territory = away != 0 ? away : s.Territory };
     }
 
     /// <summary>

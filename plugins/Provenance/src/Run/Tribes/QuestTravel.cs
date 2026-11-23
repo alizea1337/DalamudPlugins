@@ -118,8 +118,11 @@ internal sealed class QuestTravel
         var me = Services.Objects.LocalPlayer?.Position;
         var here = Services.ClientState.TerritoryType;
         if (me == null) { Fail("no character"); return; }
-        var spot = exact?.Invoke() ?? target;
-        if (here == territory && Flat(me.Value, spot) <= within + 0.5f)
+        var seen = exact?.Invoke();
+        var spot = seen ?? target;
+        // Up on a ledge or down below the real target isn't there (the game won't talk that far up or down).
+        var level = seen == null || KeepMount || Math.Abs(me.Value.Y - spot.Y) <= 3f;
+        if (here == territory && Flat(me.Value, spot) <= within + 0.5f && level)
         {
             Current = State.Arrived;
             Status = "Arrived at " + what;
