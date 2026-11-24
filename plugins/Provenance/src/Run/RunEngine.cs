@@ -413,6 +413,7 @@ internal sealed class RunEngine : IDisposable
         if (plugin.CosmicLoop.Active) return "The Cosmic Exploration loop is going; stop it first.";
         if (plugin.DeliveryLoop.Active) return "The custom deliveries are going; stop them first.";
         if (plugin.TribeLoop.Active) return "The allied society run is going; stop it first.";
+        if (OtherPlugins.StartBlocker() is { } inTheWay) return inTheWay;
         if (plugin.Plans.Catalog == null) return "Still reading game data.";
         if (plugin.Config.Order.IsEmpty) return "Add items to the order first.";
         if (!plan.CanStart) return "Get the missing items first; they are listed at the top of the plan.";
@@ -472,6 +473,8 @@ internal sealed class RunEngine : IDisposable
 
     public void Start()
     {
+        // Questionable as it is this moment: StartBlocker goes by the last look (the pages ask it every frame).
+        OtherPlugins.Look();
         if (StartBlocker() is { } why)
         {
             Notify("Can't start: " + why, true);

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Reflection;
 using ECommons.Automation;
 using ECommons.UIHelpers.AddonMasterImplementations;
@@ -168,33 +166,10 @@ internal static unsafe class DeliveryWindow
 
     // ------------------------------------------------------------------ YesAlready
 
-    private const string YesAlreadyStop = "YesAlready.StopRequests";
-    private static HashSet<string>? yesAlready;
-
     /// <summary>
     /// Asks YesAlready to stand aside while deliveries are handed in (its own turn-in races ours), through its shared
-    /// stop list. Fact from xiv-mcp (MIT).
+    /// stop list. <see cref="OtherPlugins"/> keeps the list: a run's pause of YesAlready uses the same entry, which
+    /// stays in while either of the two still wants it.
     /// </summary>
-    public static void HoldYesAlready(bool hold)
-    {
-        try
-        {
-            if (hold)
-            {
-                if (yesAlready != null) return;
-                yesAlready = Services.PluginInterface.GetOrCreateData(YesAlreadyStop, () => new HashSet<string>());
-                lock (yesAlready) yesAlready.Add("Provenance");
-            }
-            else if (yesAlready != null)
-            {
-                lock (yesAlready) yesAlready.Remove("Provenance");
-                yesAlready = null;
-                Services.PluginInterface.RelinquishData(YesAlreadyStop);
-            }
-        }
-        catch (Exception e)
-        {
-            Services.Log.Debug("YesAlready's stop list: {Message}", e.Message);
-        }
-    }
+    public static void HoldYesAlready(bool hold) => OtherPlugins.HoldForHandIn(hold);
 }

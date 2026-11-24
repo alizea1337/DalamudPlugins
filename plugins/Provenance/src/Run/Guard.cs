@@ -16,8 +16,9 @@ namespace Provenance.Run;
 /// <summary>
 /// Security checks that run every frame: cancels trade windows someone else opened (a common scam is to trade a
 /// moment before a run moves items around), and while a run works, stops everything when the character is moved
-/// and nothing explains the move (a game master can summon a character, for example), or when someone may be
-/// watching: a game master around, a player appearing close by, a player close by the game doesn't draw.
+/// and nothing explains the move (a game master can summon a character, for example), when someone may be
+/// watching (a game master around, a player appearing close by, a player close by the game doesn't draw), or when
+/// Questionable starts running its quests (two plugins can't drive the character at once).
 /// </summary>
 internal sealed unsafe class Guard
 {
@@ -31,6 +32,7 @@ internal sealed unsafe class Guard
 
     public void Tick()
     {
+        WatchOtherPlugins();
         Watch();
         var s = plugin.Config.Security;
         if (!s.DeclineTrades || (s.TradesOnlyDuringRuns && !(plugin.Runs.Active || plugin.CosmicLoop.Active || plugin.DeliveryLoop.Active || plugin.TribeLoop.Active))) return;
@@ -41,6 +43,16 @@ internal sealed unsafe class Guard
         trade->Close(true);
         plugin.Runs.Note("Declined a trade request.");
         Services.Chat.Print("[Provenance] Declined a trade request (Security tab).");
+    }
+
+    /// <summary>
+    /// Questionable can't be paused from outside, so while a run works and it starts running its quests, everything
+    /// stops as with the tripwire (whatever the tripwire's settings). A run that isn't working is left as it is.
+    /// </summary>
+    private void WatchOtherPlugins()
+    {
+        var working = plugin.Runs.Working || plugin.CosmicLoop.Working || plugin.DeliveryLoop.Working || plugin.TribeLoop.Working;
+        if (OtherPlugins.StopReason(working) is { } reason) StopAll(reason, "Questionable is running");
     }
 
     /// <summary>
@@ -135,13 +147,15 @@ internal sealed unsafe class Guard
         return list;
     }
 
-    /// <summary>Stops the run and the Cosmic loop at once (even mid-craft), stops walking and flying, and says why.</summary>
-    private void StopEverything(string what, string forLog)
+    /// <summary>The tripwire went off: everything stops (<see cref="StopAll"/>), with what set it off.</summary>
+    private void StopEverything(string what, string forLog) => StopAll($"Stopped everything: {what} (Security tab).", forLog);
+
+    /// <summary>Stops the run and the loops at once (even mid-craft), stops walking and flying, and says why.</summary>
+    private void StopAll(string reason, string forLog)
     {
         moves.Reset();
         players.Reset();
         watching = false;
-        var reason = $"Stopped everything: {what} (Security tab).";
         DebugLog.Write("guard", $"[!] {forLog}; run working {plugin.Runs.Working}, cosmic working {plugin.CosmicLoop.Working}, deliveries working {plugin.DeliveryLoop.Working}, tribes working {plugin.TribeLoop.Working}");
         if (plugin.Runs.Working) plugin.Runs.Stop(reason, problem: true, now: true);
         if (plugin.CosmicLoop.Working) plugin.CosmicLoop.Stop(reason, problem: true);

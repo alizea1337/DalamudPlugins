@@ -151,6 +151,7 @@ internal sealed unsafe class TribeRun
         if (plugin.Runs.Active) return "An order run is going; stop it first.";
         if (plugin.CosmicLoop.Active) return "The Cosmic Exploration loop is going; stop it first.";
         if (plugin.DeliveryLoop.Active) return "The custom deliveries are going; stop them first.";
+        if (OtherPlugins.StartBlocker(lookFirst: true) is { } inTheWay) return inTheWay;
         if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null) return "Log in first.";
         if (!Vnav.Available) return "vnavmesh isn't loaded; it walks to the givers, the quests' targets and the nodes.";
         if (Catalog?.Tribes is not { Tribes.Count: > 0 }) return "Still reading the game data.";

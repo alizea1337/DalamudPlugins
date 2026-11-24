@@ -183,6 +183,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
+            // First: YesAlready and TextAdvance stand aside before a run that just started or resumed does anything.
+            OtherPlugins.Tick(this);
             Plans.Tick();
             Runs.Tick();
             CosmicLoop.Tick();
@@ -228,6 +230,9 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception e) { Services.Log.Error(e, "Stopping the allied society run on unload failed"); }
         try { Runs.Dispose(); }
         catch (Exception e) { Services.Log.Error(e, "Stopping the run on unload failed"); }
+        // Whatever happened above, YesAlready and TextAdvance get to carry on.
+        try { OtherPlugins.Dispose(); }
+        catch (Exception e) { Services.Log.Error(e, "Leaving the other plugins' stop lists on unload failed"); }
         Plans.Dispose();
         UI.JobIcons.Dispose();
         fonts.Dispose();

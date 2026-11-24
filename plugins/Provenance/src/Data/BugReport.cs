@@ -311,6 +311,8 @@ internal static class BugReport
         {
             Section("Plugins loaded");
             Line(string.Join(", ", Services.PluginInterface.InstalledPlugins.Where(p => p.IsLoaded).OrderBy(p => p.InternalName).Select(p => $"{p.InternalName} {p.Version}")));
+            // The ones a run pauses or steps aside for: as last looked at (about once a second), and whether Provenance is in their stop lists.
+            Line(OtherPlugins.Describe(plugin.Config.Security.PauseOtherPlugins));
         });
         return sb.ToString();
     }

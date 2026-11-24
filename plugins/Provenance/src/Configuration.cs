@@ -189,7 +189,7 @@ public sealed class FishingSettings
     public bool FishForReduction { get; set; } = true;
 }
 
-/// <summary>The Security tab: getting unstuck, trades, and limits for a run.</summary>
+/// <summary>The Security tab: getting unstuck, trades, other plugins, the tripwire, and limits for a run.</summary>
 [Serializable]
 public sealed class SecuritySettings
 {
@@ -201,6 +201,11 @@ public sealed class SecuritySettings
     public bool DeclineTrades { get; set; } = true;
     /// <summary>Only while a run is going (otherwise always).</summary>
     public bool TradesOnlyDuringRuns { get; set; } = true;
+    /// <summary>
+    /// While a run works, ask YesAlready and TextAdvance to stand aside (their stop lists); they carry on when it
+    /// pauses, finishes or stops. Files from before it existed load with it on.
+    /// </summary>
+    public bool PauseOtherPlugins { get; set; } = true;
     /// <summary>
     /// While a run or the Cosmic loop works: the character moved to another zone, or far within the zone in an instant,
     /// with nothing explaining it (a cast, an interaction, a knock-out, a duty, Provenance's own trip) stops everything.

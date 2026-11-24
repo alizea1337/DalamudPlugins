@@ -20,6 +20,25 @@ internal static class Ipc
         }
     }
 
+    /// <summary>
+    /// Like <see cref="Func{T}"/>, but says whether the plugin answered: one that's loaded may not offer the call
+    /// (yet, or any more), and a fallback can't be told from its answer.
+    /// </summary>
+    public static bool TryFunc<T>(string name, out T? value)
+    {
+        try
+        {
+            value = Services.PluginInterface.GetIpcSubscriber<T>(name).InvokeFunc();
+            return true;
+        }
+        catch (Exception e)
+        {
+            Services.Log.Verbose("IPC {Name} failed: {Message}", name, e.Message);
+            value = default;
+            return false;
+        }
+    }
+
     public static TR? Func<T1, TR>(string name, T1 arg, TR? fallback = default)
     {
         try { return Services.PluginInterface.GetIpcSubscriber<T1, TR>(name).InvokeFunc(arg); }
