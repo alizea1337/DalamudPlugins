@@ -26,7 +26,8 @@ namespace Provenance.Run.Tribes;
 /// the stepper's own, on the job a battle society's daily was accepted as, or for the Ixal's on the job under Settings,
 /// Monster drops). After each visit the day is planned again: a visit can change the offers (a rank-up day) and the
 /// allowances. A knock-out is handled as the order run does: back up, then the day is planned again, up to the Security
-/// tab's limit. Ticked on the framework thread.
+/// tab's limit; the daily that was under way is left to the player for today (it isn't fought a second time). Ticked on
+/// the framework thread.
 /// </summary>
 /// <remarks>
 /// Safety (Tribes build plan): nothing that's an addon callback is sent while the game has scene tasks pending
@@ -109,6 +110,19 @@ internal sealed unsafe class TribeRun
     private DateTime revivedAt;
     /// <summary>A pause was asked for when the character went down: it lands once the character is back up.</summary>
     private bool pauseWhenUp;
+    /// <summary>
+    /// A Yes/No question that was already open when the character went down (a quest's own, left open mid-fight): not
+    /// the game's question about getting back up, so it isn't answered.
+    /// </summary>
+    private string? openWhenDown;
+    /// <summary>While down: a question about getting back up was answered; a question left alone was noted.</summary>
+    private bool answeredDown;
+    private bool strangerNoted;
+
+    /// <summary>Down this long without a question about getting back up to answer: the run stops, with the reason.</summary>
+    private static readonly TimeSpan DownFor = TimeSpan.FromSeconds(90);
+    /// <summary>Down this long whatever was answered: the run stops.</summary>
+    private static readonly TimeSpan DownAtMost = TimeSpan.FromMinutes(4);
 
     public TribeRun(Plugin plugin)
     {
@@ -308,7 +322,7 @@ internal sealed unsafe class TribeRun
         if (crafting && crafter.IsPaused) crafter.Resume();
         if (gathering || step == Step.Gather) gatherer.Resume();
         if (step == Step.Retainers) retainers.Resume();
-        if (step == Step.Tour && visitStep == Visit.Travel) TravelToGiver(afterTravel);
+        if (step == Step.Tour && visitStep == Visit.Travel && visit != null) TravelToGiver(afterTravel);
         // The visit's step afresh: its tries and its time limit start over (a long pause isn't a giver that doesn't answer).
         else if (step == Step.Tour && visit != null && visitStep is Visit.SwitchJob or Visit.Accept or Visit.Leave) To(visitStep);
         Wait(0.3);
@@ -388,8 +402,8 @@ internal sealed unsafe class TribeRun
             }
             if (Pausing && step == Step.Tour && stepper.MidFight)
             {
-                // The enemy being fought is finished; the stepper starts on no other.
-                stepper.Tick();
+                // The enemy being fought is finished, and whatever still attacks; the stepper starts on no other.
+                TickStepper();
                 return;
             }
             if (Pausing) { PauseNow(); return; }
@@ -413,11 +427,19 @@ internal sealed unsafe class TribeRun
     }
 
     /// <summary>
-    /// Knocked out: what the order run does. A moment for someone passing to raise, then whatever the game offers is
-    /// taken (a raise, or the way back to the home point). Once back up, the day is planned again: the quest that was
-    /// under way is still in the journal, so it's carried on from where it stands. Past the Security tab's limit the run
-    /// stops, with the reason. True while the character is down or just getting up.
+    /// Knocked out: what the order run does. A moment for someone passing to raise, then what the game offers is taken
+    /// (a raise, or the way back to the home point). Once back up, the day is planned again, without the daily that was
+    /// under way: it's still in the journal, but a fight that was lost isn't fought again (it's left to the player for
+    /// today). Past the Security tab's limit the run stops, with the reason; so it does when no way back up comes
+    /// within <see cref="DownFor"/>. True while the character is down or just getting up.
     /// </summary>
+    /// <remarks>
+    /// Yes is answered to the game's own questions about getting back up, known by their text
+    /// (<see cref="QuestSteps.KnockOutQuestions"/>), and to a question that came up only after the character went down
+    /// (nothing else asks a character that's down). A question that was already open then (a quest's own, which the
+    /// stepper leaves open mid-fight) isn't answered: with it in the way no question about getting back up can come,
+    /// and the run stops after <see cref="DownFor"/>.
+    /// </remarks>
     private bool HandleKnockOut()
     {
         var me = Services.Objects.LocalPlayer;
@@ -431,9 +453,19 @@ internal sealed unsafe class TribeRun
                 revivedAt = default;
                 knockOuts++;
                 var max = plugin.Config.Security.MaxKnockOuts;
+                openWhenDown = QuestSteps.Question();
+                answeredDown = false;
+                strangerNoted = false;
                 DebugLog.Write("tribes", $"[!] knocked out ({knockOuts} of {max}) in zone {Services.ClientState.TerritoryType}{(quest != null ? $", on {quest.Quest.Number}" : "")}, "
-                                         + $"step {step}/{visitStep}, stepper {stepper.State} \"{stepper.Status}\"");
+                                         + $"step {step}/{visitStep}, stepper {stepper.State} \"{stepper.Status}\""
+                                         + (openWhenDown != null ? $", a question was open: \"{openWhenDown}\"" : ""));
                 foreach (var l in stepper.DescribeFight()) DebugLog.Write("tribes", "  " + l);
+                // The daily under way isn't tried a second time today: what knocked the character out is still there.
+                if (quest != null)
+                {
+                    excluded[quest.Quest.RowId] = "You were knocked out during it; it's left to you today";
+                    Log($"You were knocked out during \"{quest.Quest.Name}\"; it's left to you today.", true);
+                }
                 // Whatever was under way ends here.
                 stepper.Stop();
                 travel.Cancel();
@@ -458,11 +490,40 @@ internal sealed unsafe class TribeRun
                 }
                 Status = "Knocked out";
                 Log($"Knocked out ({knockOuts} of {max}); getting back up, then planning the day again.", true);
+                // Whatever part of a visit was under way is over (a Resume meanwhile finds no visit to go on with).
+                Go(Step.Planning);
             }
-            if (now - knockedOutAt > TimeSpan.FromSeconds(4) && now >= waitUntil && Interact.Ready("SelectYesno") != null)
+            if (now - knockedOutAt > TimeSpan.FromSeconds(4) && now >= waitUntil && QuestSteps.Question() is { } question)
             {
-                Interact.Yes();
-                Wait(1);
+                var known = QuestSteps.IsKnockOutQuestion(question);
+                var cameAfter = openWhenDown == null || !StepRules.Normal(question).Equals(StepRules.Normal(openWhenDown), StringComparison.CurrentCultureIgnoreCase);
+                if (known || cameAfter)
+                {
+                    if (Interact.Yes())
+                    {
+                        answeredDown = true;
+                        DebugLog.Write("tribes", $"down: \"{question}\" -> Yes ({(known ? "the game's own question about getting back up" : "not a text the run knows, but it came up after the character went down")})");
+                    }
+                    Wait(1);
+                }
+                else if (!strangerNoted)
+                {
+                    strangerNoted = true;
+                    DebugLog.Write("tribes", $"[!] down: \"{question}\" was already open when the character went down and isn't a question about getting back up; left alone");
+                }
+            }
+            if (!answeredDown && now - knockedOutAt > DownFor)
+            {
+                var open = QuestSteps.Question();
+                Finish(open != null
+                    ? $"Knocked out, and the game didn't ask about getting back up within {DownFor.TotalSeconds:0} seconds: another question is in the way (“{open}”). Answer it and get back up yourself, then start again."
+                    : $"Knocked out, and the game didn't ask about getting back up within {DownFor.TotalSeconds:0} seconds. Get back up yourself, then start again.", true);
+                return true;
+            }
+            if (now - knockedOutAt > DownAtMost)
+            {
+                Finish($"Knocked out, and still down after {DownAtMost.TotalMinutes:0} minutes. Get back up yourself, then start again.", true);
+                return true;
             }
             return true;
         }
@@ -699,7 +760,13 @@ internal sealed unsafe class TribeRun
 
     private void TravelToGiver(Visit then)
     {
-        var g = visit!.Giver;
+        // No visit under way (it ended with a knock-out): the day is planned again.
+        if (visit == null)
+        {
+            Go(Step.Planning);
+            return;
+        }
+        var g = visit.Giver;
         afterTravel = then;
         visitStep = Visit.Travel;
         travel.OnFoot = travel.NoFly = travel.KeepMount = false;
@@ -1096,7 +1163,7 @@ internal sealed unsafe class TribeRun
         if (gathering) { TickGathering(); return; }
         // After crafting or gathering (the log closing, the node letting go), the wait before the next step.
         if (DateTime.UtcNow < waitUntil) return;
-        stepper.Tick();
+        TickStepper();
         var state = stepper.State;
         if (state != lastState)
         {
@@ -1136,6 +1203,13 @@ internal sealed unsafe class TribeRun
                 quest = null;
                 return;
         }
+    }
+
+    /// <summary>The stepper's tick; what it has for the player's eyes at once (a fight over its three minutes) is passed on.</summary>
+    private void TickStepper()
+    {
+        stepper.Tick();
+        if (stepper.TakeNotice() is { } notice) Notify(notice, true);
     }
 
     /// <summary>The quest wants its item crafted: the recipe of the class it was accepted as, fastest rotation, no food.</summary>
