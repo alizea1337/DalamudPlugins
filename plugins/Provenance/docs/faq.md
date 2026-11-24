@@ -242,9 +242,17 @@ the window showed other items. Please send a bug report then.
 ## Tribes
 
 The run does the dailies of all 20 societies. The crafter and gatherer societies' dailies have been done since
-0.22. The 11 battle societies' dailies, and the Ixal's with a fight or a password, are done too and still
-being tested: a bug report helps when one goes wrong. Rank quests and the intersocietal quests by button, and a
-shopping list for the society shops, are planned.
+0.22. The 11 battle societies' dailies, and the Ixal's with a fight or a password, are new and still being
+tested: a bug report helps when one goes wrong. Some dailies stay "do it yourself"; the questions below say
+which and why. Rank quests and the intersocietal quests by button, and a shopping list for the society shops,
+are planned.
+
+### I used Tribes before the battle societies were added. What changes?
+
+The battle societies are ticked from the start. With a job picked under *Monster drops* (Settings), the day's
+12 allowances now also go to them (under *Rank up* the lowest ranks first), and battle dailies already in
+your journal are picked up and fought. To leave a society out, untick *Include in the run* in its opened row
+on the Tribes page.
 
 ### How many dailies does it take a day?
 
@@ -262,7 +270,9 @@ notice, and its allowances go elsewhere. *Currency* and *Levelling* keep doing i
 
 ### Which goal does the Tribes run pick for me?
 
-Until you pick one, *Rank up* while a ticked society is below its top rank, then *Currency*.
+Until you pick one, *Rank up* while a ticked society is below its top rank, then *Currency*. A society counts
+for that only when the run can take one of its dailies today: a battle society doesn't while no combat job
+qualifies for its dailies.
 
 ### Why do some givers' dailies come last under Currency?
 
@@ -285,24 +295,46 @@ vendor).
 
 ### Which job does the run fight on?
 
-The one picked under *Monster drops* (Settings), in its best gearset, with the basic combo and the chocobo as
-set there. A battle society's daily is accepted on that job, since a quest locks to the class it's accepted on.
-With no job picked, battle dailies are only taken on the combat job you're on when you start. The Tribes page
-shows the job under *Combat job*, and each quest says what's missing: "Pick a combat job under Settings,
-Monster drops", a level ("PLD is below level 60") or a gearset ("No gearset saved for PLD").
+A battle society's daily is accepted and fought on the job picked under *Monster drops* (Settings) when it
+qualifies: Provenance has a combo for it, it's at the quest's level, and it has a saved gearset (the job
+you're on needs none). When it doesn't qualify, the daily goes to the combat job you're on, if that one
+qualifies. A job that was on earlier in the same run also counts. Otherwise the quest shows "needs …" and
+isn't accepted. Fights use the basic combo and the chocobo as set under *Monster drops*.
+
+The Tribes page shows the picked job under *Combat job*, and each quest says what's missing: "Pick a combat job
+under Settings, Monster drops", a level ("PLD is below level 60") or a gearset ("No gearset saved for PLD").
 
 ### What does the run attack?
 
-The quest's own enemies, and whatever attacks you or your chocobo. Other monsters of the same kind, and
-enemies someone else is fighting, are left alone. Where a quest has a key item for a weakened enemy, the run
-stops attacking and uses the item. It gets off the mount before a fight. A knock-out counts against the
-*Knock-outs* limit (Settings, Security), as in an order run.
+On a combat job: the quest's own enemies, and whatever attacks you or your chocobo. Other monsters, FATE
+monsters and enemies someone else is fighting are left alone. As a crafter or gatherer the run doesn't fight;
+it carries on with its step.
+
+Riding its own mount on the way, the run rides on past things that attack unless they're the quest's, and
+fights when it's still attacked on arrival. It gets off its own mount for a fight. On a quest mount with an
+action, that action is used on the quest's enemies, and the run rides on past anything else.
+
+Where a quest has a key item for a weakened enemy, the run stops attacking and uses the item. An item that can
+be thrown from 10 yalms or more is thrown first, and where the quest wants nothing else of the enemy only the
+item is used. Before starting the next fight the run waits for health to come back to 70%.
+
+### What if a fight goes badly?
+
+An enemy that isn't attacking and can't be reached or hurt is left after a time: 45 seconds without reaching
+it, 30 seconds without hurting it, 3 minutes in all. Something that attacks is always fought. After two
+enemies left like that, or 15 defeats that didn't move the quest on, the run pauses and asks you, once the
+fighting is over.
+
+A knock-out counts against the *Knock-outs* limit (Settings, Security). The run returns, leaves the quest it
+happened in to you for today, waits for Weakness to wear off before the next fight, and plans the day again.
 
 ### How are the Ixal's dailies with a fight done?
 
-They're accepted as a crafter like the Ixal's others. For the fight the run changes to the *Monster drops* job
-and then back, because the quest only moves on as the class it was accepted as. That takes the combat job at
-level 50 or more with a saved gearset; without it the quest shows "needs …" and isn't accepted.
+They're accepted as a crafter like the Ixal's others. The run changes to the *Monster drops* job for the fight
+and back to the crafter for talks and hand-overs, always out of combat, because the quest only moves on as the
+class it was accepted as. That job needs level 50 and a saved gearset; without it the quest shows "needs …"
+and isn't accepted. Like all battle dailies these are new and still being tested: a bug report helps when one
+goes wrong.
 
 ### Why does it craft some dailies for high quality?
 
@@ -357,9 +389,10 @@ It has a quota system of its own, so it's marked "do it yourself" and not accept
 
 ### Which Ixal dailies does the run do?
 
-The crafting ones, the ones with a fight and the ones with a password to `/say`. Nine have a step for a
-Miner, Botanist or Fisher partway through; the run doesn't change to a gatherer inside a quest yet, so those
-are "do it yourself" for now.
+The crafting ones and, new and still being tested, the ones with a fight and the ones with a password to
+`/say`. Nine have a step for a Miner, Botanist or Fisher partway through; the run doesn't change to a gatherer
+inside a quest yet, so those are "do it yourself" for now, whatever else they ask. "Deliverance" is left out
+too.
 
 ### Why doesn't it take gatherer dailies as Fisher?
 
@@ -369,9 +402,10 @@ Botanist instead.
 ### Why does the Levelling goal skip my lowest combat job?
 
 *Levelling* only takes a battle quest on a job at least 5 levels above the quest's level, and picks the
-lowest such job that the basic combo knows and that has a saved gearset. The basic combo has little healing,
-and ARR society quests aren't level-synced, so the extra levels keep the fights safe. When no job is that far
-above, the quest goes to the job picked under *Monster drops*, as under the other goals.
+lowest such job that Provenance has a combo for and that has a saved gearset (the job you're on needs none).
+Between jobs of the same level the *Monster drops* job comes first, then the better-geared one. The basic combo
+has little healing, and ARR society quests aren't level-synced, so the extra levels make the fights safer.
+When no job is that far above, the quest goes to the job it's fought on under the other goals.
 
 ### Does the run unlock societies or do rank quests?
 
