@@ -34,10 +34,20 @@ internal sealed class DeliveryPlanning
 
     private DeliverySettings Settings => plugin.Config.Deliveries;
 
-    /// <summary>The goal in effect: the one picked, else "Rank up" while a client that takes deliveries is below the top level, else "Scrips".</summary>
+    /// <summary>
+    /// The goal in effect: the one picked, else "Rank up" while a client that takes deliveries is below the top level,
+    /// else "Scrips". "Rank up" picked with every client at the top level has nothing to rank up: Scrips then.
+    /// </summary>
     public DeliveryGoal Goal(IReadOnlyList<ClientWeek> weeks)
-        => Settings.Goal ?? (weeks.Any(w => w.Rank is > 0 and < DeliveryClient.TopLevel && Deliver.QuestDone(w.Client.UnlockQuest))
-            ? DeliveryGoal.RankUp : DeliveryGoal.Scrips);
+    {
+        var canRank = CanRankUp(weeks);
+        if (Settings.Goal is { } picked && (picked != DeliveryGoal.RankUp || canRank)) return picked;
+        return canRank ? DeliveryGoal.RankUp : DeliveryGoal.Scrips;
+    }
+
+    /// <summary>A client that takes deliveries is below the top level: "Rank up" has something to do.</summary>
+    public static bool CanRankUp(IReadOnlyList<ClientWeek> weeks)
+        => weeks.Any(w => w.Rank is > 0 and < DeliveryClient.TopLevel && Deliver.QuestDone(w.Client.UnlockQuest));
 
     /// <summary>The plan, rebuilt at most once a second.</summary>
     public DeliveryPlan Current

@@ -139,8 +139,12 @@ internal sealed unsafe class DeliveriesPage : Page
         using (Ui.F.Strong.Push()) Ui.Text("Goal");
         var effective = Plugin.DeliveryPlanning.Goal(weeks);
         var goal = (int)effective;
-        if (Ui.Segmented("##deliverygoal", Goals, ref goal, 360 * s)) { S.Goal = (DeliveryGoal)goal; Config.Save(); }
+        var canRank = DeliveryPlanning.CanRankUp(weeks);
+        var off = canRank ? null : new[] { "Every client is at the top level, so there's nothing left to rank up.", null, null };
+        if (Ui.Segmented("##deliverygoal", Goals, ref goal, 360 * s, off)) { S.Goal = (DeliveryGoal)goal; Config.Save(); }
         ImGui.Dummy(new Vector2(0, 2 * s));
+        if (!canRank && S.Goal == DeliveryGoal.RankUp)
+            Ui.Wrapped("Every client is at the top level, so Rank up has nothing to do: the run goes for scrips instead.", Palette.TextFaint);
         Ui.Wrapped(effective switch
         {
             DeliveryGoal.RankUp => "Clients below the top level first, the lowest first, up to their next level each round, at the lowest collectability "

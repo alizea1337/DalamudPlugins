@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.1
+
+- Custom Deliveries: *Rank up* can't be picked any more when every client is at the top level (its button is
+  greyed out, and says why on hover). A run whose goal was set to Rank up before that goes for scrips instead,
+  with a line under the goal saying so.
+
 ## 0.23.0
 
 - Tribes: the run now does the dailies of the 11 battle societies (Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu

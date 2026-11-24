@@ -366,7 +366,8 @@ internal static partial class Ui
     }
 
     /// <summary>Choose one of a few options. The selected segment is a pill that eases between positions.</summary>
-    public static bool Segmented(string id, string[] labels, ref int index, float width = 0)
+    /// <param name="off">Per segment: why it can't be picked now (shown on hover); null or an empty entry when it can.</param>
+    public static bool Segmented(string id, string[] labels, ref int index, float width = 0, string?[]? off = null)
     {
         var s = S;
         var h = 32 * s;
@@ -398,12 +399,14 @@ internal static partial class Ui
         for (var i = 0; i < labels.Length; i++)
         {
             ImGui.SetCursorScreenPos(pos + new Vector2(x, 0));
-            if (ImGui.InvisibleButton(id + "##" + i, new Vector2(widths[i], h)) && index != i) { index = i; changed = true; }
+            var why = off != null && i < off.Length && !string.IsNullOrEmpty(off[i]) ? off[i] : null;
+            if (ImGui.InvisibleButton(id + "##" + i, new Vector2(widths[i], h)) && index != i && why == null) { index = i; changed = true; }
             var hovered = ImGui.IsItemHovered();
+            if (hovered && why != null) Tooltip(why);
             using (F.Strong.Push())
             {
                 var tw = ImGui.CalcTextSize(labels[i]).X;
-                var col = i == index ? Palette.Text : hovered ? Palette.Text : Palette.TextMuted;
+                var col = why != null ? Palette.TextFaint : i == index ? Palette.Text : hovered ? Palette.Text : Palette.TextMuted;
                 dl.AddText(pos + new Vector2(x + (widths[i] - tw) / 2, (h - ImGui.GetTextLineHeight()) / 2), Palette.U32(col), labels[i]);
             }
             x += widths[i];
