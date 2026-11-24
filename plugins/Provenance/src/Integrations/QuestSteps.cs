@@ -1115,6 +1115,11 @@ internal static unsafe class QuestSteps
 
     private static readonly Lazy<IReadOnlyList<string>> known = new(() => AddonTexts(102434, 5450, 11514));
 
+    /// <summary>The warning before a reward the game can't give (Addon 4609), as a template: see <see cref="StepRules.OnlyReputationLost"/>.</summary>
+    public static string RewardWarning => rewardWarning.Value;
+
+    private static readonly Lazy<string> rewardWarning = new(() => AddonTexts(4609).FirstOrDefault() ?? "");
+
     /// <summary>The cutscene's "Skip cutscene?" question (Addon 281, 5882).</summary>
     public static IReadOnlyList<string> SkipQuestions => skip.Value;
 

@@ -1215,6 +1215,24 @@ public static class StepRules
     /// A Yes/No question is one of the known ones: equal to a known text, or to a known text with an empty
     /// “” in it where the game fills in a name ("Commence “…”?").
     /// </summary>
+    /// <summary>
+    /// The game's warning before a reward it can't give (Addon 4609: "Warning: You will not be able to receive all the
+    /// following:", the rewards one per line, "Do you still wish to proceed?"), when the only one lost is the last of the
+    /// template's list, Reputation: a daily handed in with the society's bar full. Seals or tomestones lost are the
+    /// player's call.
+    /// </summary>
+    public static bool OnlyReputationLost(string prompt, string template)
+    {
+        static List<string> Lines(string s) => s.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        var t = Lines(template);
+        var p = Lines(prompt);
+        if (t.Count < 3 || p.Count < 3) return false;
+        var reputation = t[^2];
+        bool Same(string a, string b) => a.Equals(b, StringComparison.CurrentCultureIgnoreCase);
+        if (!Same(p[0], t[0]) || !Same(p[^1], t[^1])) return false;
+        return p.Skip(1).Take(p.Count - 2).All(l => Same(l, reputation));
+    }
+
     public static bool KnownQuestion(string prompt, IEnumerable<string> known)
     {
         var p = Normal(prompt);

@@ -74,6 +74,8 @@ internal sealed unsafe partial class Travel
     /// <summary>Arrived beside the target still in the air: landing first (talking from up there fails).</summary>
     private DateTime airArrivalSince;
     private DateTime airArrivalPress;
+    private int airArrivalPresses;
+    private bool airArrivalMoved;
     private static readonly TimeSpan AirArrivalPatience = TimeSpan.FromSeconds(5);
 
     private uint territory;
@@ -175,6 +177,8 @@ internal sealed unsafe partial class Travel
         dismountTried = false;
         airArrivalSince = default;
         airArrivalPress = default;
+        airArrivalPresses = 0;
+        airArrivalMoved = false;
         lastPath = null;
         pathFailNoted = false;
         ResetIndoors(trip: true);
@@ -443,7 +447,7 @@ internal sealed unsafe partial class Travel
             // In the air beside it with no floor right below at its height: getting off here would drop the character beside it.
             if (LandFirst(me, target, seen)) return;
             // Still in the air beside an NPC: the game won't talk from up there ("Target is too far below you"); land first.
-            if (seen != null && !KeepMount && LandOnArrival(flat)) return;
+            if (seen != null && !KeepMount && LandOnArrival(me, target, flat)) return;
             Vnav.Stop();
             Note($"{what}: arrived, {flat:0.0} yalms from the target");
             Current = State.Arrived;
@@ -608,15 +612,24 @@ internal sealed unsafe partial class Travel
     /// Arrived in the air beside the target: Dismount lands (the first press brings the mount down, it doesn't get off),
     /// pressed again every 1.5 seconds, for at most <see cref="AirArrivalPatience"/>. True while it takes the tick.
     /// </summary>
-    private bool LandOnArrival(float flat)
+    private bool LandOnArrival(Vector3 me, Vector3 target, float flat)
     {
         if (!Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return false;
         var now = DateTime.UtcNow;
         if (airArrivalSince == default)
         {
             airArrivalSince = now;
+            airArrivalPresses = 0;
             Vnav.Stop();
             Note($"{what}: {flat:0.0} yalms from the target but still in the air; landing first");
+        }
+        // The game doesn't land everywhere (over a chair, a table, a step): after two presses, come down on the walkable
+        // floor near the target instead, and get off there.
+        if (airArrivalPresses >= 2 && !airArrivalMoved && LandingNear(me, target) is { } floor)
+        {
+            airArrivalMoved = true;
+            StartDescent(floor, $"Dismount didn't land {flat:0.0} yalms from the target; coming down on the floor nearby at {Where(floor)} instead");
+            return true;
         }
         if (now - airArrivalSince > AirArrivalPatience)
         {
@@ -627,6 +640,7 @@ internal sealed unsafe partial class Travel
         if (airArrivalPress == default || now - airArrivalPress > TimeSpan.FromSeconds(1.5))
         {
             airArrivalPress = now;
+            airArrivalPresses++;
             var am = ActionManager.Instance();
             if (am != null && am->GetActionStatus(ActionType.GeneralAction, Dismount) == 0) am->UseAction(ActionType.GeneralAction, Dismount);
         }

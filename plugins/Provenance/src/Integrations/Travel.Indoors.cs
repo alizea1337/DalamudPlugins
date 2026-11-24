@@ -238,6 +238,22 @@ internal sealed unsafe partial class Travel
     }
 
     /// <summary>
+    /// A walkable floor point near the target to come down on when Dismount won't land where the character hovers: the
+    /// floor at the target when it's a yalm or more away from here, else the nearest walkable point of a 3-yalm ring
+    /// around the target at its height that is that far away.
+    /// </summary>
+    private Vector3? LandingNear(Vector3 me, Vector3 target)
+    {
+        if (FloorAt(target) is { } at && Landing.Flat(me, at) >= 1f) return at;
+        Vector3? best = null;
+        foreach (var p in Landing.Ring(target, 3f))
+            if (Vnav.NearestPoint(p, 1.5f, 2f) is { } q && MathF.Abs(q.Y - target.Y) <= 2f && Landing.Flat(me, q) >= 1f
+                && (best is not { } b || Landing.Flat(me, q) < Landing.Flat(me, b)))
+                best = q;
+        return best;
+    }
+
+    /// <summary>
     /// Stuck on a mount near a target under a roof (the flight to the spot outside its door rubbed along a wall): come
     /// down on the floor right below, when it's open sky here and that floor is at about the target's level, and walk
     /// the rest. True when it started that.

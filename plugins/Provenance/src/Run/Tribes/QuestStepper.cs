@@ -1589,9 +1589,9 @@ internal sealed unsafe class QuestStepper
 
         if (QuestSteps.Question() is { } question)
         {
-            if (StepRules.KnownQuestion(question, QuestSteps.KnownQuestions))
+            if (StepRules.KnownQuestion(question, QuestSteps.KnownQuestions) || StepRules.OnlyReputationLost(question, QuestSteps.RewardWarning))
             {
-                if (QuestSteps.Yes()) Note($"question \"{question}\" -> Yes");
+                if (QuestSteps.Yes()) Note($"question \"{question.Replace('\n', ' ')}\" -> Yes");
                 Wait(0.8);
                 return true;
             }

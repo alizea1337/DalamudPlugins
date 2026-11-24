@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.23.2
+
+- Arriving in the air next to an NPC where the game won't land (over a chair, a table or a step; the Dwarves'
+  Slurping Dwarf), the run pressed Dismount until it gave up and asked you. After two presses it now comes
+  down on the walkable floor next to the NPC and gets off there.
+- Tribes: handing in a daily of a society whose reputation bar is full, the game warns that the reputation
+  can't be received. The run now answers Yes when reputation is all that's lost (it plans those dailies
+  knowingly); when seals or tomestones would be lost as well, it still asks you.
+
 ## 0.23.1
 
 - Custom Deliveries: *Rank up* can't be picked any more when every client is at the top level (its button is

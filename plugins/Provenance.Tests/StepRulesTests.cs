@@ -1372,6 +1372,18 @@ public class StepRulesTests
     public void KnownQuestionsOnly(string prompt, bool known)
         => Assert.Equal(known, StepRules.KnownQuestion(prompt, new[] { "Do you really want to trade a high-quality item?", "Commence “”?" }));
 
+    private const string RewardWarning = "Warning: You will not be able to receive all the following:\n\n  Company Seals\n  Allagan Tomestones\n  Reputation\n\nDo you still wish to proceed?";
+
+    [Theory]
+    // The Moogles' bar full (live, 0.23.1): only reputation lost -> the run says Yes.
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Reputation\n\nDo you still wish to proceed?", true)]
+    // Tomestones or seals lost as well, or only them: the player's call.
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Allagan Tomestones\n  Reputation\n\nDo you still wish to proceed?", false)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Company Seals\n\nDo you still wish to proceed?", false)]
+    [InlineData("Disband party?", false)]
+    public void TheRewardWarningIsAnsweredOnlyWhenReputationAloneIsLost(string prompt, bool yes)
+        => Assert.Equal(yes, StepRules.OnlyReputationLost(prompt, RewardWarning));
+
     /// <summary>The questions a knock-out brings up (Addon 111/196, 117, 112, 3787), split around what the game fills in.</summary>
     private static readonly (string Before, string After, bool Hole)[] KnockOut =
     {
