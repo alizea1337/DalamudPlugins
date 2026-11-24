@@ -4,6 +4,8 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using ECommons.Automation;
 using ECommons.UIHelpers.AddonMasterImplementations;
@@ -40,6 +42,9 @@ namespace Provenance.Integrations;
 /// /say go through the chat box as a player types them (ECommons' <c>Chat</c>, MIT). The hand-over follows
 /// <see cref="DeliveryWindow"/> (PandorasBox's callbacks, BSD-3, as facts). Nothing that is an addon callback is sent
 /// while the game has scene tasks pending (<see cref="DeliveryWindow.SceneBusy"/>); clicks on enabled buttons are.
+/// A quest's enemies come from its listeners (<see cref="EnemyRules"/>); the mobs around are read from the object table
+/// with their own fields (FATE, nameplate icon, the "subdued" flag <c>Character.ActorControlFlags &amp; 0x40</c>:
+/// FFXIVClientStructs), which is safe in combat, while what the quest's handler says of them is kept from the last calm look.
 /// </remarks>
 internal static unsafe class QuestSteps
 {
@@ -49,11 +54,13 @@ internal static unsafe class QuestSteps
 
     /// <summary>
     /// The text rows holding the /say phrase of the quests that have no "SAYTODO" row (read from their scripts:
-    /// Moogles 2295 compares with SYSTEM_000_019, the Ixal password quests with SYSTEM_100_062).
+    /// Moogles 2295 compares with SYSTEM_000_019, the Ixal password quests with SYSTEM_100_062; the Vath's 2277
+    /// "Fifty Shades of Yellow" keeps its "Uhm Ala" in SYSTEM_000_012, by its quest text sheet).
     /// </summary>
     private static readonly Dictionary<uint, string> SayKeys = new()
     {
         [2295] = "SYSTEM_000_019",
+        [2277] = "SYSTEM_000_012",
         [1497] = "SYSTEM_100_062", [1501] = "SYSTEM_100_062", [1507] = "SYSTEM_100_062", [1515] = "SYSTEM_100_062", [1568] = "SYSTEM_100_062",
     };
 
@@ -128,12 +135,22 @@ internal static unsafe class QuestSteps
         MountFact? mount = null;
         if (facts.Arg("MOUNT0") is { } mountId and > 0)
         {
-            var actionId = facts.Arg("ACTION0") ?? 0;
+            var mountRow = Services.Data.GetExcelSheet<Mount>().GetRowOrDefault(mountId);
+            // The actions the script names (ACTION0, ACTION1 ...: the hippo cart has three). When it names none, the
+            // mount's own first action (the Ananta's marid: Trample, which the script of "Ants in the Pants" doesn't name).
+            var named = facts.ArgsOf("ACTION").Select(a => a.Value).Where(v => v != 0).Distinct().ToList();
+            if (named.Count == 0 && mountRow?.MountAction.ValueNullable is { } own)
+                named.AddRange(own.Action.Select(a => a.RowId).Where(v => v != 0).Take(1));
+            var actionId = named.FirstOrDefault();
             var act = actionId != 0 ? Services.Data.GetExcelSheet<SheetAction>().GetRowOrDefault(actionId) : null;
             var line = act is { CastType: 4 or 12 };
             var self = act is { } a && (a.Range == 0 || SelfCentred(a));
-            var canFly = Services.Data.GetExcelSheet<Mount>().GetRowOrDefault(mountId)?.FlyingCondition.RowId is > 0;
-            mount = new MountFact(mountId, actionId, self ? 0 : act?.Range ?? 0, act?.EffectRange ?? 0, line, canFly);
+            var canFly = mountRow?.FlyingCondition.RowId is > 0;
+            mount = new MountFact(mountId, actionId, self ? 0 : act?.Range ?? 0, act?.EffectRange ?? 0, line, canFly)
+            {
+                Others = named.Skip(1).ToList(),
+                Ground = act?.TargetArea ?? false,
+            };
         }
 
         // /say: the quest's own phrase, on the line whose text names it.
@@ -177,6 +194,8 @@ internal static unsafe class QuestSteps
             OptionalRewards = quest.OptionalItemReward.Select(r => r.RowId).Where(r => r != 0).ToList(),
             MenuPrompts = facts.Text.Where(kv => QuestionKey.IsMatch(kv.Key) && kv.Value.Length > 0).Select(kv => kv.Value).ToList(),
             MenuAnswers = facts.Text.Where(kv => AnswerKey.IsMatch(kv.Key) && kv.Value.Length > 0).Select(kv => kv.Value).ToList(),
+            Enemies = EnemyRules.Read(facts.Args, facts.Listeners, QuestFacts.LevelSpot),
+            ItemObjects = EnemyRules.ItemObjects(facts.Listeners),
         };
     }
 
@@ -248,9 +267,16 @@ internal static unsafe class QuestSteps
 
     /// <summary>
     /// Casting, in an event or a cutscene, crafting or gathering, getting on a mount, jumping, in combat, between areas,
-    /// or the game has scene tasks pending: the engine starts nothing now, and the quest's script isn't asked anything.
+    /// or the game has scene tasks pending: the quest's script isn't asked anything, and nothing of a talk is started.
     /// </summary>
-    public static bool Busy
+    public static bool Busy => Occupied || InCombat;
+
+    /// <summary>
+    /// <see cref="Busy"/> without the combat: the game itself is in the way (a cast, an event, a cutscene, crafting,
+    /// gathering, mounting, a jump, loading, scene tasks pending) and nothing can be started. In combat alone the
+    /// character can still act: fight back, walk on, use a key item.
+    /// </summary>
+    public static bool Occupied
     {
         get
         {
@@ -262,10 +288,12 @@ internal static unsafe class QuestSteps
                    || c[ConditionFlag.Crafting] || c[ConditionFlag.PreparingToCraft] || c[ConditionFlag.ExecutingCraftingAction]
                    || c[ConditionFlag.Gathering] || c[ConditionFlag.ExecutingGatheringAction]
                    || c[ConditionFlag.Mounting] || c[ConditionFlag.Mounting71] || c[ConditionFlag.Jumping] || c[ConditionFlag.Jumping61]
-                   || c[ConditionFlag.InCombat]
                    || DeliveryWindow.SceneBusy;
         }
     }
+
+    /// <summary>In combat, as the game counts it.</summary>
+    public static bool InCombat => Services.Condition[ConditionFlag.InCombat];
 
     public static bool InCutscene
         => Services.Condition[ConditionFlag.OccupiedInCutSceneEvent] || Services.Condition[ConditionFlag.WatchingCutscene]
@@ -327,15 +355,21 @@ internal static unsafe class QuestSteps
         }
         var completed = qm->IsDailyQuestCompleted(id) || (!q.Repeatable && QuestManager.IsQuestComplete(id));
 
-        // The quest's script is asked only when the game is idle, a while after a zone change, and when its script is
-        // loaded: calling into it while an event, a cutscene or scene tasks run, or while the zone sets up, can crash.
-        var busy = Busy;
+        // The quest's script is asked only when the game is idle (not in combat either), a while after a zone change,
+        // and when its script is loaded: calling into it while an event, a cutscene or scene tasks run, in a fight, or
+        // while the zone sets up, can crash.
+        var occupied = Occupied;
+        var inCombat = InCombat;
+        var busy = occupied || inCombat;
         var settled = Settled(DateTime.UtcNow);
         var handler = accepted && !busy && settled ? Handler(q.Quest) : null;
         var loaded = handler != null && handler->LuaEventHandler.LuaState != null;
         var read = !accepted || (!busy && settled && (handler == null || loaded));
         if (!loaded) handler = null;
         var todos = new List<TodoProgress>();
+        var objects = new List<StepObject>();
+        var remembered = false;
+        if (!accepted) CalmLooks.Remove(q.Quest);
         if (handler != null)
         {
             var me = (BattleChara*)player.Address;
@@ -345,6 +379,18 @@ internal static unsafe class QuestSteps
                 handler->GetTodoArgs(me, (byte)t.Index, &a0, &a1, &a2);
                 todos.Add(new TodoProgress(t.Index, handler->IsTodoChecked(me, (byte)t.Index), a0, a1, a2));
             }
+            var marks = new Dictionary<ulong, uint>();
+            objects = Objects(handler, marks);
+            CalmLooks[q.Quest] = new CalmLook(Progress(sequence, vars), todos, objects, marks);
+        }
+        else if (accepted && inCombat && !occupied && settled && CalmLooks.TryGetValue(q.Quest, out var calm) && calm.Progress == Progress(sequence, vars))
+        {
+            // In combat the script isn't asked. While the quest hasn't moved since the last calm look, its lines and
+            // objects are still those (the objects where they stand now): a class that doesn't fight carries on by them.
+            todos = calm.Todos;
+            objects = Refreshed(calm.Objects);
+            remembered = true;
+            read = true;
         }
 
         var items = new Dictionary<uint, int>();
@@ -385,15 +431,150 @@ internal static unsafe class QuestSteps
             Mounted = Services.Condition[ConditionFlag.Mounted],
             Mount = Services.Condition[ConditionFlag.Mounted] ? chara->Mount.MountId : 0u,
             Flying = Services.Condition[ConditionFlag.InFlight],
-            Busy = busy,
+            Busy = occupied,
+            InCombat = inCombat,
+            Fighter = Combat.BasicCombo.For(player.ClassJob.RowId) != null,
             ScriptRead = read,
+            Remembered = remembered,
             Todos = todos,
-            Objects = handler != null ? Objects(handler) : new List<StepObject>(),
+            Objects = objects,
             Markers = Markers(q.Quest),
+            Hostiles = accepted ? Mobs(q, player) : new List<StepEnemy>(),
             Items = items,
             Statuses = statuses,
             Expiring = expiring,
         };
+    }
+
+    /// <summary>
+    /// What the quest's script said at the last calm look: its to-do lines, its objects, and which mobs its handler
+    /// held (with the icon it gave each), together with the quest's state then. In combat the script isn't asked, so
+    /// the marks on mobs come from here, and so do the lines and objects while the state hasn't changed.
+    /// </summary>
+    private sealed record CalmLook(string Progress, List<TodoProgress> Todos, List<StepObject> Objects, Dictionary<ulong, uint> Marks);
+
+    private static readonly Dictionary<uint, CalmLook> CalmLooks = new();
+
+    private static string Progress(byte sequence, byte[] vars) => $"{sequence}|{Convert.ToHexString(vars)}";
+
+    /// <summary>Remembered objects as they are now: those still loaded, where they stand, whether they can be targeted. No script is asked.</summary>
+    private static List<StepObject> Refreshed(List<StepObject> objects)
+    {
+        var list = new List<StepObject>(objects.Count);
+        foreach (var o in objects)
+            if (Services.Objects.SearchById(o.Id) is { } live && live.BaseId == o.BaseId)
+                list.Add(o with { Position = live.Position, Targetable = live.IsTargetable });
+        return list;
+    }
+
+    /// <summary>
+    /// The mobs around, from the object table (safe whatever the game is doing: only their own fields are read): every
+    /// hostile one within <see cref="EnemyRules.ViewRange"/>, and the quest's own kinds even when not hostile (one that
+    /// was subdued waits for the quest's item). What the quest's handler said of each comes from the last calm look.
+    /// </summary>
+    private static List<StepEnemy> Mobs(QuestScript q, IPlayerCharacter me)
+    {
+        var list = new List<StepEnemy>();
+        var marks = CalmLooks.TryGetValue(q.Quest, out var calm) ? calm.Marks : null;
+        var kinds = q.Enemies.Count == 0 ? null : q.Enemies.Select(e => e.Base).ToHashSet();
+        var buddy = Services.Buddies.CompanionBuddy?.GameObject?.GameObjectId ?? 0;
+        foreach (var o in Services.Objects)
+        {
+            if (o is not IBattleNpc n || n.BattleNpcKind != BattleNpcSubKind.Combatant || n.IsDead || n.CurrentHp == 0) continue;
+            if (Vector3.Distance(n.Position, me.Position) > EnemyRules.ViewRange) continue;
+            var flags = n.StatusFlags;
+            var hostile = flags.HasFlag(StatusFlags.Hostile);
+            uint icon = 0;
+            var held = marks != null && marks.TryGetValue(n.GameObjectId, out icon);
+            if (!hostile && !held && kinds?.Contains(n.BaseId) != true) continue;
+            var chara = (Character*)n.Address;
+            var targetId = n.TargetObjectId;
+            var target = targetId is 0 or 0xE000_0000 ? EnemyTarget.None
+                : targetId == me.GameObjectId ? EnemyTarget.You
+                : buddy != 0 && targetId == buddy ? EnemyTarget.YourChocobo
+                : Services.Objects.SearchById(targetId) is IPlayerCharacter ? EnemyTarget.OtherPlayer
+                : EnemyTarget.Other;
+            list.Add(new StepEnemy(n.GameObjectId, n.BaseId, n.NameId, n.Name.TextValue, n.Position)
+            {
+                Radius = n.HitboxRadius,
+                Hostile = hostile,
+                Targetable = n.IsTargetable,
+                InCombat = flags.HasFlag(StatusFlags.InCombat),
+                Target = target,
+                Weakened = (chara->ActorControlFlags & SubduedFlag) != 0,
+                Fate = chara->FateId,
+                Icon = icon,
+                Held = held,
+                Drawn = chara->NamePlateIconId,
+                Hp = n.MaxHp > 0 ? (int)(n.CurrentHp * 100 / n.MaxHp) : 100,
+                Tagger = chara->CombatTaggerId,
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// <c>Character.ActorControlFlags</c> bit of a quest mob that was subdued: its attacks stop, it takes no more damage
+    /// and it waits for the quest's item (FFXIVClientStructs' note on the field; battle-society research).
+    /// </summary>
+    private const byte SubduedFlag = 0x40;
+
+    /// <summary>The loaded mob for an id, when it's still there.</summary>
+    public static IBattleNpc? FindEnemy(ulong gameObjectId) => gameObjectId == 0 ? null : Services.Objects.SearchById(gameObjectId) as IBattleNpc;
+
+    /// <summary>The mob was subdued: it takes no more damage and waits for the quest's item.</summary>
+    public static bool Subdued(IGameObject mob) => mob.Address != 0 && (((Character*)mob.Address)->ActorControlFlags & SubduedFlag) != 0;
+
+    // ------------------------------------------------------------------ enemies, for the logs
+
+    /// <summary>The quest's enemies as its data has them, in one line: kind (and name), sequence, what's done with it, where it's from.</summary>
+    public static string EnemyData(QuestScript q)
+        => q.Enemies.Count == 0 ? "none" : string.Join("; ", q.Enemies.GroupBy(e => (e.Base, e.Name, e.Sequence, e.Field, e.Task)).Select(g =>
+            $"{g.Key.Base}{(g.Key.Name != 0 ? $"/{g.Key.Name}" : "")} seq {g.Key.Sequence} {g.Key.Task}"
+            + (g.Key.Field ? " field" : g.Any(e => e.Spawn != null) ? $" at {g.Count(e => e.Spawn != null)} spawn point{(g.Count(e => e.Spawn != null) == 1 ? "" : "s")}" : "")));
+
+    /// <summary>
+    /// A mob with everything the enemy filter goes by, and the filter's verdict: kind and name ids, how far, health,
+    /// hostile, the quest's own icon and whether its handler holds it (as of the last calm look), the icon drawn now,
+    /// its FATE, subdued, in combat, whom it targets and who first hit it (never a name). For the run's log.
+    /// </summary>
+    public static string EnemyLine(QuestScript q, StepSnapshot s, StepEnemy e)
+        => $"\"{e.Name}\" {e.BaseId}/{e.NameId} {Vector3.Distance(e.Position, s.Player):0} y, health {e.Hp}%, {EnemyFacts(q, s, e)}";
+
+    /// <summary>What the filter goes by for a mob, and its verdict; without its distance and health (those change all the time).</summary>
+    private static string EnemyFacts(QuestScript q, StepSnapshot s, StepEnemy e)
+    {
+        var verdict = EnemyRules.Judge(q, s, e);
+        var me = Services.Objects.LocalPlayer?.GameObjectId ?? 0;
+        var tag = e.Tagger is 0 or 0xE000_0000 ? "nobody" : e.Tagger == me ? "you" : "another";
+        var target = e.Target switch
+        {
+            EnemyTarget.You => "you",
+            EnemyTarget.YourChocobo => "your chocobo",
+            EnemyTarget.OtherPlayer => "another player",
+            EnemyTarget.Other => "something else",
+            _ => "nobody",
+        };
+        return $"{(e.Hostile ? "hostile" : "not hostile")}{(e.Targetable ? "" : ", untargetable")}, icon {e.Icon}, drawn {e.Drawn}, {(e.Held ? "held" : "not held")}, fate {e.Fate}"
+               + $"{(e.Weakened ? ", SUBDUED" : "")}, {(e.InCombat ? "in combat" : "idle")}, targets {target}, first hit by {tag} => {verdict.Verdict} ({verdict.Why})";
+    }
+
+    /// <summary>
+    /// The mobs within <paramref name="within"/> yalms, nearest first. Mobs of one kind and name that the filter sees
+    /// alike are one entry (with how far each is), <paramref name="most"/> entries at most. <paramref name="key"/>
+    /// changes when an entry comes, goes or changes in what the filter goes by, not with distance, health or how many
+    /// of an entry there are: a line is written only then, so a herd wandering by doesn't fill the log.
+    /// </summary>
+    public static string EnemiesSeen(QuestScript q, StepSnapshot s, float within, int most, out string key)
+    {
+        var groups = s.Hostiles.Where(e => Vector3.Distance(e.Position, s.Player) <= within).OrderBy(e => Vector3.DistanceSquared(e.Position, s.Player))
+            .GroupBy(e => (e.Name, e.BaseId, e.NameId, Facts: EnemyFacts(q, s, e))).ToList();
+        key = string.Join("|", groups.Select(g => $"{g.Key.BaseId}/{g.Key.NameId}:{g.Key.Facts}").OrderBy(x => x, StringComparer.Ordinal));
+        if (groups.Count == 0) return $"(none within {within:0} yalms)";
+        return string.Join("; ", groups.Take(most).Select(g =>
+                   $"{(g.Count() > 1 ? $"{g.Count()}x " : "")}\"{g.Key.Name}\" {g.Key.BaseId}/{g.Key.NameId} at {string.Join("/", g.Take(6).Select(e => Vector3.Distance(e.Position, s.Player).ToString("0")))} y, "
+                   + $"health {g.First().Hp}%, {g.Key.Facts}"))
+               + (groups.Count > most ? $"; and {groups.Count - most} more kinds" : "");
     }
 
     /// <summary>The character has the status, and it lasts at least this long more (or doesn't run out).</summary>
@@ -409,9 +590,10 @@ internal static unsafe class QuestSteps
     /// The quest handler's objects that are loaded: what they are, where, the icon this quest gives them (and the one
     /// the game draws, for the log), whether the quest's script counts them active, whether they can be targeted. Only
     /// objects still in the game's object table are asked about: a pointer the handler still holds to one that was
-    /// unloaded isn't touched.
+    /// unloaded isn't touched. A hostile mob the handler holds isn't one of these objects (it would be "talked to"):
+    /// it goes into <paramref name="mobs"/> with the icon the quest gives it, for the enemy filter.
     /// </summary>
-    private static List<StepObject> Objects(QuestEventHandler* handler)
+    private static List<StepObject> Objects(QuestEventHandler* handler, Dictionary<ulong, uint> mobs)
     {
         var list = new List<StepObject>();
         var table = Services.Objects;
@@ -430,6 +612,11 @@ internal static unsafe class QuestSteps
             };
             // The quest's own icon for it: the drawn one comes from every handler (a giver showing "dailies available").
             var icon = handler->GetNameplateIconForObject(go);
+            if (go->ObjectKind == CsObjectKind.BattleNpc)
+            {
+                mobs[go->GetGameObjectId()] = icon;
+                if (((Character*)go)->IsHostile) continue;
+            }
             list.Add(new StepObject(go->GetGameObjectId(), go->BaseId, kind, go->NameString, new Vector3(go->Position.X, go->Position.Y, go->Position.Z),
                 icon, handler->IsActive(go), go->GetIsTargetable())
             {
@@ -554,12 +741,19 @@ internal static unsafe class QuestSteps
         }
     }
 
-    /// <summary>Uses the quest mount's action: on the target, or around the rider (null target).</summary>
-    public static bool UseMountAction(uint actionId, IGameObject? target, out uint why)
+    /// <summary>Uses the quest mount's action: on the target, around the rider (null target), or thrown at a place on the ground (<paramref name="at"/>).</summary>
+    public static bool UseMountAction(uint actionId, IGameObject? target, out uint why, Vector3? at = null)
     {
         var am = ActionManager.Instance();
         why = 0;
         if (am == null) return false;
+        if (at is { } place)
+        {
+            // Never thrown at no place (a spot of all zeros).
+            if (place == Vector3.Zero) return false;
+            why = am->GetActionStatus(ActionType.Action, actionId);
+            return why == 0 && am->UseActionLocation(ActionType.Action, actionId, 0xE000_0000, &place);
+        }
         if (target != null)
         {
             Target(target);
