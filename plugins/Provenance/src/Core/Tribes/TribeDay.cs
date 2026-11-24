@@ -107,14 +107,33 @@ public static class TribeLeftovers
         => allowances > 0 && listed == 0 && open > 0 && room > 0 && inJournal > 0;
 }
 
-/// <summary>The goal in effect for the day's run.</summary>
+/// <summary>The goal in effect for the day's run: one rule, for the planner and the page.</summary>
 public static class TribeGoals
 {
+    /// <summary>The unlocked societies the run may visit: the ticked ones, of all 20.</summary>
+    public static List<TribeToday> Taking(IEnumerable<TribeToday> days, IReadOnlySet<uint> leftOut)
+        => days.Where(d => d.Unlocked && !leftOut.Contains(d.Tribe.Id)).ToList();
+
     /// <summary>
     /// The goal picked, else (decided with the user) "Rank up" while any society taking part is below its top rank,
-    /// otherwise "Currency".
+    /// otherwise "Currency". A society counts only when the run could take one of its dailies today
+    /// (<see cref="CanTake"/>): one whose dailies are all left out (a battle society with no usable combat job) gains
+    /// no rank from the run, and mustn't turn the Currency order off for the others.
     /// </summary>
-    /// <param name="taking">The unlocked societies the run may visit (the ticked ones, of all 20).</param>
-    public static TribeGoal Effective(TribeGoal? picked, IEnumerable<TribeToday> taking)
-        => picked ?? (taking.Any(t => t.Unlocked && !t.AtTop) ? TribeGoal.RankUp : TribeGoal.Currency);
+    /// <param name="days">Every society today; the locked and the unticked ones don't count.</param>
+    /// <param name="leftOut">Societies the player unticked (<c>BeastTribe</c> rows).</param>
+    /// <param name="who">The player's classes, as the class choice sees them.</param>
+    /// <param name="leaveOutSay">The Tribes option "Leave out quests that /say in public".</param>
+    public static TribeGoal Effective(TribeGoal? picked, IEnumerable<TribeToday> days, IReadOnlySet<uint> leftOut, PlayerClasses who, bool leaveOutSay = false)
+        => picked ?? (Taking(days, leftOut).Any(t => !t.AtTop && CanTake(t, who, leaveOutSay)) ? TribeGoal.RankUp : TribeGoal.Currency);
+
+    /// <summary>
+    /// The run could take one of the society's dailies today: one of today's offers is the run's to do
+    /// (<see cref="QuestPolicy"/>) and a class can take it, with a combat job for its fight
+    /// (<see cref="TribeClasses.ClassNeed"/>; for a battle society's daily that's <see cref="TribeClasses.Choose"/>
+    /// naming a job). Offers already accepted or done today count as well, and the allowances, a giver's room and what
+    /// the run gave up on don't, so the goal doesn't change while the day's dailies get done.
+    /// </summary>
+    public static bool CanTake(TribeToday day, PlayerClasses who, bool leaveOutSay = false)
+        => day.Offers.Any(o => QuestPolicy.Judge(o.Quest, new PolicyOptions(leaveOutSay)).RunCanDo && TribeClasses.ClassNeed(o.Quest, who) == null);
 }

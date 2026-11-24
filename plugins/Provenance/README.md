@@ -134,9 +134,14 @@ keeps it from sliding things around.
     you already own; and the achievements and titles.
   - The run, for all 20 societies. The crafter and gatherer societies (the Moogles, Dwarves, Loporrits, Yok
     Huy, Namazu, Qitari, Omicrons and Mamool Ja, and the Ixal's crafting dailies) have been done since 0.22.
-    The 11 battle societies (the Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu Vanu, Vath, Kojin, Ananta, Pixies,
-    Arkasodara and Pelupelu) and the Ixal's dailies with a fight or a password are done too, and are still
-    being tested: please send a bug report when one goes wrong. It takes today's quests within the 12 daily
+    The dailies of the 11 battle societies (the Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu Vanu, Vath, Kojin,
+    Ananta, Pixies, Arkasodara and Pelupelu) and the Ixal's dailies with a fight or a password are new. The
+    run takes them too, apart from the ones listed below as "do it yourself", and they're still being tested:
+    please send a bug report when one goes wrong. If you used Tribes before they were added: the battle
+    societies are ticked from the start, so with a *Monster drops* job set the day's 12 allowances now also go
+    to them (under *Rank up* the lowest ranks first), and battle dailies already in your journal are picked up
+    and fought. Untick a society on the Tribes page to leave it out.
+    The run takes today's quests within the 12 daily
     allowances: up to 3 from each giver (the Ixal and the four ARR battle societies have one giver for each
     rank, so more than 3 a day there), and on the day you rank up the 3 more the giver offers when the new
     rank has dailies of its own (reaching Sworn gives none for most societies, reaching Bloodsworn none for
@@ -153,15 +158,34 @@ keeps it from sliding things around.
     quests are done as Miner or Botanist at the society's own nodes. Today's plan shows on the page, and on
     the Plan page when no order is on it and there are dailies to do; Pause, Resume and Stop are in the
     action bar and the compact strip.
-  - Fights: a battle society's dailies are accepted and fought on the job picked under *Monster drops*
-    (Settings), in its best gearset, with the basic combo and the chocobo as set there. With none picked,
-    they're only taken on the combat job you're on when you start. The run fights the quest's own enemies and
-    whatever attacks you, nothing else: other monsters, and enemies someone else is fighting, are left alone.
-    Where a quest has a key item for a weakened enemy, the run stops attacking and uses it. An Ixal daily with
-    a fight is accepted as a crafter like the others; for the fight the run changes to the *Monster drops* job
-    and back, which takes that job at level 50 or more with a saved gearset. A daily without a usable combat
-    job shows "needs …" and isn't accepted. Knock-outs count against the *Knock-outs* limit (Settings,
-    Security), as in an order run.
+  - Fights (new, and still being tested like all battle dailies):
+    - The job: a battle society's daily is accepted and fought on the job picked under *Monster drops*
+      (Settings) when it qualifies: Provenance has a combo for it, it's at the quest's level, and it has a
+      saved gearset (the job you're on needs none). When it doesn't qualify, the daily goes to the combat job
+      you're on, if that one qualifies. A job that was on earlier in the same run also counts. Otherwise the
+      quest shows "needs …" and isn't accepted. Fights use the basic combo and the chocobo as set under
+      *Monster drops*.
+    - What it fights: on a combat job, the quest's own enemies and whatever attacks you or your chocobo.
+      Other monsters, FATE monsters and enemies someone else is fighting are left alone. As a crafter or
+      gatherer the run doesn't fight; it carries on with its step. Riding its own mount on the way, it rides
+      on past things that attack unless they're the quest's, and fights when it's still attacked on arrival.
+      On a quest mount with an action, that action is used on the quest's enemies, and the run rides on past
+      anything else.
+    - Key items: where a quest has an item for a weakened enemy, the run stops attacking and uses it. An item
+      that can be thrown from 10 yalms or more is thrown first, and where the quest wants nothing else of the
+      enemy only the item is used.
+    - Health: before starting the next fight the run waits for health to come back to 70%.
+    - When a fight goes badly: an enemy that isn't attacking and can't be reached or hurt is left after a
+      time (45 seconds without reaching it, 30 seconds without hurting it, 3 minutes in all). Something that
+      attacks is always fought. After two enemies left like that, or 15 defeats that didn't move the quest on,
+      the run pauses and asks you, once the fighting is over.
+    - Knock-outs count against the *Knock-outs* limit (Settings, Security). The run returns, leaves the quest
+      it happened in to you for today, waits for Weakness to wear off before the next fight, and plans the day
+      again.
+    - Ixal dailies with a fight are accepted as a crafter like the Ixal's others. The run changes to the
+      *Monster drops* job for the fight and back to the crafter for talks and hand-overs, always out of
+      combat. That job needs level 50 and a saved gearset; without it the quest shows "needs …" and isn't
+      accepted.
   - Goals: *Rank up* first takes the dailies that fill each society's bar, the lowest rank first;
     allowances still left after that go to more dailies, since they still pay currency, gil, crystals and
     EXP. A society whose bar is full waits for its rank quest: it gets
@@ -170,11 +194,14 @@ keeps it from sliding things around.
     Respected (no Oaknots) and the ARR battle societies' Neutral and Recognized ones (a Venture, no tokens).
     *Levelling* takes each daily on your lowest class that qualifies; a battle quest only on a combat job at
     least 5 levels above the quest's level, the lowest such job, since the basic combo has little healing and
-    ARR society quests aren't level-synced (when no job is that far above, the *Monster drops* job).
-    Currency and Levelling keep doing the dailies of a society whose bar is full. Until you pick one, the
-    goal is Rank up while a ticked society is below its top rank, then Currency. Under Rank up and Currency
-    a crafter's or gatherer's quest is accepted on your current class when it qualifies, otherwise on your
-    best-geared one, and a battle quest on the *Monster drops* job.
+    ARR society quests aren't level-synced (when no job is that far above, the job it's fought on under the
+    other goals). Between classes of the same level the *Monster drops* job comes first, then the better-geared
+    one. Currency and Levelling keep doing the dailies of a society whose bar is full. Until you pick one, the
+    goal is Rank up while a ticked society is below its top rank, then Currency; a society counts for that
+    only when the run can take one of its dailies today (a battle society doesn't while no combat job
+    qualifies for its dailies). Under Rank up and Currency a crafter's or gatherer's quest is accepted on your
+    current class when it qualifies, otherwise on your best-geared one, and a battle quest on the *Monster
+    drops* job or, when that one doesn't qualify, on the combat job you're on (see Fights).
   - Options: *Include in the run* in each society's opened row; *Pause for cutscenes* (otherwise they're
     skipped); *Leave out quests that /say in public* (off to start), which skips those quests altogether; and
     *Note what the run would do while I do society quests myself (for bug reports)* (on to start, and only
@@ -233,7 +260,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 | Cosmic Exploration | Crafting missions (done; since 0.18), two-class missions and Cosmic Fortunes (done; since 0.19), then gathering missions with critical missions and red alerts, then fishing missions, then Master missions and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
 | Custom Deliveries | The page with the week and every client (done; since 0.20), the run for crafted and gathered requests (done; since 0.21), then fish and spearfishing requests, a shopping list for scrips at the cap and a trip after the run; later making items ahead and a Levelling goal |
-| Tribes | The page and the run for the crafter and gatherer societies' dailies (done; since 0.22), the battle societies' dailies and the Ixal's dailies with a fight or a password (done; still being tested), then rank quests and the intersocietal quests by button, then a shopping list for the society shops |
+| Tribes | The page and the run for the crafter and gatherer societies' dailies (done; since 0.22), the battle societies' dailies and the Ixal's dailies with a fight or a password (new; still being tested), then rank quests and the intersocietal quests by button, then a shopping list for the society shops |
 
 ### To do
 

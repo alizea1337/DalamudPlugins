@@ -23,11 +23,12 @@ public readonly record struct ClassInfo(uint ClassJob, int Level, bool HasGearse
 public sealed record PlayerClasses(IReadOnlyList<ClassInfo> All, uint Current, uint CombatJob = 0)
 {
     /// <summary>
-    /// The classes that have been on since the run that's going started, the first first. Empty outside a run: then
-    /// only <see cref="Current"/> counts as on. A run changes class between a crafter's and a battle society's visits
-    /// and plans again after each; with this the day's dailies keep going to the classes it started with (the player's
-    /// own first), so the crystals fetched for one crafter's recipes aren't left for another's, and a combat job that
-    /// was on at the start still takes the battle dailies after a crafter's visit.
+    /// The classes that were on when the run that's going planned, since it started, the first first
+    /// (<see cref="ClassHistory"/>). Empty outside a run: then only <see cref="Current"/> counts as on. A run changes
+    /// class between a crafter's and a battle society's visits and plans again after each; with this the day's dailies
+    /// keep going to the classes it started with (the player's own first), so the crystals fetched for one crafter's
+    /// recipes aren't left for another's, and a combat job that was on at the start still takes the battle dailies
+    /// after a crafter's visit.
     /// </summary>
     public IReadOnlyList<uint> History { get; init; } = Array.Empty<uint>();
 
@@ -52,6 +53,33 @@ public sealed record PlayerClasses(IReadOnlyList<ClassInfo> All, uint Current, u
             if (c.ClassJob == classJob) return c;
         return null;
     }
+}
+
+/// <summary>
+/// The classes that were on each time a run planned its day, the first first: what <see cref="PlayerClasses.History"/>
+/// is made from. Only the run's planning notes a class (<see cref="Note"/>). A look (<see cref="Seen"/>) notes nothing:
+/// the Tribes page asks twice a second, and whatever class happened to be on then mustn't count as one the run was on.
+/// </summary>
+public sealed class ClassHistory
+{
+    private readonly List<uint> classes = new();
+    /// <summary>The list is the run's that's going now; otherwise it's what an earlier run left.</summary>
+    private bool current;
+
+    /// <summary>No run is going: the next run's first planning starts the list anew.</summary>
+    public void RunOver() => current = false;
+
+    /// <summary>The run plans with this class on (0: unknown, not noted). Returns the run's classes so far, this one included.</summary>
+    public IReadOnlyList<uint> Note(uint classJob)
+    {
+        if (!current) classes.Clear();
+        current = true;
+        if (classJob != 0 && !classes.Contains(classJob)) classes.Add(classJob);
+        return classes.ToArray();
+    }
+
+    /// <summary>The classes the run that's going has planned on; none while no run goes, or before it first plans.</summary>
+    public IReadOnlyList<uint> Seen(bool running) => running && current ? classes.ToArray() : Array.Empty<uint>();
 }
 
 /// <summary>What a quest still needs before the run can take it.</summary>
@@ -150,8 +178,8 @@ public static class TribeClasses
     /// <item>A crafter's or gatherer's quest: every class that qualifies, the current one first, then the best-geared
     /// (then the highest level); under Levelling the lowest first.</item>
     /// <item>A battle quest: the Monster drops job when it qualifies, else the current job when it does. Under Levelling
-    /// the combat jobs at least <see cref="LevellingMargin"/> levels above the quest, the lowest first; when none is,
-    /// the same as without Levelling.</item>
+    /// the combat jobs at least <see cref="LevellingMargin"/> levels above the quest, the lowest first (among jobs of
+    /// one level the Monster drops job, then the best-geared); when none is, the same as without Levelling.</item>
     /// <item>In a run, a class that was on earlier counts as the current one does, the first of them first
     /// (<see cref="PlayerClasses.History"/>).</item>
     /// </list>
@@ -169,15 +197,19 @@ public static class TribeClasses
     }
 
     /// <summary>
-    /// Classes in the order the run prefers them. Under Levelling the lowest level first. Otherwise the Monster drops
-    /// job (for a fight), then the current class (in a run: the classes that have been on, the first first), then the
-    /// best-geared, then the highest level.
+    /// Classes in the order the run prefers them. Under Levelling the lowest level first; among classes of one level
+    /// the Monster drops job (for a fight), then the best-geared (the item level of its best gearset,
+    /// <see cref="ClassInfo.ItemLevel"/>). Otherwise the Monster drops job (for a fight), then the current class (in a
+    /// run: the classes that have been on, the first first), then the best-geared, then the highest level.
     /// </summary>
     public static IEnumerable<ClassInfo> Order(IEnumerable<ClassInfo> classes, PlayerClasses who, bool levelling)
         => levelling
-            ? classes.OrderBy(c => c.Level).ThenBy(c => c.ClassJob)
-            : classes.OrderByDescending(c => c.Fights && c.ClassJob == who.CombatJob).ThenBy(c => who.OnRank(c.ClassJob))
+            ? classes.OrderBy(c => c.Level).ThenByDescending(c => IsCombatJob(c, who)).ThenByDescending(c => c.ItemLevel).ThenBy(c => c.ClassJob)
+            : classes.OrderByDescending(c => IsCombatJob(c, who)).ThenBy(c => who.OnRank(c.ClassJob))
                 .ThenByDescending(c => c.ItemLevel).ThenByDescending(c => c.Level).ThenBy(c => c.ClassJob);
+
+    /// <summary>The class is the job picked under Settings, Monster drops, and the run fights on it.</summary>
+    private static bool IsCombatJob(ClassInfo c, PlayerClasses who) => c.Fights && c.ClassJob == who.CombatJob;
 
     /// <summary>The class the run takes a quest on (the first of <see cref="Options"/>); 0 when none can.</summary>
     public static uint Choose(TribeQuest quest, PlayerClasses who, bool levelling = false)

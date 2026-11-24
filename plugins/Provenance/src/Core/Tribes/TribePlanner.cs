@@ -92,7 +92,7 @@ public sealed class TribePlanInput
     public uint CurrentJob { get; init; }
     /// <summary>The job picked under Settings, Monster drops (0: none): battle dailies and the fights of Ixal dailies are done on it.</summary>
     public uint CombatJob { get; init; }
-    /// <summary>The classes that have been on since the run started, the first first (<see cref="PlayerClasses.History"/>); empty outside a run.</summary>
+    /// <summary>The classes the run has planned on since it started, the first first (<see cref="PlayerClasses.History"/>); empty outside a run.</summary>
     public IReadOnlyList<uint> ClassHistory { get; init; } = Array.Empty<uint>();
     /// <summary>The zone the character is in: among equals, its society comes first (no trip there).</summary>
     public uint Territory { get; init; }
@@ -133,10 +133,10 @@ public static class TribePlanner
 {
     public static TribePlan Plan(TribePlanInput input)
     {
-        var taking = input.Days.Where(d => d.Unlocked && !input.LeftOut.Contains(d.Tribe.Id)).ToList();
-        var goal = TribeGoals.Effective(input.Goal, taking);
-        var levelling = goal == TribeGoal.Levelling;
         var who = new PlayerClasses(input.Classes, input.CurrentJob, input.CombatJob) { History = input.ClassHistory };
+        var taking = TribeGoals.Taking(input.Days, input.LeftOut);
+        var goal = TribeGoals.Effective(input.Goal, input.Days, input.LeftOut, who, input.LeaveOutSay);
+        var levelling = goal == TribeGoal.Levelling;
         var left = new List<LeftOutQuest>();
         var notices = new List<TribeNotice>();
         var dayOf = new Dictionary<uint, TribeToday>();
