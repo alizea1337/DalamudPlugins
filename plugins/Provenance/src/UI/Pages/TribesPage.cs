@@ -16,10 +16,10 @@ namespace Provenance.UI.Pages;
 
 /// <summary>
 /// Tribes (Expeditions): the allied societies. The day (allowances left, the reset, quests left over from before it),
-/// the run's goal and options, and every society with its rank and today's status; a society opens to what unlocks it,
-/// how far its next rank and its top rank are, today's quests (what the run does, what's yours to do and why, what's
-/// missing), whether they match the giver's list, what each rank opens in its shop (and what you own), and its
-/// achievements.
+/// the run's goal, the combat job its fights are done on and its options, and every society with its rank and today's
+/// status; a society opens to what unlocks it, how far its next rank and its top rank are, today's quests (what each
+/// asks and as which class, what the run does, what's yours to do and why, what's missing), whether they match the
+/// giver's list, what each rank opens in its shop (and what you own), and its achievements.
 /// </summary>
 internal sealed class TribesPage : Page
 {
@@ -59,7 +59,7 @@ internal sealed class TribesPage : Page
                 yield break;
             }
             yield return new FooterAction("Start", Ui.Kind.Primary, FontAwesomeIcon.Play, () => startProblem = Loop.Start(),
-                Tooltip: "Accepts today's planned dailies at each society and does them: the crafting, the gathering and the errands.");
+                Tooltip: "Accepts today's planned dailies at each society and does them: the crafting, the gathering, the fights and the errands.");
         }
     }
 
@@ -76,11 +76,12 @@ internal sealed class TribesPage : Page
             yield return new FooterAction("Keep going", Ui.Kind.Secondary, FontAwesomeIcon.Play, loop.Resume, Tooltip: "Never mind the pause.");
         else
             yield return new FooterAction("Pause", Ui.Kind.Secondary, FontAwesomeIcon.Pause, loop.Pause,
-                Tooltip: "Pauses after the item being crafted or the node being gathered, otherwise right away.");
+                Tooltip: "Pauses after the item being crafted, the node being gathered or the enemy being fought, otherwise right away.");
     }
 
     /// <summary>What the page shows, read from the game at most twice a second.</summary>
-    private sealed record Snapshot(List<TribeToday> Days, List<AcceptedTribeQuest> Accepted, int Allowances, List<ClassInfo> Classes, uint Current);
+    /// <param name="Who">The player's classes, the class that's on and the combat job picked under Settings, Monster drops.</param>
+    private sealed record Snapshot(List<TribeToday> Days, List<AcceptedTribeQuest> Accepted, int Allowances, PlayerClasses Who);
 
     private Snapshot Read(TribeData data)
     {
@@ -88,7 +89,7 @@ internal sealed class TribesPage : Page
         var accepted = Game.Accepted(data);
         var slots = Game.DailySlots();
         var days = data.Tribes.Select(t => Game.Today(data, t, accepted, slots)).ToList();
-        snapshot = new Snapshot(days, accepted, Game.AllowancesLeft, Game.Classes(), Integrations.GameState.CurrentJob);
+        snapshot = new Snapshot(days, accepted, Game.AllowancesLeft, Plugin.TribePlanning.Who());
         snapshotAt = DateTime.UtcNow;
         return snapshot;
     }
@@ -152,7 +153,8 @@ internal sealed class TribesPage : Page
     {
         (TribeGoal.RankUp, "Rank up", "Societies below their top rank first, the lowest rank first. A society whose bar is full waits for its rank quest, and its quests go to the others."),
         (TribeGoal.Currency, "Currency", "As many dailies as the day allows, for each society's currency (and gil and crystals)."),
-        (TribeGoal.Levelling, "Levelling", "As many dailies as the day allows, each on the lowest class that can take it."),
+        (TribeGoal.Levelling, "Levelling", "As many dailies as the day allows, each on the lowest class that can take it; a battle quest on the lowest combat job "
+                                           + "at least 5 levels above it."),
     };
 
     /// <summary>
@@ -250,7 +252,7 @@ internal sealed class TribesPage : Page
             ImGui.Dummy(new Vector2(0, 2 * s));
             foreach (var v in plan.Visits)
             foreach (var q in v.Quests)
-                DrawPlanned(catalog, v, q);
+                DrawPlanned(catalog, v, q, TribeClasses.FightsOnAnotherJob(q.Quest) ? plugin.Config.Combat.ClassJob : 0);
             DrawCrystals(plugin, catalog, plan);
         }
         if (plan.Notices.Count > 0)
@@ -263,11 +265,12 @@ internal sealed class TribesPage : Page
             ImGui.Dummy(new Vector2(0, 4 * s));
             Ui.Muted("Not this time:");
             const int shown = 6;
-            foreach (var l in plan.LeftOut.Take(shown))
-                using (Ui.F.Small.Push()) Ui.Wrapped($"\"{l.Quest.Name}\" ({l.Tribe.Name}): {l.Reason}.", Palette.TextMuted);
-            if (plan.LeftOut.Count > shown)
+            var reasons = LeftOutLines(plan);
+            foreach (var line in reasons.Take(shown))
+                using (Ui.F.Small.Push()) Ui.Wrapped(line, Palette.TextMuted);
+            if (reasons.Count > shown)
                 using (Ui.F.Small.Push())
-                    Ui.Wrapped($"And {plan.LeftOut.Count - shown} more. Open a society on the Tribes page for each quest's reason.", Palette.TextFaint);
+                    Ui.Wrapped($"And {reasons.Count - shown} more reasons. Open a society on the Tribes page for each quest's reason.", Palette.TextFaint);
         }
         if (fromPlanPage)
         {
@@ -279,8 +282,28 @@ internal sealed class TribesPage : Page
 
     private static string GoalName(TribeGoal goal) => Goals.First(g => g.Goal == goal).Label;
 
+    /// <summary>
+    /// What the plan leaves out, a line per reason in the plan's order: one or two dailies by name, more as a count
+    /// with their societies. With twenty societies and twelve allowances a day, most of a day's offers share a reason
+    /// ("No allowances left for it today"), which would bury the others.
+    /// </summary>
+    private static List<string> LeftOutLines(TribePlan plan)
+    {
+        var lines = new List<string>();
+        foreach (var group in plan.LeftOut.GroupBy(l => l.Reason))
+        {
+            var all = group.ToList();
+            var societies = all.Select(l => l.Tribe.Name).Distinct().ToList();
+            var where = societies.Count <= 3 ? Join(societies) : $"{string.Join(", ", societies.Take(2))} and {societies.Count - 2} more societies";
+            var what = all.Count <= 2 ? Join(all.Select(l => $"\"{l.Quest.Name}\"")) : $"{all.Count} dailies";
+            lines.Add($"{what} ({where}): {group.Key}.");
+        }
+        return lines;
+    }
+
     /// <summary>One planned daily: its item or errand glyph, its name over its society and what it asks, and the class chip.</summary>
-    private static void DrawPlanned(GameCatalog catalog, TribeVisit v, PlannedQuest q)
+    /// <param name="fighter">The combat job a crafter's daily fights on (the Ixal's); 0 for the others.</param>
+    private static void DrawPlanned(GameCatalog catalog, TribeVisit v, PlannedQuest q, uint fighter)
     {
         var s = Ui.S;
         var start = ImGui.GetCursorScreenPos();
@@ -300,7 +323,7 @@ internal sealed class TribesPage : Page
         dl.PushClipRect(start, new Vector2(textRight, start.Y + h), true);
         dl.AddText(new Vector2(x, start.Y + 3 * s), Palette.U32(Palette.Text), q.Quest.Name);
         using (Ui.F.Small.Push())
-            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted), $"{v.Tribe.Name}. {What(catalog, q.Quest, q.ClassJob)}");
+            dl.AddText(new Vector2(x, start.Y + 22 * s), Palette.U32(Palette.TextMuted), $"{v.Tribe.Name}. {What(catalog, q.Quest, q.ClassJob, fighter)}");
         dl.PopClipRect();
         ImGui.SetCursorScreenPos(new Vector2(start.X + width - chipW, start.Y + (h - 20 * s) / 2));
         Ui.Chip(chip, color, icon, job);
@@ -335,7 +358,7 @@ internal sealed class TribesPage : Page
         var s = Ui.S;
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Goal");
-        var taking = snap.Days.Where(d => d.Tribe.CraftOrGather && d.Unlocked && !S.LeftOut.Contains(d.Tribe.Id)).ToList();
+        var taking = snap.Days.Where(d => d.Unlocked && !S.LeftOut.Contains(d.Tribe.Id)).ToList();
         var effective = TribeGoals.Effective(S.Goal, taking);
         var shown = Goals.First(g => g.Goal == effective).Label;
         if (Ui.DropdownField("##tribegoal", shown, "Pick a goal", 320 * s, FontAwesomeIcon.Flag, detail: S.Goal == null ? "picked for you" : null))
@@ -354,6 +377,8 @@ internal sealed class TribesPage : Page
         }
         ImGui.Dummy(new Vector2(0, 2 * s));
         Ui.Wrapped(Goals.First(g => g.Goal == effective).Text, Palette.TextMuted);
+
+        DrawCombatJob(snap, taking, effective == TribeGoal.Levelling);
 
         ImGui.Dummy(new Vector2(0, 6 * s));
         using (Ui.F.Strong.Push()) Ui.Text("Options");
@@ -380,6 +405,32 @@ internal sealed class TribesPage : Page
             Config.Save();
         }
         Ui.EndCard();
+    }
+
+    /// <summary>
+    /// The job the run's fights are done on (Settings, Monster drops), where a fight can come up: with a battle society
+    /// or the Ixal unlocked and ticked. A chip with the job, or in warning colours what's missing, and where to change it.
+    /// </summary>
+    private static void DrawCombatJob(Snapshot snap, List<TribeToday> taking, bool levelling)
+    {
+        if (!taking.Any(d => d.Tribe.Kind == TribeKind.Battle || d.Tribe.Id == QuestPolicy.IxalId)) return;
+        var s = Ui.S;
+        ImGui.Dummy(new Vector2(0, 6 * s));
+        using (Ui.F.Strong.Push()) Ui.Text("Combat job");
+        var job = snap.Who.CombatJob;
+        if (job != 0 && snap.Who.Of(job) is { Fights: true } picked)
+        {
+            Ui.Chip($"{ClassName(job)}, level {picked.Level}", Palette.ClassJobColor(job), job: job);
+            Ui.Wrapped("The job picked under Settings, Monster drops. Battle societies' dailies and the fights in Ixal dailies are done on it, "
+                       + "in its best gearset, with the chocobo as set there."
+                       + (levelling ? " Under Levelling a battle daily goes to a lower combat job when one is at least 5 levels above it." : ""), Palette.TextMuted);
+            if (!picked.HasGearset)
+                Ui.Wrapped($"No gearset is saved for {ClassName(job)}: the run can only change to a job with one.", Palette.Warn);
+            return;
+        }
+        Ui.Chip(job == 0 ? "None picked" : $"No combo for {ClassJobs.Abbreviation(job)}", Palette.Warn, FontAwesomeIcon.ExclamationTriangle);
+        Ui.Wrapped("Battle societies' dailies and the fights in Ixal dailies need a combat job: pick one under Settings, Monster drops. "
+                   + "Without one, battle dailies are only taken on the combat job you're on when you start, and Ixal dailies with a fight are left out.", Palette.TextMuted);
     }
 
     // ------------------------------------------------------------------ the day
@@ -428,7 +479,7 @@ internal sealed class TribesPage : Page
         using (Ui.F.Strong.Push()) Ui.Text(craftOrGather ? "Crafter and gatherer societies" : "Battle societies");
         Ui.Wrapped(craftOrGather
             ? "Their dailies are the run's: open one for today's quests and what's in the way."
-            : "Their dailies come in a later version. Here for your rank, what each rank opens and the achievements.", Palette.TextMuted);
+            : "Their dailies are the run's too, fights included, on your combat job: open one for today's quests and what's in the way.", Palette.TextMuted);
         ImGui.Dummy(new Vector2(0, 4 * s));
         foreach (var day in days)
         {
@@ -446,7 +497,7 @@ internal sealed class TribesPage : Page
         if (!day.Unlocked) return State.Locked;
         if (snap.Accepted.Any(a => a.Leftover && a.Quest.TribeId == day.Tribe.Id)) return State.Leftover;
         if (day.RankQuestReady != null) return State.RankQuest;
-        if (day.Tribe.CraftOrGather && S.LeftOut.Contains(day.Tribe.Id)) return State.LeftOut;
+        if (S.LeftOut.Contains(day.Tribe.Id)) return State.LeftOut;
         if (day.Offers.Any() && day.LeftToday(Game.DailyAllowance) == 0)
             return day.Offers.All(o => o.State == OfferState.Done) ? State.DoneToday : State.UnderWay;
         if (day.AtTop) return State.Top;
@@ -556,18 +607,15 @@ internal sealed class TribesPage : Page
         }
         else
         {
-            if (t.CraftOrGather)
+            var include = !S.LeftOut.Contains(t.Id);
+            ImGui.PushID((int)t.Id);
+            if (Ui.Checkbox("Include in the run", ref include, "Left out, the run doesn't visit this society."))
             {
-                var include = !S.LeftOut.Contains(t.Id);
-                ImGui.PushID((int)t.Id);
-                if (Ui.Checkbox("Include in the run", ref include, "Left out, the run doesn't visit this society."))
-                {
-                    if (include) S.LeftOut.Remove(t.Id);
-                    else S.LeftOut.Add(t.Id);
-                    Config.Save();
-                }
-                ImGui.PopID();
+                if (include) S.LeftOut.Remove(t.Id);
+                else S.LeftOut.Add(t.Id);
+                Config.Save();
             }
+            ImGui.PopID();
             foreach (var left in snap.Accepted.Where(a => a.Leftover && a.Quest.TribeId == t.Id))
                 Ui.Wrapped($"\"{left.Quest.Name}\" is left over from before the reset: hand it in or abandon it, and the giver offers today's dailies.", Palette.Warn);
             DrawRank(data, day, snap);
@@ -671,14 +719,15 @@ internal sealed class TribesPage : Page
     {
         var s = Ui.S;
         var q = offer.Quest;
-        var judgement = QuestPolicy.Judge(q, day.Tribe, new PolicyOptions(S.LeaveOutSay, offer.AcceptedAs));
-        var job = offer.State == OfferState.Accepted ? offer.AcceptedAs
-            : TribeClasses.Choose(q, snap.Classes, snap.Current, S.Goal == TribeGoal.Levelling);
+        var levelling = S.Goal == TribeGoal.Levelling;
+        var judgement = QuestPolicy.Judge(q, new PolicyOptions(S.LeaveOutSay, offer.AcceptedAs));
+        var job = offer.State == OfferState.Accepted ? offer.AcceptedAs : TribeClasses.Choose(q, snap.Who, levelling);
         QuestReadiness? ready = null;
         if (offer.State == OfferState.Open && judgement.RunCanDo)
-            ready = TribeClasses.Readiness(q, snap.Classes, snap.Current, S.Goal == TribeGoal.Levelling, Game.OnHand, Game.Owns,
-                catalog.ItemName, catalog.ItemNamePlural);
+            ready = TribeClasses.Readiness(q, snap.Who, levelling, Game.OnHand, Game.Owns, catalog.ItemName, catalog.ItemNamePlural);
         if (ready is { Ready: true }) job = ready.ClassJob;
+        // The combat job a crafter's daily fights on (the Ixal's), when one is usable.
+        var fighter = TribeClasses.Fighter(q, snap.Who);
 
         // The chip says where the quest stands; the line under the name says why, or what it asks.
         string chip;
@@ -688,26 +737,33 @@ internal sealed class TribesPage : Page
         string sub;
         if (offer.State == OfferState.Done)
         {
-            (chip, color, icon, sub) = ("Done today", Palette.Accent, FontAwesomeIcon.Check, What(catalog, q, job));
+            (chip, color, icon, sub) = ("Done today", Palette.Accent, FontAwesomeIcon.Check, What(catalog, q, job, fighter));
         }
         else if (!judgement.RunCanDo)
         {
             (chip, color, icon, sub) = ("Do it yourself", Palette.TextMuted, FontAwesomeIcon.UserCheck, judgement.Reason ?? "");
             if (offer.State == OfferState.Accepted && offer.AcceptedAs != 0) sub = $"Accepted as {ClassJobs.Abbreviation(offer.AcceptedAs)}. " + sub;
         }
+        else if (offer.State == OfferState.Accepted && TribeClasses.FighterNeed(q, snap.Who) is { } fight)
+        {
+            // In the journal as its crafter, but nothing to do its fight on.
+            (chip, color, icon, sub) = (NeedChip(fight.Need), Palette.Warn, FontAwesomeIcon.ExclamationTriangle,
+                $"Accepted as {ClassJobs.Abbreviation(offer.AcceptedAs)}. {fight.Text}{CombatJobHint(fight)}");
+        }
         else if (offer.State == OfferState.Accepted)
         {
             (chip, color, chipJob, sub) = ($"Accepted as {ClassJobs.Abbreviation(offer.AcceptedAs)}", Palette.ClassJobColor(offer.AcceptedAs), offer.AcceptedAs,
-                What(catalog, q, offer.AcceptedAs));
+                What(catalog, q, offer.AcceptedAs, fighter));
         }
         else if (ready is { Ready: false } need)
         {
             (chip, color, icon, sub) = (NeedChip(need.Need), Palette.Warn, FontAwesomeIcon.ExclamationTriangle, need.Text ?? "");
             if (need.Need == NeedKind.Crystals) sub += " in your bags. The run takes them from your retainers, or gathers them, when it can.";
+            else sub += CombatJobHint(need);
         }
         else
         {
-            (chip, color, icon, sub) = ("The run does it", Palette.Accent, FontAwesomeIcon.Check, What(catalog, q, job));
+            (chip, color, icon, sub) = ("The run does it", Palette.Accent, FontAwesomeIcon.Check, What(catalog, q, job, fighter));
         }
 
         var start = ImGui.GetCursorScreenPos();
@@ -738,7 +794,19 @@ internal sealed class TribesPage : Page
         NeedKind.ClassLevel => "Needs a higher level",
         NeedKind.Gearset => "Needs a gearset",
         NeedKind.EquipItem => "Needs an item",
+        NeedKind.CombatJob => "Needs a combat job",
         _ => "Needs something",
+    };
+
+    /// <summary>
+    /// For a need of the combat job that names the job (its level, its gearset): which job that is and where it's
+    /// picked, as a sentence after the need. Nothing for the other needs (theirs say where to go already).
+    /// </summary>
+    private static string CombatJobHint(QuestReadiness need) => !need.AboutCombatJob ? "" : need.Need switch
+    {
+        NeedKind.ClassLevel => ". The run fights on the job picked under Settings, Monster drops.",
+        NeedKind.Gearset => ". Save one, or pick another job under Settings, Monster drops.",
+        _ => "",
     };
 
     /// <summary>The quest's item (what it crafts or gathers for the class), else a glyph for its kind of errand, in a 28 px square.</summary>
@@ -773,7 +841,8 @@ internal sealed class TribesPage : Page
     private static (FontAwesomeIcon, Vector4) Glyph(TribeQuest q)
     {
         if (q.Has(StepKinds.Snipe)) return (FontAwesomeIcon.Crosshairs, Palette.TextMuted);
-        if (q.Has(StepKinds.Combat)) return (FontAwesomeIcon.FistRaised, Palette.TextMuted);
+        if (q.Has(StepKinds.Stealth)) return (FontAwesomeIcon.EyeSlash, Palette.TextMuted);
+        if (q.Has(StepKinds.Combat)) return (FontAwesomeIcon.FistRaised, Palette.Accent);
         if (q.Has(StepKinds.Mount)) return (FontAwesomeIcon.Horse, Palette.Accent);
         if (q.Has(StepKinds.Say)) return (FontAwesomeIcon.CommentDots, Palette.Accent);
         if (q.Has(StepKinds.Emote)) return (FontAwesomeIcon.Smile, Palette.Accent);
@@ -782,28 +851,52 @@ internal sealed class TribesPage : Page
         return (FontAwesomeIcon.MapMarkerAlt, Palette.Accent);
     }
 
-    /// <summary>What the quest asks, in a few words: "Crafts Snow Removal Tool as Carpenter (up to 4)", "An errand: rides a quest mount".</summary>
-    private static string What(GameCatalog catalog, TribeQuest q, uint job)
+    /// <summary>
+    /// What the quest asks and as which class, in a few words: "Crafts Snow Removal Tool as Carpenter, up to 4", "Gathers
+    /// Ancient Lumber as Botanist", "Fights Zahar'ak lancers and Zahar'ak archers as Paladin", "An errand as Paladin: rides
+    /// a quest mount and uses its action".
+    /// </summary>
+    /// <param name="fighter">The combat job a crafter's daily fights on (the Ixal's); 0 when it has no fight, or no job is usable.</param>
+    private static string What(GameCatalog catalog, TribeQuest q, uint job, uint fighter = 0)
     {
         if (q.Craft is { } c && (job == 0 || ClassJobs.IsCrafter(job)))
-            return $"Crafts {catalog.ItemName(c.Product)}{(job != 0 ? $" as {ClassName(job)}" : "")}, up to {QuestCraft.MostCrafts}{(c.NeedsHq ? ", high quality only" : "")}";
+        {
+            // What a crafting daily does in public or on another job is said too: a fight (the Ixal's), a /say phrase.
+            var besides = new List<string>();
+            if (q.Has(StepKinds.Combat)) besides.Add($"fights {Enemies(q)}{As(fighter)}");
+            if (q.Has(StepKinds.Say)) besides.Add("says a phrase in /say");
+            return $"Crafts {catalog.ItemName(c.Product)}{As(job)}, up to {QuestCraft.MostCrafts}{(c.NeedsHq ? ", high quality only" : "")}"
+                   + (besides.Count > 0 ? ", and " + Join(besides) : "");
+        }
         if (q.Gather.Count > 0 && (job == 0 || job is 16 or 17))
         {
             var g = q.GatherFor(job) ?? q.Gather[0];
-            return $"Gathers {catalog.ItemName(g.ItemId)}{(job != 0 ? $" as {ClassName(job)}" : "")}";
+            return $"Gathers {catalog.ItemName(g.ItemId)}{As(job)}";
         }
         var parts = new List<string>();
         if (q.Has(StepKinds.Mount)) parts.Add(q.Has(StepKinds.MountAction) ? "rides a quest mount and uses its action" : "rides a quest mount");
         if (q.Has(StepKinds.Say)) parts.Add("says a phrase in /say");
         if (q.Emotes.Count > 0) parts.Add("uses " + Join(q.Emotes.Select(EmoteCommand)));
         if (q.Has(StepKinds.Carry)) parts.Add("carries a load");
-        if (q.Has(StepKinds.UseItem)) parts.Add("uses a key item");
+        if (q.Has(StepKinds.ItemOnEnemy)) parts.Add("uses a key item on an enemy");
+        else if (q.Has(StepKinds.UseItem)) parts.Add("uses a key item");
         else if (q.Has(StepKinds.KeyItem)) parts.Add("hands over a key item");
         if (q.SubZones.Count > 0) parts.Add("goes to " + Join(q.SubZones.Select(ZoneName).Where(z => z.Length > 0).Distinct()));
         if (q.Has(StepKinds.Snipe)) parts.Add("shoots targets");
-        if (q.Has(StepKinds.Combat)) parts.Add("fights");
-        return parts.Count == 0 ? "An errand: talks to people nearby" : "An errand: " + Join(parts);
+        if (q.Has(StepKinds.Stealth)) parts.Add("stays unseen under a spell");
+        if (q.Has(StepKinds.Combat))
+            return $"Fights {Enemies(q)}{As(job)}" + (parts.Count > 0 ? "; also " + Join(parts) : "");
+        return $"An errand{As(job)}: " + (parts.Count == 0 ? "talks to people nearby" : Join(parts));
     }
+
+    /// <summary>" as Paladin" (nothing while no class is known).</summary>
+    private static string As(uint job) => job != 0 ? $" as {ClassName(job)}" : "";
+
+    /// <summary>
+    /// Who a quest fights: the field monsters it counts by name ("Zahar'ak lancers and Zahar'ak archers"), else the
+    /// enemies that appear for it (the game data gives those no name).
+    /// </summary>
+    private static string Enemies(TribeQuest q) => q.FieldEnemies.Count > 0 ? Join(q.FieldEnemies) : "the quest's own enemies";
 
     /// <summary>Whether the offers worked out for a giver match what its list showed today.</summary>
     private static void DrawCheck(TribeGiver giver)
@@ -943,8 +1036,12 @@ internal sealed class TribesPage : Page
         };
     }
 
+    /// <summary>A class's name as the game spells it, each word capitalised ("Carpenter", "Dark Knight"); its abbreviation when the sheet has none.</summary>
     private static string ClassName(uint job)
-        => TribeData.Capitalise(Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(job)?.Name.ExtractText() ?? ClassJobs.Abbreviation(job));
+    {
+        var name = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(job)?.Name.ExtractText() ?? "";
+        return name.Length == 0 ? ClassJobs.Abbreviation(job) : string.Join(' ', name.Split(' ').Select(TribeData.Capitalise));
+    }
 
     private static string EmoteCommand(uint emote)
         => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Emote>().GetRowOrDefault(emote)?.TextCommand.ValueNullable?.Command.ExtractText() is { Length: > 0 } c ? c : "an emote";

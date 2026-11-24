@@ -241,16 +241,17 @@ the window showed other items. Please send a bug report then.
 
 ## Tribes
 
-Since 0.22 the run does the dailies of the crafter and gatherer societies, and the Ixal's craft-only ones.
-Rank quests by button, the battle societies, the rest of the Ixal's dailies, the intersocietal quests and a
-shopping list for the society shops are planned.
+The run does the dailies of all 20 societies. The crafter and gatherer societies' dailies have been done since
+0.22. The 11 battle societies' dailies, and the Ixal's with a fight or a password, are done too and still
+being tested: a bug report helps when one goes wrong. Rank quests and the intersocietal quests by button, and a
+shopping list for the society shops, are planned.
 
 ### How many dailies does it take a day?
 
-Within the 12 allowances a day, up to 3 from each giver. Most societies have one giver; the Ixal have one for
-each rank, so more than 3 a day is possible there. On the day you rank up, the giver offers 3 more when the new
-rank has dailies of its own: reaching Sworn gives none for most societies, and reaching Bloodsworn none for
-any.
+Within the 12 allowances a day, up to 3 from each giver. Most societies have one giver; the Ixal and the four
+ARR battle societies (Amalj'aa, Sylphs, Kobolds, Sahagin) have one for each rank, so more than 3 a day is
+possible there. On the day you rank up, the giver offers 3 more when the new rank has dailies of its own:
+reaching Sworn gives none for most societies, and reaching Bloodsworn none for any.
 
 ### What does Rank up do with my allowances?
 
@@ -263,9 +264,11 @@ notice, and its allowances go elsewhere. *Currency* and *Levelling* keep doing i
 
 Until you pick one, *Rank up* while a ticked society is below its top rank, then *Currency*.
 
-### Why do some Ixal dailies come last under Currency?
+### Why do some givers' dailies come last under Currency?
 
-The dailies of the Ixal's givers below Respected pay no Oaknots, so under *Currency* those givers come last.
+Their dailies pay none of the society's currency, so under *Currency* those givers get allowances last: the
+Ixal's givers below Respected (no Oaknots), and the Neutral and Recognized givers of the Amalj'aa, Sylphs,
+Kobolds and Sahagin, whose dailies pay a Venture and no tokens.
 
 ### How are the days to a rank counted?
 
@@ -277,7 +280,29 @@ to the next rank and to the society's top rank: Bloodsworn for most, Sworn for t
 
 "The run does it": the run can take it today. "Do it yourself" comes with the reason the run doesn't take it
 (a minigame, a FATE, a rank quest and the like). "Needs …" says what's missing first: crystals, a class level, a
-saved gearset, or an item to wear (the Ixal's Ehcatl Wristgloves, sold by their vendor).
+saved gearset, a combat job for a fight, or an item to wear (the Ixal's Ehcatl Wristgloves, sold by their
+vendor).
+
+### Which job does the run fight on?
+
+The one picked under *Monster drops* (Settings), in its best gearset, with the basic combo and the chocobo as
+set there. A battle society's daily is accepted on that job, since a quest locks to the class it's accepted on.
+With no job picked, battle dailies are only taken on the combat job you're on when you start. The Tribes page
+shows the job under *Combat job*, and each quest says what's missing: "Pick a combat job under Settings,
+Monster drops", a level ("PLD is below level 60") or a gearset ("No gearset saved for PLD").
+
+### What does the run attack?
+
+The quest's own enemies, and whatever attacks you or your chocobo. Other monsters of the same kind, and
+enemies someone else is fighting, are left alone. Where a quest has a key item for a weakened enemy, the run
+stops attacking and uses the item. It gets off the mount before a fight. A knock-out counts against the
+*Knock-outs* limit (Settings, Security), as in an order run.
+
+### How are the Ixal's dailies with a fight done?
+
+They're accepted as a crafter like the Ixal's others. For the fight the run changes to the *Monster drops* job
+and then back, because the quest only moves on as the class it was accepted as. That takes the combat job at
+level 50 or more with a saved gearset; without it the quest shows "needs …" and isn't accepted.
 
 ### Why does it craft some dailies for high quality?
 
@@ -306,12 +331,20 @@ and the Namazu's "Out of the Frypan", stay "do it yourself" too.
 "Demolition Demo" and "Substitute Tester" fire a cannon that has to be aimed at each target, which the run
 can't do yet. They're "do it yourself" for now.
 
-### Why are two emote dailies "do it yourself"?
+### Why are some emote dailies "do it yourself"?
 
-In the Moogles' "The Moogle Motivator" and the Yok Huy's "Romanced by the Stone", the emote goes to people the
-quest's data doesn't name; it only points at an area. Emotes are public, so the run only emotes at someone the quest
-names, and leaves these two to you for now. Phrases for `/say` are different: when a step points at a place, the run
-goes there and says the phrase once.
+In nine dailies the emote goes to people or things the quest's data doesn't name; it only points at an area or
+an object. Emotes are public, so the run only emotes at someone the quest names, and leaves these to you for
+now: the Moogles' "The Moogle Motivator", the Yok Huy's "Romanced by the Stone", the Kobolds' "Hells Have No
+Fury", the Vanu Vanu's "Dance Commander", "Electric Gunduloo" and "Wildwort and Sundrop", the Kojin's "You Have
+the Rite", the Ananta's "When Feathers Fly" and the Arkasodara's "Blood from a Stonemason". Phrases for `/say`
+are different: when a step points at a place, the run goes there and says the phrase once.
+
+### Why are the Sylphs' stealth dailies "do it yourself"?
+
+"Now You See Me", "Waterbringer" and "Mist Opportunities" are done while a sylph's spell keeps you unseen,
+before it runs out; blooms on the way make it last longer. The run can't do that yet, so they're "do it
+yourself" for now.
 
 ### Why are the FATE dailies left out?
 
@@ -320,8 +353,13 @@ long time. They're marked "do it yourself" and not accepted.
 
 ### Why is the Ixal's "Deliverance" left out?
 
-It has a quota system of its own, so it's marked "do it yourself" and not accepted. The Ixal's craft-only
-dailies are done; the rest of the Ixal's dailies are planned with the battle societies.
+It has a quota system of its own, so it's marked "do it yourself" and not accepted.
+
+### Which Ixal dailies does the run do?
+
+The crafting ones, the ones with a fight and the ones with a password to `/say`. Nine have a step for a
+Miner, Botanist or Fisher partway through; the run doesn't change to a gatherer inside a quest yet, so those
+are "do it yourself" for now.
 
 ### Why doesn't it take gatherer dailies as Fisher?
 
@@ -330,16 +368,17 @@ Botanist instead.
 
 ### Why does the Levelling goal skip my lowest combat job?
 
-This applies once the battle societies arrive (planned). *Levelling* only takes a battle quest on a job at
-least 5 levels above the quest's level, and picks the lowest such job. The basic combat has little healing,
-and ARR society quests aren't level-synced, so the extra levels keep the fights safe.
+*Levelling* only takes a battle quest on a job at least 5 levels above the quest's level, and picks the
+lowest such job that the basic combo knows and that has a saved gearset. The basic combo has little healing,
+and ARR society quests aren't level-synced, so the extra levels keep the fights safe. When no job is that far
+above, the quest goes to the job picked under *Monster drops*, as under the other goals.
 
 ### Does the run unlock societies or do rank quests?
 
 It doesn't do unlock quests: the page shows what's missing for each society, and those quests are yours. Rank
 quests are yours too for now: the page gives a notice when one is ready. They're planned for a later release,
 started with *Do the rank quest*; the three with a solo duty (Kojin, Ananta, Pixies) will warn you beforehand
-and pause at the duty for you to do it.
+and pause at the duty for you to do it. The intersocietal quests for the "Allied" rank are planned with them.
 
 ### Can I keep some allowances for myself?
 

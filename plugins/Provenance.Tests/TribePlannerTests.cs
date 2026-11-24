@@ -48,7 +48,7 @@ public class TribePlannerTests
         {
             Days = days, Accepted = accepted ?? Array.Empty<AcceptedTribeQuest>(), Allowances = allowances, Goal = goal,
             LeftOut = leftOut ?? new HashSet<uint>(), LeaveOutSay = leaveOutSay, Classes = classes ?? Crafters(current), CurrentJob = current,
-            Territory = Here, Owns = owns ?? (_ => true), ItemName = id => $"Item {id}", ClassName = id => $"Class {id}",
+            Territory = Here, Owns = owns ?? (_ => true), ItemName = id => $"Item {id}", ItemNamePlural = id => $"Items {id}", ClassName = id => $"Class {id}",
             CraftsLeft = craftsLeft ?? (_ => null), Excluded = excluded ?? new Dictionary<uint, string>(),
         });
 
@@ -148,9 +148,10 @@ public class TribePlannerTests
     [Fact]
     public void UnderCurrencyTheIxalGiversThatPayNoOaknotsComeLastButKeepTheirPlace()
     {
-        var low = Giver(501, 1, 1);
+        // The game data says which givers' dailies pay the society's currency: of the Ixal's, the Respected and Honored ones.
+        var low = Giver(501, 1, 1) with { PaysCurrency = false };
         var respected = Giver(505, 5, 5);
-        var ixal = Society(QuestPolicy.IxalId, 7, 100, TribeKind.Crafter, low, respected);
+        var ixal = Society(QuestPolicy.IxalId, 7, 100, TribeKind.Crafter, low, respected) with { CurrencyItem = 21073 };
         var ixalDay = new TribeToday(ixal, 6, false, 0, 1000, false, new[]
         {
             new GiverToday(low, new[] { Open(Daily(5, 1501, 501)), Open(Daily(5, 1502, 501)), Open(Daily(5, 1503, 501)) }, 0),
@@ -162,7 +163,9 @@ public class TribePlannerTests
         var plan = Plan(new[] { ixalDay, other }, allowances: 6, goal: TribeGoal.Currency);
         Assert.Equal(6, plan.ToAccept);
         Assert.DoesNotContain(plan.Quests, q => q.Quest.Giver == 501);
-        Assert.Equal(3, plan.LeftOut.Count(l => l.Quest.Giver == 501 && l.Reason.Contains("Ixali Oaknots")));
+        // The reason names the currency (the game's plural: "Ixali Oaknots").
+        Assert.Equal(3, plan.LeftOut.Count(l => l.Quest.Giver == 501
+            && l.Reason == "No allowances left for it today: this giver's dailies pay no Items 21073, so they come last under Currency"));
 
         // With allowances for all, the low giver's dailies are taken where the Ixal are on the tour.
         plan = Plan(new[] { ixalDay, other }, allowances: 12, goal: TribeGoal.Currency);

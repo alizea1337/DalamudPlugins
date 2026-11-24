@@ -18,9 +18,10 @@ namespace Provenance.Integrations;
 
 /// <summary>
 /// Allied societies in the game: rank, reputation and the "ranked up today" bit per society, the allowances left, the
-/// day's daily-quest slots and seed, the society quests in the journal and the class each was taken on, which
-/// unlock, rank and intersocietal quests are done, which shop items are already owned, and the achievements. Plus the
-/// check of the worked-out offers against a giver's "Daily Quests" list (<see cref="Observe"/>).
+/// day's daily-quest slots and seed, the society quests in the journal and the class each was taken on, the player's
+/// classes a daily can be taken on (crafters, gatherers and combat jobs), which unlock, rank and intersocietal quests
+/// are done, which shop items are already owned, and the achievements. Plus the check of the worked-out offers
+/// against a giver's "Daily Quests" list (<see cref="Observe"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -204,19 +205,55 @@ internal static unsafe class Tribes
 
     // ------------------------------------------------------------------ what the player has
 
-    /// <summary>The player's crafters and Miner/Botanist: level, a saved gearset, and its item level.</summary>
+    /// <summary>
+    /// The combat classes and jobs a battle society's quests take: every Disciple of War or Magic but the limited jobs,
+    /// which is what the quests' <c>ClassJobCategory</c> 142 admits (checked against the 7.58 sheets: the same 30 rows).
+    /// </summary>
+    private static readonly Lazy<uint[]> CombatClasses = new(() =>
+    {
+        try
+        {
+            return Services.Data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>()
+                .Where(c => c.RowId != 0 && c.ClassJobCategory.RowId is DiscipleOfWar or DiscipleOfMagic && !c.IsLimitedJob)
+                .Select(c => c.RowId).ToArray();
+        }
+        catch (Exception) { return Array.Empty<uint>(); }
+    });
+
+    /// <summary><c>ClassJob.ClassJobCategory</c> of a combat class: 30 Disciple of War, 31 Disciple of Magic.</summary>
+    private const uint DiscipleOfWar = 30, DiscipleOfMagic = 31;
+
+    /// <summary>
+    /// The player's crafters, Miner and Botanist, and combat classes and jobs: level, a saved gearset and its item
+    /// level; and for a combat job whether the basic combat has a combo for it (the jobs Settings, Monster drops offers:
+    /// a starting class without its job has none).
+    /// </summary>
     public static List<ClassInfo> Classes()
     {
         var list = new List<ClassInfo>();
+        // The best gearset of every class in one pass over the gearsets.
+        var best = new Dictionary<uint, int>();
         var module = RaptureGearsetModule.Instance();
+        if (module != null)
+            for (var i = 0; i < 100; i++)
+            {
+                var e = module->Entries[i];
+                if ((e.Flags & RaptureGearsetModule.GearsetFlag.Exists) == 0) continue;
+                if (!best.TryGetValue(e.ClassJob, out var level) || e.ItemLevel > level) best[e.ClassJob] = e.ItemLevel;
+            }
         foreach (var job in Core.Character.ClassJobs.Crafters.Concat(new uint[] { 16, 17 }))
-        {
-            var best = GameState.BestGearset(job);
-            var itemLevel = best >= 0 && module != null ? module->Entries[best].ItemLevel : 0;
-            list.Add(new ClassInfo(job, PlanService.JobLevel(job), best >= 0, itemLevel));
-        }
+            list.Add(new ClassInfo(job, PlanService.JobLevel(job), best.ContainsKey(job), best.GetValueOrDefault(job)));
+        var combos = Combat.BasicCombo.Jobs;
+        foreach (var job in CombatClasses.Value)
+            list.Add(new ClassInfo(job, PlanService.JobLevel(job), best.ContainsKey(job), best.GetValueOrDefault(job), combos.Contains(job)));
         return list;
     }
+
+    /// <summary>
+    /// The player's classes as the choice of one for a quest sees them: all of <see cref="Classes"/>, the class that's
+    /// on, and the combat job picked under Settings, Monster drops.
+    /// </summary>
+    public static PlayerClasses Who(Configuration config) => new(Classes(), GameState.CurrentJob, config.Combat.ClassJob);
 
     /// <summary>An item in the four bags and the crystal bag (where crafting takes its crystals from), as the plan counts them.</summary>
     public static int OnHand(uint itemId)

@@ -127,19 +127,24 @@ keeps it from sliding things around.
     do unlock quests); rank and reputation, with the dailies and days to the next rank and to the society's
     top rank (Bloodsworn for most, Sworn for the Ixal); a notice when a rank quest is ready; today's quests
     from each giver, worked out in advance and checked against the game when you talk to the giver, each
-    marked "the run does it", "do it yourself" (with the reason) or "needs …" (crystals, a class level, a
-    saved gearset, or an item to wear, such as the Ixal's Ehcatl Wristgloves); the allowances left and the
-    countdown to the daily reset (15:00 UTC, shown in your local time); what each rank opens in the society's
-    shop and what you already own; and the achievements and titles.
-  - The run, for the crafter and gatherer societies: the Moogles, Dwarves, Loporrits, Yok Huy, Namazu,
-    Qitari, Omicrons and Mamool Ja, plus the Ixal's craft-only dailies. It takes today's quests within the 12
-    daily allowances: up to 3 from each giver (the Ixal have one giver for each rank, so more than 3 a day
-    there), and on the day you rank up the 3 more the giver offers when the new rank has dailies of its own
-    (reaching Sworn gives none for most societies, reaching Bloodsworn none for any). Dailies already in your
-    journal come first, and one accepted before the reset first of all, since the game gives no new dailies
-    until it's handed in. The run does the errands too: talking, handing items over, emotes, `/say`, key
-    items, quest mounts and so on. A `/say` is the quest's own phrase, said once; if the game doesn't take it,
-    the run hands that step to you. An emote gets one more try after 15 seconds when nothing changed.
+    with what it asks and as which class, and marked "the run does it", "do it yourself" (with the reason) or
+    "needs …" (crystals, a class level, a saved gearset, a combat job, or an item to wear, such as the Ixal's
+    Ehcatl Wristgloves); the combat job the fights are done on; the allowances left and the countdown to the
+    daily reset (15:00 UTC, shown in your local time); what each rank opens in the society's shop and what
+    you already own; and the achievements and titles.
+  - The run, for all 20 societies. The crafter and gatherer societies (the Moogles, Dwarves, Loporrits, Yok
+    Huy, Namazu, Qitari, Omicrons and Mamool Ja, and the Ixal's crafting dailies) have been done since 0.22.
+    The 11 battle societies (the Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu Vanu, Vath, Kojin, Ananta, Pixies,
+    Arkasodara and Pelupelu) and the Ixal's dailies with a fight or a password are done too, and are still
+    being tested: please send a bug report when one goes wrong. It takes today's quests within the 12 daily
+    allowances: up to 3 from each giver (the Ixal and the four ARR battle societies have one giver for each
+    rank, so more than 3 a day there), and on the day you rank up the 3 more the giver offers when the new
+    rank has dailies of its own (reaching Sworn gives none for most societies, reaching Bloodsworn none for
+    any). Dailies already in your journal come first, and one accepted before the reset first of all, since
+    the game gives no new dailies until it's handed in. The run does the errands too: talking, handing items
+    over, emotes, `/say`, key items, quest mounts and so on. A `/say` is the quest's own phrase, said once;
+    if the game doesn't take it, the run hands that step to you. An emote gets one more try after 15 seconds
+    when nothing changed.
     Crafting quests are crafted with a Raphael rotation: the fastest one, or one for full quality when the
     quest only counts its item made high quality (the page says "high quality only"; a normal-quality one
     doesn't count, so after two tries without one the run asks you). Crystals come from
@@ -148,15 +153,28 @@ keeps it from sliding things around.
     quests are done as Miner or Botanist at the society's own nodes. Today's plan shows on the page, and on
     the Plan page when no order is on it and there are dailies to do; Pause, Resume and Stop are in the
     action bar and the compact strip.
+  - Fights: a battle society's dailies are accepted and fought on the job picked under *Monster drops*
+    (Settings), in its best gearset, with the basic combo and the chocobo as set there. With none picked,
+    they're only taken on the combat job you're on when you start. The run fights the quest's own enemies and
+    whatever attacks you, nothing else: other monsters, and enemies someone else is fighting, are left alone.
+    Where a quest has a key item for a weakened enemy, the run stops attacking and uses it. An Ixal daily with
+    a fight is accepted as a crafter like the others; for the fight the run changes to the *Monster drops* job
+    and back, which takes that job at level 50 or more with a saved gearset. A daily without a usable combat
+    job shows "needs …" and isn't accepted. Knock-outs count against the *Knock-outs* limit (Settings,
+    Security), as in an order run.
   - Goals: *Rank up* first takes the dailies that fill each society's bar, the lowest rank first;
     allowances still left after that go to more dailies, since they still pay currency, gil, crystals and
     EXP. A society whose bar is full waits for its rank quest: it gets
     a notice, and its allowances go elsewhere. *Currency* (for the society shops) takes as many dailies as
-    the day allows, the Ixal's givers below Respected last, since their dailies pay no Oaknots. *Levelling*
-    takes each daily on your lowest class that qualifies. Currency and Levelling keep doing the dailies of a
-    society whose bar is full. Until you pick one, the goal is Rank up while a ticked society is below its
-    top rank, then Currency. Under Rank up and Currency a quest is accepted on your current class when it
-    qualifies, otherwise on your best-geared one.
+    the day allows; the givers whose dailies pay none of the society's currency come last: the Ixal's below
+    Respected (no Oaknots) and the ARR battle societies' Neutral and Recognized ones (a Venture, no tokens).
+    *Levelling* takes each daily on your lowest class that qualifies; a battle quest only on a combat job at
+    least 5 levels above the quest's level, the lowest such job, since the basic combo has little healing and
+    ARR society quests aren't level-synced (when no job is that far above, the *Monster drops* job).
+    Currency and Levelling keep doing the dailies of a society whose bar is full. Until you pick one, the
+    goal is Rank up while a ticked society is below its top rank, then Currency. Under Rank up and Currency
+    a crafter's or gatherer's quest is accepted on your current class when it qualifies, otherwise on your
+    best-geared one, and a battle quest on the *Monster drops* job.
   - Options: *Include in the run* in each society's opened row; *Pause for cutscenes* (otherwise they're
     skipped); *Leave out quests that /say in public* (off to start), which skips those quests altogether; and
     *Note what the run would do while I do society quests myself (for bug reports)* (on to start, and only
@@ -171,21 +189,24 @@ keeps it from sliding things around.
     - The Ixal's "Deliverance": it has a quota system of its own.
     - Fisher for the gatherer dailies: the game data has no fishing spot or bait for those quest fish, so
       gatherer dailies are taken as Miner or Botanist.
-  - Not yet done by the run: the Dwarves' cannon dailies, "Demolition Demo" and "Substitute Tester", are
-    "do it yourself" for now, because the cannon has to be aimed. So are the Moogles' "The Moogle Motivator" and
-    the Yok Huy's "Romanced by the Stone": their emote goes to people the quest doesn't name, and the run only
-    emotes at someone it's sure of.
+  - Not yet done by the run, and "do it yourself" for now, with the reason:
+    - The Dwarves' cannon dailies, "Demolition Demo" and "Substitute Tester": the cannon has to be aimed.
+    - Dailies whose emote goes to people or things the quest doesn't name (it only points at an area or an
+      object), since the run only emotes at someone it's sure of: the Moogles' "The Moogle Motivator", the
+      Yok Huy's "Romanced by the Stone", the Kobolds' "Hells Have No Fury", the Vanu Vanu's "Dance
+      Commander", "Electric Gunduloo" and "Wildwort and Sundrop", the Kojin's "You Have the Rite", the
+      Ananta's "When Feathers Fly" and the Arkasodara's "Blood from a Stonemason".
+    - The Sylphs' three stealth dailies, "Now You See Me", "Waterbringer" and "Mist Opportunities": they're
+      done while a spell keeps you unseen, before it runs out.
+    - The nine Ixal dailies with a step for a Miner, Botanist or Fisher partway through: the run doesn't
+      change to a gatherer inside a quest yet.
   - Planned for later releases:
-    - Rank quests, started with *Do the rank quest*, escort and follow steps included. Three of them hold a
+    - Rank quests, started with *Do the rank quest*, escort and follow steps included, and with them the
+      intersocietal quests for the "Allied" rank. Three rank quests hold a
       solo duty (the Kojin's "A Test of Courage", the Ananta's "Schism between Sisters", the Pixies' "As the
       Heart Bids"): the run warns you beforehand and pauses at the duty for you to do it, then Resume
       carries on. Two contain a minigame and stay "do it yourself": the Kojin's "Under Wraps" and the
       Namazu's "Out of the Frypan". Until then rank quests are yours to do.
-    - The battle societies, with the basic combat on the job picked under Monster drops, plus the rest of
-      the Ixal's dailies and the intersocietal quests for the "Allied" rank. For safety, *Levelling* only
-      takes a battle quest on a job at least 5 levels above the quest's level, the lowest such job: the
-      basic combat has little healing, and ARR society quests aren't level-synced, so the extra levels
-      count.
     - A shopping list for the society shops.
 - **Travel tools**: `/prov tp <aetheryte>` teleports with Provenance's own teleport (no other
   plugin), `/prov flag` walks or flies to the map flag with vnavmesh.
@@ -212,7 +233,7 @@ Commands: `/prov`, `/prov start`, `/prov pause` (again to resume), `/prov stop`,
 | Fishing | Rod fishing and spearfishing of its own, ported from AutoHook and GatherBuddy Reborn (done; since 0.8) |
 | Cosmic Exploration | Crafting missions (done; since 0.18), two-class missions and Cosmic Fortunes (done; since 0.19), then gathering missions with critical missions and red alerts, then fishing missions, then Master missions and token shopping, and orders buying cosmic items; later the cosmic tools (relic), Artifact Search, class levels and mech ops |
 | Custom Deliveries | The page with the week and every client (done; since 0.20), the run for crafted and gathered requests (done; since 0.21), then fish and spearfishing requests, a shopping list for scrips at the cap and a trip after the run; later making items ahead and a Levelling goal |
-| Tribes | The page and the run for the crafter and gatherer societies' dailies (done; since 0.22), then rank quests by button, then the battle societies with the rest of the Ixal and the intersocietal quests, then a shopping list for the society shops |
+| Tribes | The page and the run for the crafter and gatherer societies' dailies (done; since 0.22), the battle societies' dailies and the Ixal's dailies with a fight or a password (done; still being tested), then rank quests and the intersocietal quests by button, then a shopping list for the society shops |
 
 ### To do
 

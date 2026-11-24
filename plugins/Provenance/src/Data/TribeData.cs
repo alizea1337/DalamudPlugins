@@ -12,8 +12,9 @@ namespace Provenance.Data;
 /// <summary>
 /// Allied societies ("tribes") from the game data: the 20 societies (<c>BeastTribe</c>) with their givers, unlock and
 /// rank quests, portals, shops and achievements; every society quest with what it asks (crafting with a recipe per
-/// crafter and its crystals, gathering with its quest-only node, the step kinds read from its script and text); and the
-/// rank ladder (<c>BeastReputationRank</c>). Read once with the catalog.
+/// crafter and its crystals, gathering with its quest-only node, the step kinds read from its script, its listeners
+/// and its text, the field monsters it fights by name); and the rank ladder (<c>BeastReputationRank</c>). Read once
+/// with the catalog.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,6 +24,17 @@ namespace Provenance.Data;
 /// their product in <c>RITEM*</c>/<c>QST_PRODUCT_ITEM</c> (8 recipes, one per crafter; <c>RITEM0 = 100</c> is a
 /// placeholder); gathering dailies name their item per gatherer in <c>QST_GATHERING_ITEM_MIN/HRV/FSH</c>, on gathering
 /// point bases the sheets place nowhere (territory 1), so the society's zone and <c>ExportedGatheringPoint</c> place them.
+/// </para>
+/// <para>
+/// Facts from the battle-society research (game data 7.58, checked against the game's sheets): every battle daily
+/// takes any Disciple of War or Magic but the limited jobs (<c>ClassJobCategory</c> 142) at the giver's level (41 to
+/// 48 in A Realm Reborn, then 50, 60, 70, 80 and 90). A quest fights exactly when it has <c>ENEMY*</c> arguments, which is
+/// exactly when <c>Quest.QuestListenerParams</c> lists battle NPCs (a <c>Listener</c> below 1,000,000): with
+/// <c>QuestUInt8A</c> 5 for a defeat, 9 for a defeat that gives a key item, 8 for a key item used on it. A listener with
+/// <c>ConditionType</c> 1 counts field monsters by name (<c>ConditionValue</c> is the <c>BNpcName</c>); type 3 is an
+/// enemy that appears for the quest at a <c>Level</c> spawn point, which the sheets give no name. The Sylphs' stealth
+/// quests name status 416 "Transparent" in a <c>STATUS*</c> argument. A daily pays the society's currency when its fixed
+/// rewards (<c>ItemRewardType</c> 1) hold it; the reward tables by class (6) and by rank (7) all do.
 /// </para>
 /// <para>
 /// The unlock quests and the society aetherytes are a fact table (the sheets don't link them). The portals in front of
@@ -94,11 +106,27 @@ internal sealed class TribeData
     private static readonly Dictionary<uint, uint> GilShops = new() { [5] = 262696, [8] = 262699 };
 
     /// <summary>
-    /// /say dailies whose phrase has no <c>_SAYTODO_</c> text (the Moogles' 2295 and five Ixal ones; queststeps research).
+    /// /say dailies whose phrase has no <c>_SAYTODO_</c> text: the Moogles' 2295 and five Ixal ones (queststeps
+    /// research), and the Vath's 2277 "Fifty Shades of Yellow", whose phrase "Uhm Ala" is its text row
+    /// <c>SYSTEM_000_012</c> (battle-society research, quest text 7.58). The battle societies' other four /say dailies
+    /// (2985, 3691, 3712, 4577) have the row.
     /// </summary>
-    private static readonly HashSet<ushort> SayWithoutText = new() { 2295, 1497, 1501, 1507, 1515, 1568 };
+    private static readonly HashSet<ushort> SayWithoutText = new() { 2295, 1497, 1501, 1507, 1515, 1568, 2277 };
 
+    /// <summary>Status 404 "Transporting": the quest has something carried in both arms.</summary>
     private const uint CarryStatus = 404;
+
+    /// <summary>Status 416 "Transparent": a Sylph's spell that hides the player for the Sylphs' stealth quests.</summary>
+    private const uint StealthStatus = 416;
+
+    /// <summary><c>QuestListenerParams.QuestUInt8A</c> on a battle NPC: a defeat, a key item used on it, a defeat that gives a key item.</summary>
+    private const byte ListenDefeat = 5, ListenItem = 8, ListenDefeatForItem = 9;
+
+    /// <summary><c>QuestListenerParams.ConditionType</c> on a battle NPC: field monsters counted by name (<c>ConditionValue</c> is the <c>BNpcName</c>).</summary>
+    private const byte ConditionFieldMonster = 1;
+
+    /// <summary><c>Quest.ItemRewardType</c>: the rewards are the fixed items of <c>Reward[]</c> (6 and 7 are tables by class and by rank).</summary>
+    private const byte FixedRewards = 1;
 
     // ------------------------------------------------------------------ building
 
@@ -149,13 +177,18 @@ internal sealed class TribeData
         var emotes = IndexEmotes();
 
         var territories = new Dictionary<uint, uint>();
-        foreach (var b in beastTribes) territories[b.RowId] = b.Level.ValueNullable?.Territory.RowId ?? 0;
+        var currencies = new Dictionary<uint, uint>();
+        foreach (var b in beastTribes)
+        {
+            territories[b.RowId] = b.Level.ValueNullable?.Territory.RowId ?? 0;
+            currencies[b.RowId] = b.CurrencyItem.RowId;
+        }
 
         // Every society quest, read once.
         foreach (var q in society)
         {
             var tribe = q.BeastTribe.RowId;
-            var quest = ReadQuest(q, territories.GetValueOrDefault(tribe), recipes, nodes, emotes);
+            var quest = ReadQuest(q, territories.GetValueOrDefault(tribe), currencies.GetValueOrDefault(tribe), recipes, nodes, emotes);
             if (quest != null) quests[quest.RowId] = quest;
         }
 
@@ -182,7 +215,7 @@ internal sealed class TribeData
 
     // ------------------------------------------------------------------ quests
 
-    private TribeQuest? ReadQuest(Lumina.Excel.Sheets.Quest q, uint tribeTerritory, Dictionary<uint, List<Recipe>> recipes,
+    private TribeQuest? ReadQuest(Lumina.Excel.Sheets.Quest q, uint tribeTerritory, uint currency, Dictionary<uint, List<Recipe>> recipes,
         Dictionary<uint, List<(GatheringPointBase Base, uint GatheringItem)>> nodes, Dictionary<string, uint> emotes)
     {
         var tribe = q.BeastTribe.RowId;
@@ -220,20 +253,36 @@ internal sealed class TribeData
             else if (name == "MOUNT0" && value != 0) { mount = value; steps |= StepKinds.Mount; }
             else if (name == "ACTION0" && value != 0) { action = value; steps |= StepKinds.MountAction; }
             else if (Is(name, "ENEMY")) steps |= StepKinds.Combat;
-            else if (name == "STATUS0" && value == CarryStatus) steps |= StepKinds.Carry;
+            else if (Is(name, "STATUS"))
+            {
+                if (value == CarryStatus) steps |= StepKinds.Carry;
+                else if (value == StealthStatus) steps |= StepKinds.Stealth;
+            }
             else if (Is(name, "EVENTRANGE")) steps |= StepKinds.EnterArea;
             else if (Is(name, "TERRITORYTYPE") && value != 0)
             {
                 steps |= StepKinds.SubZone;
                 if (value != tribeTerritory && !subZones.Contains(value)) subZones.Add(value);
             }
-            else if (Is(name, "SNP") || Is(name, "SNP_")) steps |= StepKinds.Snipe;
+            else if (Is(name, "SNP") || Is(name, "SNP_") || Is(name, "SNIPE_")) steps |= StepKinds.Snipe;
             else if (name.StartsWith("BIND_LEAD", StringComparison.Ordinal) || name.StartsWith("SEQEV_TSURE", StringComparison.Ordinal) || name == "ET_DOUKOU")
                 steps |= StepKinds.Escort;
         }
         if (q.ClassJobCategory1.RowId != 0) steps |= StepKinds.OtherClass;
-        // Not every minigame names itself in the script (2991 and 3707 have no SNP argument).
+        // The known minigames, however their script spells the argument.
         if (QuestPolicy.Minigames.Contains((ushort)(q.RowId - 0x10000))) steps |= StepKinds.Snipe;
+
+        // The battle NPCs the quest listens to: enemies to defeat or to use a key item on, and by name the field
+        // monsters whose kills it counts.
+        var fieldEnemies = new List<string>();
+        foreach (var l in q.QuestListenerParams)
+        {
+            if (l.Listener is 0 or >= 1_000_000) continue;
+            if (l.QuestUInt8A is ListenDefeat or ListenDefeatForItem or ListenItem) steps |= StepKinds.Combat;
+            if (l.QuestUInt8A == ListenItem) steps |= StepKinds.ItemOnEnemy;
+            if (l.ConditionType != ConditionFieldMonster || EnemyName(l.ConditionValue) is not { Length: > 0 } enemy) continue;
+            if (!fieldEnemies.Contains(enemy)) fieldEnemies.Add(enemy);
+        }
 
         // Zones the to-do lines point at, besides the society's own.
         foreach (var todo in facts?.Todos ?? Array.Empty<QuestTodo>())
@@ -263,9 +312,9 @@ internal sealed class TribeData
         }
         if (fish != 0) steps |= StepKinds.Fish;
 
-        // The journal text (client language) for /say phrases and emotes. Battle societies' text isn't needed yet.
+        // The journal text (client language) for /say phrases and emotes.
         var emoteIds = new List<uint>();
-        if (classes != TribeKind.Battle && facts != null)
+        if (facts != null)
         {
             if (facts.TextWith("_SAYTODO_").Any() || SayWithoutText.Contains((ushort)(q.RowId - 0x10000))) steps |= StepKinds.Say;
             foreach (var line in facts.TodoText)
@@ -273,11 +322,52 @@ internal sealed class TribeData
                 if (emotes.TryGetValue(m.Value.ToLowerInvariant(), out var emote) && !emoteIds.Contains(emote))
                     emoteIds.Add(emote);
             if (emoteIds.Count > 0) steps |= StepKinds.Emote;
+            if (EmoteNamesNobody(facts, emotes)) steps |= StepKinds.EmoteUnnamed;
         }
+
+        // The society's currency among the fixed rewards; the reward tables by class and by rank all hold it.
+        var pays = currency == 0 || q.ItemRewardType != FixedRewards || q.CurrencyReward.RowId == currency && q.CurrencyRewardCount > 0;
+        for (var i = 0; !pays && i < q.Reward.Count && i < q.ItemCountReward.Count; i++)
+            pays = q.Reward[i].RowId == currency && q.ItemCountReward[i] > 0;
 
         var level = q.ClassJobLevel.Count > 0 ? q.ClassJobLevel[0] : 0;
         return new TribeQuest(q.RowId, tribe, CleanName(q.Name.ExtractText()), kind, rank, q.DailyQuestPool, q.IssuerStart.RowId, q.TargetEnd.RowId,
-            classes, level, q.ReputationReward, steps, craft, gather, fish, keyItems, (mount, action), emoteIds, subZones, alternatives);
+            classes, level, q.ReputationReward, steps, craft, gather, fish, keyItems, (mount, action), emoteIds, subZones, alternatives)
+        {
+            FieldEnemies = fieldEnemies,
+            PaysCurrency = pays,
+        };
+    }
+
+    /// <summary>
+    /// A to-do line asks for an emote and its spots name no NPC (they're areas, or an object): the step engine, which
+    /// only emotes at an NPC the line names, has nobody to aim it at. A line without spots counts the same.
+    /// </summary>
+    private static bool EmoteNamesNobody(QuestFacts facts, Dictionary<string, uint> emotes)
+    {
+        var prefix = "TEXT_" + facts.Key.ToUpperInvariant() + "_TODO_";
+        foreach (var (key, line) in facts.Text)
+        {
+            if (!key.StartsWith(prefix, StringComparison.Ordinal) || line.Length == 0 || !int.TryParse(key.AsSpan(prefix.Length), out var index)) continue;
+            var emote = false;
+            foreach (Match m in SlashCommand.Matches(line))
+                emote |= emotes.ContainsKey(m.Value.ToLowerInvariant());
+            if (!emote) continue;
+            var todo = facts.Todos.FirstOrDefault(t => t.Index == index);
+            if (todo == null || !todo.Spots.Any(spot => spot.Object is >= FirstNpc and < FirstObject)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>ENpc ids start at 1,000,000 and EObj ids at 2,000,000 (allied-society research).</summary>
+    private const uint FirstNpc = 1_000_000, FirstObject = 2_000_000;
+
+    /// <summary>A monster's name for a list ("Zahar'ak lancers"): the plural when the client's language has one.</summary>
+    private static string EnemyName(uint bnpcName)
+    {
+        if (Services.Data.GetExcelSheet<BNpcName>().GetRowOrDefault(bnpcName) is not { } row) return "";
+        var plural = row.Plural.ExtractText();
+        return plural.Length > 0 ? plural : row.Singular.ExtractText();
     }
 
     private static readonly Regex SlashCommand = new(@"/[\p{L}\p{N}_\-]+", RegexOptions.Compiled);
@@ -395,7 +485,10 @@ internal sealed class TribeData
             var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Quest>().GetRowOrDefault(group.First().RowId);
             var at = row?.IssuerLocation.ValueNullable;
             givers.Add(new TribeGiver(group.Key, NpcName(group.Key), at?.Territory.RowId ?? territory, PlaceName(at?.Territory.RowId ?? territory),
-                at is { } l ? new Vector3(l.X, l.Y, l.Z) : Vector3.Zero, group.Min(q => q.Rank), group.Max(q => q.Rank)));
+                at is { } l ? new Vector3(l.X, l.Y, l.Z) : Vector3.Zero, group.Min(q => q.Rank), group.Max(q => q.Rank))
+            {
+                PaysCurrency = group.Any(q => q.PaysCurrency),
+            });
         }
 
         // Unlock: the fact table's first quest, then the society's rank-0 story quests.

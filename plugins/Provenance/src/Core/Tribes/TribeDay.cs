@@ -28,7 +28,7 @@ public sealed record GiverToday(TribeGiver Giver, IReadOnlyList<TribeOffer> Offe
 
 /// <summary>A society quest in the journal, with the class it's locked to.</summary>
 /// <param name="Sequence">The quest's step (0 just accepted, 255 ready to hand in).</param>
-/// <param name="AcceptClassJob">The class it was accepted on (DoH/DoL quests only go on with that class).</param>
+/// <param name="AcceptClassJob">The class it was accepted on (a society quest only goes on with that class).</param>
 /// <param name="Today">It has one of today's daily-quest slots; an accepted daily without one is left over from before the reset.</param>
 public sealed record AcceptedTribeQuest(TribeQuest Quest, byte Sequence, uint AcceptClassJob, bool Today)
 {
@@ -114,7 +114,7 @@ public static class TribeGoals
     /// The goal picked, else (decided with the user) "Rank up" while any society taking part is below its top rank,
     /// otherwise "Currency".
     /// </summary>
-    /// <param name="taking">The unlocked societies the run may visit (ticked, crafter or gatherer).</param>
+    /// <param name="taking">The unlocked societies the run may visit (the ticked ones, of all 20).</param>
     public static TribeGoal Effective(TribeGoal? picked, IEnumerable<TribeToday> taking)
         => picked ?? (taking.Any(t => t.Unlocked && !t.AtTop) ? TribeGoal.RankUp : TribeGoal.Currency);
 }
