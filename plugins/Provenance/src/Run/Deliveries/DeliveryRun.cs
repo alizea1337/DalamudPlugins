@@ -33,7 +33,8 @@ internal sealed unsafe class DeliveryRun
     private readonly Crafter crafter;
     private readonly Gatherer gatherer;
     private readonly Shopper shopper;
-    private readonly Travel travel = new();
+    /// <summary>Clients stand in houses and under roofs: the buildings rules are on.</summary>
+    private readonly Travel travel = new() { RoofAware = true };
     private readonly List<(DateTime At, string Text, bool Problem)> log = new();
     private readonly Dictionary<uint, int> aim = new();
     private readonly Dictionary<uint, int> want = new();

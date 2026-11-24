@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.6
+
+- Custom Deliveries and order runs: an NPC inside a building was flown at from outside, so the character ended
+  up against the wall and stayed stuck there (R'dhyanki in Labyrinthos). The rules the Tribes run already uses
+  for buildings now apply to every trip to a vendor, an appraiser or a delivery client: the run lands in the
+  open near the building, gets off and walks in through the door, and it walks out of a building before it
+  mounts up. Trips to gathering nodes and fishing holes go as before.
+
 ## 0.22.5
 
 - Other automation plugins: Provenance now deals with the three that get in a run's way most.

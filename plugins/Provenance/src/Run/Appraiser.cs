@@ -22,7 +22,8 @@ internal sealed unsafe class Appraiser
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
-    private readonly Travel travel = new();
+    /// <summary>Appraisers stand in shops and under roofs: the buildings rules are on.</summary>
+    private readonly Travel travel = new() { RoofAware = true };
     private readonly List<uint> items = new();
     private (uint NpcId, string Name, uint TerritoryId, System.Numerics.Vector2 Position) npc;
     private Step step = Step.Idle;

@@ -132,9 +132,9 @@ internal sealed unsafe partial class Travel
 
     /// <summary>
     /// The rules for buildings and raised floors (Travel.Indoors.cs): out of a building on foot first, a target under a
-    /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to quest
-    /// NPCs (the Tribes run turns it on); off, a trip goes exactly as it always did (gathering under tree canopies, cliff
-    /// nodes, vendors, clients).
+    /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to NPCs
+    /// (quest NPCs, vendors, appraisers, delivery clients turn it on); off, a trip goes exactly as it always did
+    /// (gathering under tree canopies, cliff nodes).
     /// </summary>
     public bool RoofAware { get; set; }
 
