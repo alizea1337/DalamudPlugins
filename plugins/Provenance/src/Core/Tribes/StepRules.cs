@@ -71,6 +71,12 @@ public sealed record StepPlan(StepKind Kind, string What)
     public uint Level { get; init; }
     /// <summary>What an attempt is counted under (public actions: once per step).</summary>
     public string Key { get; init; } = "";
+    /// <summary>
+    /// The class the step is done as (0: whichever is on). A trip can be made on another one (an Ixal hand-over is
+    /// travelled to on the combat job, through where the quest's enemies appear): at the target the step is decided
+    /// afresh, which puts the class on first.
+    /// </summary>
+    public uint Job { get; init; }
     /// <summary>A /say or an emote: seen by everyone around, so sent once per step (an emote once more).</summary>
     public bool Public => Kind is StepKind.Say or StepKind.Emote;
 
@@ -141,9 +147,22 @@ public sealed class StepMemory
     public int HqMisses { get; set; }
     /// <summary>
     /// Enemies given up on (by game object id): a fight that took too long, one that couldn't be reached or hurt, one
-    /// the quest's item did nothing to. Not fought again while this quest is worked on.
+    /// the quest's item or the quest mount's action did nothing to, one the game says isn't the character's to
+    /// attack. Not fought again while this quest is worked on, unless it attacks: what attacks is always fought.
     /// </summary>
     public HashSet<ulong> GivenUp { get; } = new();
+    /// <summary>
+    /// Enemies that attack but couldn't be reached or hurt (on a ledge, behind something, invulnerable), left for now:
+    /// the step goes on meanwhile. The stepper puts them here, and takes them out again after a while for another try.
+    /// </summary>
+    public HashSet<ulong> CantHit { get; } = new();
+    /// <summary>
+    /// The enemy the run's attack has just gone out on (0: none). In combat without a target yet, it's the run's all
+    /// the same: the game takes a moment to show whom a mob turned on.
+    /// </summary>
+    public ulong Striking { get; set; }
+    /// <summary>Since when the character has been getting its health back before the next fight (default: it isn't).</summary>
+    public DateTime RestSince { get; set; }
     /// <summary>How many were given up on since the player last took over: after <see cref="StepRules.MaxGiveUps"/> the player is asked.</summary>
     public int GiveUps { get; set; }
     /// <summary>Enemies defeated since the quest last moved on (a defeat that counts moves it on).</summary>
@@ -151,8 +170,9 @@ public sealed class StepMemory
     /// <summary>Times the quest's item was used on an enemy, by game object id.</summary>
     public Dictionary<ulong, int> ItemUses { get; } = new();
     /// <summary>
-    /// Enemies the run fought (by game object id). One of them that was subdued is the run's to use the quest's item on,
-    /// whatever else marks it: it stops attacking then, and may stop counting as hostile.
+    /// Enemies the run fought (by game object id): those that turned on the character or the chocobo, or lost health
+    /// to the run's attack (not one it only walked up to). One of them that was subdued is the run's to use the
+    /// quest's item on, whatever else marks it: it stops attacking then, and may stop counting as hostile.
     /// </summary>
     public HashSet<ulong> Fought { get; } = new();
     /// <summary>
@@ -355,6 +375,18 @@ public static class StepRules
     public const int MaxIdleKills = 15;
     /// <summary>"Weakness" and "Brink of Death": the statuses a knock-out leaves behind. No fight is started with them.</summary>
     public static readonly IReadOnlySet<uint> KnockOutStatuses = new HashSet<uint> { 43, 44 };
+    /// <summary>No fight is picked, and nothing that calls the quest's enemies is done, below this much health (percent).</summary>
+    public const int FightFromHp = 70;
+    /// <summary>The wait for health is this long at most; then the step goes on as it is.</summary>
+    public static readonly TimeSpan RestFor = TimeSpan.FromSeconds(40);
+    /// <summary>The wait for health is for a step this close by (further off, the health comes back on the way).</summary>
+    public const float RestNear = 60f;
+    /// <summary>
+    /// A quest accepted as a crafter with a fight at this sequence (the Ixal's): this close to whoever is talked to
+    /// or handed something, the crafter goes back on. Wider than the talk's own reach, so standing at its edge doesn't
+    /// change the class back and forth.
+    /// </summary>
+    public const float ClassChangeWithin = 10f;
 
     /// <summary>A class that doesn't fight: a crafter (8–15) or a gatherer (16–18).</summary>
     public static bool HandOrLand(uint job) => job is >= 8 and <= 18;
@@ -364,39 +396,63 @@ public static class StepRules
     /// The job a quest accepted as a crafter or gatherer is fought on (the Ixal's: Settings, Monster drops); 0 when none
     /// is picked. A battle society's quest is fought on the job it was accepted as.
     /// </param>
+    /// <remarks>
+    /// The order around fights. What attacks the character or the chocobo is answered first, before any reason to ask
+    /// the player (a run that asks stops, and a stopped run doesn't defend itself); on the quest mount that's its
+    /// action, on the quest's own enemies only. Then the reasons to ask (nothing changed for long, fights given up,
+    /// defeats that didn't count). Then the quest's own enemies in view, once the character has its health back. In
+    /// combat with nothing the run can fight, a combat job waits it out, unless what attacks can't be reached or hurt:
+    /// then, as for a class that doesn't fight, the step goes on by the last calm look. Whoever calls this while in
+    /// combat holds a returned <see cref="StepKind.AskUser"/> back until the fight is over (the stepper does).
+    /// </remarks>
     public static StepPlan Decide(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay = false, uint combatJob = 0)
     {
         if (!s.Accepted)
             return s.Completed ? new StepPlan(StepKind.Done, "The quest is complete.") : new StepPlan(StepKind.Failed, "The quest isn't in the journal any more.");
+        var stale = m.ProgressAt != default && now - m.ProgressAt > NoProgressLimit;
         // Before the wait for a busy game: a game that stays busy doesn't stop the clock.
-        if (m.ProgressAt != default && now - m.ProgressAt > NoProgressLimit)
-            return Ask($"Nothing has changed for {NoProgressLimit.TotalMinutes:0} minutes; do this step yourself, then resume.");
-        if (s.Busy) return new StepPlan(StepKind.Wait, "busy");
+        if (s.Busy) return stale ? Ask(Stale()) : new StepPlan(StepKind.Wait, "busy");
 
         var riding = q.Mount is { } qm && s.Mounted && s.Mount == qm.Mount;
 
         // Enemies come before everything else, and before the wait while in combat (a run that is attacked mustn't
-        // stand there): on a combat job, whatever attacks and the quest's own enemies in view are fought.
+        // stand there). On a combat job: whatever attacks, and the quest's own enemies in view. On the quest mount its
+        // action is the weapon, and only for the quest's own (the Ananta's marid tramples the ants; past anything else
+        // that attacks it rides on).
+        StepEnemy? enemy = null;
+        EnemyJudgement why = default;
+        if (s.Fighter && riding)
+        {
+            enemy = q.Mount!.Action != 0 ? EnemyRules.NextOwn(q, s, m) : null;
+            if (enemy != null) why = EnemyRules.Own(q, s, enemy, m);
+        }
+        else if (s.Fighter)
+        {
+            enemy = EnemyRules.Next(q, s, m);
+            if (enemy != null) why = EnemyRules.Judge(q, s, enemy, m);
+        }
+        var attacked = enemy != null && (riding ? enemy.AttacksMe : why.Verdict == EnemyVerdict.Attacker);
+        if (attacked) return riding ? MountAttack(q.Mount!, s, m, enemy!) : Fight(s, enemy!, why);
+
+        if (stale) return Ask(Stale());
         if (m.GiveUps >= MaxGiveUps)
             return Ask($"{m.GiveUps} of the quest's fights were given up (too long, or the enemy couldn't be reached or hurt); do this step yourself, then resume.");
-        if (m.Kills > MaxIdleKills)
+        if (m.Kills >= MaxIdleKills)
             return Ask($"{m.Kills} enemies were defeated without the quest moving on; do this step yourself, then resume.");
-        if (s.Fighter && EnemyRules.Next(q, s, m) is { } enemy)
+
+        if (enemy != null)
         {
-            var why = EnemyRules.Judge(q, s, enemy, m);
-            if (riding)
-            {
-                // On the quest mount its action is the weapon (the Ananta's marid tramples the ants); with none, ride on.
-                if (MountAttack(q.Mount!, s, m, enemy) is { } attack) return attack;
-            }
-            else if (why.Verdict != EnemyVerdict.Attacker && s.Statuses.Overlaps(KnockOutStatuses))
+            // One that isn't attacking is the run's choice: not while weak from a knock-out, nor on low health.
+            if (riding) return MountAttack(q.Mount!, s, m, enemy);
+            if (s.Statuses.Overlaps(KnockOutStatuses))
                 return new StepPlan(StepKind.Wait, "weak from a knock-out: no fight is started until that wears off");
-            else return Fight(s, enemy, why);
+            return Rest(s, m, now) ?? Fight(s, enemy, why);
         }
         if (s.InCombat)
         {
             // Nothing of the run's to fight (the end of a fight, or someone else's): wait it out. The busy watch bounds it.
-            if (s.Fighter && !riding) return new StepPlan(StepKind.Wait, "in combat");
+            // Not when what attacks couldn't be reached or hurt: standing there helps nothing, so the step goes on.
+            if (s.Fighter && !riding && !EnemyRules.AttackedBeyondReach(s, m)) return new StepPlan(StepKind.Wait, "in combat");
             // A class that doesn't fight carries on: by the last calm look when the quest hasn't moved since (below),
             // else on to the next marked place, away from whatever attacks.
             if (!s.ScriptRead)
@@ -406,33 +462,142 @@ public static class StepRules
         }
         if (!s.ScriptRead) return new StepPlan(StepKind.Wait, "busy");
 
-        // The class first: as another class nobody (the facility supervisor neither) moves the quest on. A fight of a
-        // quest accepted as a crafter or gatherer (the Ixal's) is done on the combat job, for the whole of its sequence:
-        // the job can't be changed once the enemy is there.
         var fights = EnemyRules.Fights(q, s.Sequence);
-        if (s.AcceptJob != 0)
+        // A quest accepted as a crafter or gatherer with a fight at this sequence (the Ixal's): the fight is done on the
+        // combat job, the talks and hand-overs as the class it was accepted as.
+        if (fights && s.AcceptJob != 0 && HandOrLand(s.AcceptJob))
+            return Detour(q, s, m, now, leaveOutSay, combatJob, riding);
+
+        // The class first: as another class nobody (the facility supervisor neither) moves the quest on.
+        if (s.AcceptJob != 0 && s.Job != s.AcceptJob)
         {
-            var wanted = s.AcceptJob;
-            if (fights && HandOrLand(s.AcceptJob))
-            {
-                if (combatJob == 0 || HandOrLand(combatJob))
-                    return Ask("This step has a fight, and no combat job is picked under Settings, Monster drops. Pick one (or do the fight yourself), then resume.");
-                wanted = combatJob;
-            }
-            if (s.Job != wanted)
-            {
-                if (s.InCombat) return new StepPlan(StepKind.Wait, "in combat: the class can't be changed now");
-                return new StepPlan(StepKind.SwitchJob, wanted == s.AcceptJob ? "the quest goes on only as the class it was accepted as" : "the quest's fight is done on your combat job") { Id = wanted };
-            }
+            if (!s.InCombat) return Change(s.AcceptJob, s);
+            // The game changes no class in combat: the trip goes on meanwhile, the class once that's over.
+            return OnTheWay(Step(q, s, m, now, leaveOutSay, riding, fights) with { Job = s.AcceptJob }, s);
         }
         // A fight ahead on a class the basic combat has no actions for (a quest already in the journal can have been
         // accepted as any combat class): the player's, before anything calls the enemy.
-        if (fights && !s.Fighter)
-            return Ask("This step has a fight, and Provenance's basic combat has no actions for the class you're on; do the fight yourself, then resume.");
-        // Weak from a knock-out, with a fight ahead: wait until it wears off (it lasts under two minutes).
-        if (fights && s.Statuses.Overlaps(KnockOutStatuses))
-            return new StepPlan(StepKind.Wait, "weak from a knock-out: no fight is started until that wears off");
+        if (fights && !s.Fighter) return Ask(NoActions);
+        return Careful(q, s, m, now, Step(q, s, m, now, leaveOutSay, riding, fights), fights);
+    }
 
+    private const string NoActions = "This step has a fight, and Provenance's basic combat has no actions for the class you're on; do the fight yourself, then resume.";
+
+    private static string Stale() => $"Nothing has changed for {NoProgressLimit.TotalMinutes:0} minutes; do this step yourself, then resume.";
+
+    private static StepPlan Change(uint job, StepSnapshot s)
+        => new(StepKind.SwitchJob, job == s.AcceptJob ? "the quest goes on only as the class it was accepted as" : "the quest's fight is done on your combat job") { Id = job };
+
+    /// <summary>
+    /// A sequence with a fight, of a quest accepted as a crafter or gatherer (13 Ixal dailies). Which class does what:
+    /// talking to someone a to-do line names, handing over and crafting are done as the class the quest was accepted
+    /// as (it only moves on as that one); everything else in the sequence is done on the combat job, since it calls
+    /// the quest's enemies or leads through where they appear (the object that's used, the place walked into, the
+    /// NPCs who turn on you, the field mobs' area), and the class can't be changed once something attacks. So every
+    /// trip is made on the combat job, and the class the quest was accepted as goes on only at whoever is talked to
+    /// (<see cref="ClassChangeWithin"/>), out of combat, with none of the quest's enemies left to fight.
+    /// </summary>
+    /// <remarks>
+    /// By the game data and the quests' scripts (7.58): 1505 "Of Rodents and Rigging" hands its crate to Hildeyerd in
+    /// sequence 2, with an ambush on the way (an area that calls a Qiqirn); 1516 "Hot Cross Buns" has "Speak with
+    /// Duvicauroix" and the shearing knife's use on a feral croc both in sequence 1 (in either order, by its script: the
+    /// knife is in the bags from the accept, Duvicauroix hands out the materials). Those two name the NPC in the to-do
+    /// line's place. 1502 and 1519 call their enemies by talking to NPCs no line names; 1494, 1496, 1504 and 1513 by an
+    /// object or an area; 1503, 1506, 1512, 1517 and 1566 fight in a sequence of its own. Whether the game would take a
+    /// hand-over from the combat job isn't known (nothing here was run in game); as the crafter it does.
+    /// </remarks>
+    private static StepPlan Detour(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay, uint combatJob, bool riding)
+    {
+        if (combatJob == 0 || HandOrLand(combatJob))
+            return Ask("This step has a fight, and no combat job is picked under Settings, Monster drops. Pick one (or do the fight yourself), then resume.");
+        var step = Step(q, s, m, now, leaveOutSay, riding, true);
+        // Nothing to do just now (an emote that may still count): no class is changed for a wait.
+        if (step.Kind == StepKind.Wait) return step;
+        var handOver = HandOver(q, s, step);
+        var own = step.Kind is StepKind.Craft or StepKind.Gather || (handOver && Near(step, s, ClassChangeWithin));
+        var wanted = own ? s.AcceptJob : combatJob;
+        // The step is done as the class it needs: arriving as another (the trip to a hand-over), it's decided afresh.
+        if (step.Kind is not (StepKind.AskUser or StepKind.Craft or StepKind.Gather)) step = step with { Job = handOver ? s.AcceptJob : combatJob };
+        if (s.Job != wanted)
+        {
+            if (!s.InCombat) return Change(wanted, s);
+            // Attacked as the wrong class (the crafter before the change, or a straggler that can't be hit after the
+            // fight): the game changes no class in combat, so the trip goes on and the class once that's over.
+            return OnTheWay(step, s);
+        }
+        if (own || handOver || step.Kind == StepKind.AskUser) return step;
+        // On the combat job, with a fight ahead: one the basic combat has actions for.
+        if (!s.Fighter) return Ask(NoActions);
+        return Careful(q, s, m, now, step, true);
+    }
+
+    /// <summary>
+    /// Talking to (or a phrase or emote at) an NPC the open to-do lines name, or whoever the quest is reported to: a
+    /// talk or hand-over, not something that calls the quest's enemies. An NPC the quest's script holds without a line
+    /// naming them (the Qiqirn rats of 1502, the suspicious Coerthans of 1519) is one who turns on you.
+    /// </summary>
+    public static bool HandOver(QuestScript q, StepSnapshot s, StepPlan step)
+        => step.Kind is StepKind.Talk or StepKind.Say or StepKind.Emote && step.Target is { Kind: StepObjectKind.Npc } t
+           && (t.BaseId == TurnIn(q) || t.BaseId == q.Giver || SpotObjects(OpenLines(q, s)).Contains(t.BaseId));
+
+    /// <summary>The step's target or spot is in this zone, within this many yalms on the ground.</summary>
+    private static bool Near(StepPlan step, StepSnapshot s, float within)
+    {
+        if ((step.Target?.Position ?? step.Enemy?.Position ?? step.Spot) is not { } at) return true;
+        if (step.Territory != 0 && step.Territory != s.Territory) return false;
+        return Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(s.Player.X, s.Player.Z)) <= within;
+    }
+
+    /// <summary>
+    /// In combat on a class the step can't be done as: the way to it is made all the same (standing where one is
+    /// attacked helps nothing); there, the wait for the fight to end, and then the class.
+    /// </summary>
+    private static StepPlan OnTheWay(StepPlan step, StepSnapshot s)
+    {
+        var travels = step.Kind is StepKind.Talk or StepKind.Say or StepKind.Emote or StepKind.UseItem or StepKind.Go && (step.Target != null || step.Spot != null);
+        if (step.Kind == StepKind.AskUser) return step;
+        if (!travels || Near(step, s, step.Within)) return new StepPlan(StepKind.Wait, "in combat: the class can't be changed now");
+        return step with { What = "on the way while attacked (the class is changed once that's over): " + step.What };
+    }
+
+    /// <summary>
+    /// A step in a sequence with a fight that may call the quest's enemies (anything but a talk or hand-over: an object
+    /// used, a key item, a place walked into, the mount's action) waits while the character is weak from a knock-out,
+    /// and, when it's close by, until the health is back (<see cref="Rest"/>).
+    /// </summary>
+    private static StepPlan Careful(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, StepPlan step, bool fights)
+    {
+        if (!fights || HandOver(q, s, step)) return step;
+        if (step.Kind is not (StepKind.Talk or StepKind.Say or StepKind.Emote or StepKind.UseItem or StepKind.MountAction or StepKind.Go)) return step;
+        // Weak from a knock-out, with a fight ahead: wait until it wears off (it lasts under two minutes).
+        if (s.Statuses.Overlaps(KnockOutStatuses))
+            return new StepPlan(StepKind.Wait, "weak from a knock-out: no fight is started until that wears off");
+        return Near(step, s, RestNear) && Rest(s, m, now) is { } rest ? rest : step;
+    }
+
+    /// <summary>
+    /// Before a fight the run picks (never before fighting back): the wait until the health is at
+    /// <see cref="FightFromHp"/> or more, for <see cref="RestFor"/> at most; null when there's nothing to wait for. The
+    /// clock is kept in the memory, and starts over once the health is back (or, by the stepper, with the next fight).
+    /// </summary>
+    public static StepPlan? Rest(StepSnapshot s, StepMemory m, DateTime now)
+    {
+        if (s.Hp >= FightFromHp)
+        {
+            m.RestSince = default;
+            return null;
+        }
+        if (m.RestSince == default) m.RestSince = now;
+        return now - m.RestSince > RestFor ? null : new StepPlan(StepKind.Wait, $"getting your health back before the next fight ({s.Hp}%)");
+    }
+
+    /// <summary>
+    /// The quest's step once nothing is to be fought and the script could be read: crafting, gathering, the quest
+    /// mount, a phrase or emote, a key item, the hand-over, the marked target, the marked place, where the quest's
+    /// enemies appear; else the player.
+    /// </summary>
+    private static StepPlan Step(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay, bool riding, bool fights)
+    {
         // Crafting: the to-do line is about the product, or (older quests) the materials are in the bags and products
         // are still short. Short of both: talk to whoever the step marks (a crate, the materials NPC hands more out).
         var craftShort = false;
@@ -512,6 +677,13 @@ public static class StepRules
             return Talk(target, carrying ? "deliver what you carry" : "the step's marked target") with { OnFoot = carrying };
         }
 
+        // The quest wants only its item used on its enemies, and the item isn't in the bags (yet, or any more): there's
+        // nothing to do in the enemies' area, so the line's other places come first (whoever hands the item out).
+        if (fights && EnemyRules.Active(q, s.Sequence) is { Count: > 0 } wanted && wanted.All(e => e.Task == EnemyTask.UseItem) && EnemyRules.EnemyItem(q, s) == null)
+        {
+            var areas = lines.SelectMany(t => t.Spots).Where(p => p.Area).Select(p => p.Level).ToHashSet();
+            if (areas.Count > 0 && Where(q, s, m, areas) is { } first) return first with { OnFoot = carrying };
+        }
         if (Where(q, s, m) is { } go) return go with { OnFoot = carrying };
 
         // Nothing marked is left and none of the quest's enemies is in view: where the quest puts them, and around
@@ -539,12 +711,12 @@ public static class StepRules
         };
 
     /// <summary>
-    /// The quest mount's action on an enemy (null when the mount has none). An enemy it did nothing to in
-    /// <see cref="InteractTries"/> tries is given up on by the stepper.
+    /// The quest mount's action on one of the quest's own enemies (<see cref="EnemyRules.NextOwn"/>; a mount without
+    /// an action has no such target). An enemy it did nothing to in <see cref="InteractTries"/> uses the game took is
+    /// left by the stepper, which goes by the enemy's health before and after.
     /// </summary>
-    private static StepPlan? MountAttack(MountFact mount, StepSnapshot s, StepMemory m, StepEnemy enemy)
+    private static StepPlan MountAttack(MountFact mount, StepSnapshot s, StepMemory m, StepEnemy enemy)
     {
-        if (mount.Action == 0) return null;
         var key = $"action:{enemy.Id}";
         return new StepPlan(StepKind.MountAction, "the quest mount's action on the quest's enemy")
         {
@@ -695,6 +867,10 @@ public static class StepRules
         var verdict = PublicVerdict(kind, m.Public.Get(plan.Key, now), m.ProgressAt, now);
         return verdict switch
         {
+            // Attacked (a class that doesn't fight carries on): the way there is made, but nothing public is sent in
+            // combat. It's sent once only, and the game may not count it then.
+            PublicTry.Yes when s.InCombat && Near(plan, s, plan.Within)
+                => new StepPlan(StepKind.Wait, $"in combat: the {(kind == StepKind.Say ? "phrase" : "emote")} waits until that's over (it's sent only once)"),
             PublicTry.Yes => plan,
             PublicTry.NotYet => new StepPlan(StepKind.Wait, $"waiting to see whether the {(kind == StepKind.Say ? "phrase" : "emote")} counted"),
             _ => Ask(kind == StepKind.Say
@@ -1053,6 +1229,35 @@ public static class StepRules
             var before = k[..(hole + 1)];
             var after = k[(hole + 1)..];
             if (p.Length > k.Length && p.StartsWith(before, StringComparison.CurrentCultureIgnoreCase) && p.EndsWith(after, StringComparison.CurrentCultureIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A question is one of the game's texts that have something filled in ("Return to " + a place + "?"): it starts
+    /// with what comes before the filled-in part and ends with what comes after it, with something in between. A text
+    /// with nothing to fill in (<c>Hole</c> false) must be the question whole. Case and spacing aside.
+    /// </summary>
+    public static bool FitsShape(string prompt, IEnumerable<(string Before, string After, bool Hole)> shapes)
+    {
+        const int MinShape = 4;
+        var p = Normal(prompt);
+        if (p.Length == 0) return false;
+        foreach (var (rawBefore, rawAfter, hole) in shapes)
+        {
+            var before = Normal(rawBefore);
+            var after = Normal(rawAfter);
+            if (!hole)
+            {
+                if (before.Length > 0 && p.Equals(before, StringComparison.CurrentCultureIgnoreCase)) return true;
+                continue;
+            }
+            // There must be enough fixed text to go by: both halves, or one of a few characters at least (a language
+            // that puts the filled-in part first or last). A text that's all but filled in says nothing.
+            if ((before.Length == 0 || after.Length == 0) && before.Length + after.Length < MinShape) continue;
+            if (p.Length > before.Length + after.Length && p.StartsWith(before, StringComparison.CurrentCultureIgnoreCase) && p.EndsWith(after, StringComparison.CurrentCultureIgnoreCase)
+                && p[before.Length..^after.Length].Trim().Length > 0)
                 return true;
         }
         return false;

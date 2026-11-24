@@ -225,7 +225,10 @@ public sealed record StepEnemy(ulong Id, uint BaseId, uint NameId, string Name, 
 
     /// <summary>It fights the character or the character's chocobo.</summary>
     public bool AttacksMe => InCombat && Target is EnemyTarget.You or EnemyTarget.YourChocobo;
-    /// <summary>It fights someone else: theirs, not the run's.</summary>
+    /// <summary>
+    /// It fights someone else (its target says so): theirs, not the run's. One in combat without a target is judged by
+    /// whether the run began that fight (<see cref="EnemyRules.Own"/>).
+    /// </summary>
     public bool FightsOther => InCombat && Target is EnemyTarget.OtherPlayer or EnemyTarget.Other;
 }
 
@@ -268,6 +271,8 @@ public sealed class StepSnapshot
     public bool InCombat { get; init; }
     /// <summary>The class on now fights: a combat job the basic combat has actions for.</summary>
     public bool Fighter { get; init; }
+    /// <summary>The character's health in percent: no fight is picked on low health (what attacks is fought whatever it is).</summary>
+    public int Hp { get; init; } = 100;
     /// <summary>
     /// The quest's script was asked (its to-do lines and objects are read), or they're the last calm look's
     /// (<see cref="Remembered"/>). False while the game is busy, in combat, just after a zone change or while the

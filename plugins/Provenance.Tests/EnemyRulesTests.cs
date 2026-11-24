@@ -659,13 +659,144 @@ public class EnemyRulesTests
     }
 
     [Fact]
-    public void EnemiesGivenUpOnAreLeftOut()
+    public void EnemiesGivenUpOnAreLeftOutButNeverOneThatAttacks()
     {
         var q = Elite();
-        var attacker = Mob(3, 9999, 1, 125, 0, target: EnemyTarget.You);
+        var lancer = Mob(1, 739, 1837, 180, 0);
         var m = new StepMemory();
+        m.GivenUp.Add(1);
+        Assert.Null(EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { lancer }, new[] { EliteMarker }), m));
+        // It turns on the character: fought, given up on or not (the character mustn't stand there being hit).
+        var biting = lancer with { Target = EnemyTarget.You, InCombat = true };
+        Assert.Equal(1ul, EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { biting }, new[] { EliteMarker }), m)!.Id);
+        var stranger = Mob(3, 9999, 1, 125, 0, target: EnemyTarget.YourChocobo);
         m.GivenUp.Add(3);
-        Assert.Null(EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { attacker }, new[] { EliteMarker }), m));
+        Assert.Equal(3ul, EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { stranger }, new[] { EliteMarker }), m)!.Id);
+    }
+
+    [Fact]
+    public void AnEnemyGivenUpOnIsNotTheRunsFightAnyMoreWhileItHasNoTarget()
+    {
+        // Fought, then given up on (it wasn't attacking: it evaded, say). In combat without a target it isn't taken up again.
+        var q = Shaft();
+        var melia = Mob(5, 5550, 4100, 296, 174, combat: true, drawn: 71224);
+        var s = Snap(q, 1, Forelands, AtSurvey, new[] { melia });
+        var m = new StepMemory();
+        m.Fought.Add(5);
+        Assert.Equal(EnemyVerdict.Attacker, EnemyRules.Judge(q, s, melia, m).Verdict);
+        m.GivenUp.Add(5);
+        Assert.NotEqual(EnemyVerdict.Attacker, EnemyRules.Judge(q, s, melia, m).Verdict);
+        Assert.Null(EnemyRules.Next(q, s, m));
+    }
+
+    [Fact]
+    public void AnAttackerThatCantBeHitIsLeftForNowAndTheRulesKnowItStillAttacks()
+    {
+        var q = Elite();
+        var onALedge = Mob(3, 9999, 1, 125, 0, target: EnemyTarget.You);
+        var other = Mob(4, 9999, 1, 126, 0, target: EnemyTarget.You);
+        var m = new StepMemory();
+        var s = Snap(q, 1, Thanalan, InZaharak, new[] { onALedge }, new[] { EliteMarker });
+        Assert.False(EnemyRules.AttackedBeyondReach(s, m));
+        m.CantHit.Add(3);
+        Assert.Null(EnemyRules.Next(q, s, m));
+        Assert.True(EnemyRules.AttackedBeyondReach(s, m));
+        // Another that attacks is fought all the same; and the quest's own enemies are still picked.
+        Assert.Equal(4ul, EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { onALedge, other }, new[] { EliteMarker }), m)!.Id);
+        var lancer = Mob(1, 739, 1837, 180, 0);
+        Assert.Equal(1ul, EnemyRules.Next(q, Snap(q, 1, Thanalan, InZaharak, new[] { onALedge, lancer }, new[] { EliteMarker }), m)!.Id);
+        // Once the stepper takes it out again (after a while), it's fought again.
+        m.CantHit.Remove(3);
+        Assert.Equal(3ul, EnemyRules.Next(q, s, m)!.Id);
+    }
+
+    // ------------------------------------------------------------------ whose a mob is
+
+    [Fact]
+    public void ADrawnIconMarksAPlacedKindOnlyWhereTheQuestPutsIt()
+    {
+        // A melia with a quest icon far from both spawn points: another quest's (or another player's elsewhere).
+        var q = Shaft();
+        var elsewhere = Mob(1, 5550, 4100, 500, 500, drawn: 71224);
+        var s = Snap(q, 1, Forelands, new Vector3(490, 0, 490), new[] { elsewhere });
+        Assert.Equal(EnemyVerdict.No, Verdict(q, s, elsewhere));
+        // A field mob has no place: there the drawn icon still marks it (inside or outside the icon's range).
+        var e = Elite();
+        var archer = Mob(2, 741, 1838, 135, 5, drawn: 71224);
+        Assert.Equal(EnemyVerdict.Marked, Verdict(e, Snap(e, 1, Thanalan, InZaharak, new[] { archer }, new[] { EliteMarker }), archer));
+    }
+
+    [Fact]
+    public void ADrawnIconDoesntMarkAMobTheQuestsHandlerHoldsWithoutAnIcon()
+    {
+        // The handler holds it and gives it no icon: the icon drawn over it is someone else's. Far from the spawn points,
+        // where "held" alone says nothing either, it's left alone.
+        var q = Shaft();
+        var held = Mob(1, 5550, 4100, 500, 500, drawn: 71224, held: true);
+        Assert.Equal(EnemyVerdict.No, Verdict(q, Snap(q, 1, Forelands, new Vector3(490, 0, 490), new[] { held }), held));
+        // Its own icon is the handler's word for it, wherever it stands.
+        var own = held with { Icon = 71224 };
+        Assert.Equal(EnemyVerdict.Marked, Verdict(q, Snap(q, 1, Forelands, new Vector3(490, 0, 490), new[] { own }), own));
+    }
+
+    [Fact]
+    public void AMobInCombatWithoutATargetIsSomeoneElsesUnlessTheRunBeganTheFight()
+    {
+        // A lancer in combat with nobody as its target (between two attacks on another player): not the run's.
+        var q = Elite();
+        var busy = Mob(1, 739, 1837, 180, 0, combat: true);
+        var s = Snap(q, 1, Thanalan, InZaharak, new[] { busy }, new[] { EliteMarker });
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, s, busy).Verdict);
+        var m = new StepMemory();
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, s, busy, m).Verdict);
+        Assert.Contains("not with you", EnemyRules.Judge(q, s, busy, m).Why);
+        // The run's attack has just gone out on it (the game hasn't shown yet whom it turned on): still the run's.
+        m.Striking = 1;
+        Assert.Equal(EnemyVerdict.FieldMob, EnemyRules.Judge(q, s, busy, m).Verdict);
+        // Once it turned on the character, or lost health to the run, it's one the run fought.
+        m.Striking = 0;
+        m.Fought.Add(1);
+        Assert.Equal(EnemyVerdict.Attacker, EnemyRules.Judge(q, s, busy, m).Verdict);
+        // A marked quest spawn in combat with no target and not the run's: another player's, at the same spawn point.
+        var shaft = Shaft();
+        var theirs = Mob(5, 5550, 4100, 296, 174, combat: true, drawn: 71224);
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(shaft, Snap(shaft, 1, Forelands, AtSurvey, new[] { theirs }), theirs, new StepMemory()).Verdict);
+    }
+
+    [Fact]
+    public void TheQuestMountsActionIsForTheQuestsOwnEnemiesOnly()
+    {
+        var q = Shaft();
+        var stranger = Mob(1, 9999, 1, 299, 171, target: EnemyTarget.You);
+        var marked = Mob(2, 5550, 4100, 296, 174, drawn: 71224);
+        var biting = Mob(3, 5550, 4100, 310, 190, drawn: 71224, target: EnemyTarget.You);
+        var m = new StepMemory();
+        // Whatever else attacks isn't the quest's: no target for the mount's action.
+        Assert.Null(EnemyRules.NextOwn(q, Snap(q, 1, Forelands, AtSurvey, new[] { stranger }), m));
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Own(q, Snap(q, 1, Forelands, AtSurvey, new[] { stranger }), stranger, m).Verdict);
+        Assert.Equal(2ul, EnemyRules.NextOwn(q, Snap(q, 1, Forelands, AtSurvey, new[] { stranger, marked }), m)!.Id);
+        // One of the quest's that attacks comes before a nearer one that doesn't.
+        Assert.Equal(3ul, EnemyRules.NextOwn(q, Snap(q, 1, Forelands, AtSurvey, new[] { stranger, marked, biting }), m)!.Id);
+        Assert.Equal(EnemyVerdict.Marked, EnemyRules.Own(q, Snap(q, 1, Forelands, AtSurvey, new[] { biting }), biting, m).Verdict);
+        // One the action did nothing to is left out.
+        m.GivenUp.Add(3);
+        Assert.Equal(2ul, EnemyRules.NextOwn(q, Snap(q, 1, Forelands, AtSurvey, new[] { marked, biting }), m)!.Id);
+    }
+
+    [Fact]
+    public void AKindTheQuestWantsOnlyItsItemOnIsToldApart()
+    {
+        // 1516 "Hot Cross Buns": the shearing knife on a feral croc (no defeat). 1228: the tempered are defeated, then the ash.
+        var buns = new QuestScript { Quest = 65536 + 1516, Enemies = EnemyRules.Read(new[] { ("ENEMY0", 395u) }, new[] { Row(395, 1, 784, 8, 1) }, _ => null) };
+        var croc = Mob(1, 395, 784, 10, 10);
+        Assert.True(EnemyRules.ItemOnly(buns, Snap(buns, 1, 155, Vector3.Zero, new[] { croc }), croc));
+        Assert.False(EnemyRules.ItemOnly(buns, Snap(buns, 2, 155, Vector3.Zero, new[] { croc }), croc));
+        var q = Tempered();
+        var tempered = Mob(2, 79, 2000, -77, -105);
+        Assert.False(EnemyRules.ItemOnly(q, Snap(q, 1, Thanalan, AtGround, new[] { tempered }), tempered));
+        var lancer = Mob(3, 739, 1837, 180, 0);
+        Assert.True(EnemyRules.OfQuest(Elite(), Snap(Elite(), 1, Thanalan, InZaharak, new[] { lancer }), lancer));
+        Assert.False(EnemyRules.OfQuest(Elite(), Snap(Elite(), 255, Thanalan, InZaharak, new[] { lancer }), lancer));
     }
 
     // ------------------------------------------------------------------ where to look

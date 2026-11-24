@@ -1371,4 +1371,38 @@ public class StepRulesTests
     [InlineData("Commence?", false)]
     public void KnownQuestionsOnly(string prompt, bool known)
         => Assert.Equal(known, StepRules.KnownQuestion(prompt, new[] { "Do you really want to trade a high-quality item?", "Commence “”?" }));
+
+    /// <summary>The questions a knock-out brings up (Addon 111/196, 117, 112, 3787), split around what the game fills in.</summary>
+    private static readonly (string Before, string After, bool Hole)[] KnockOut =
+    {
+        ("Return to ", "?", true), ("Return to your home point?", "", false), ("Accept Raise?", "", false), ("Accept Raise from ", "?", true),
+    };
+
+    [Theory]
+    [InlineData("Return to New Gridania?", true)]
+    [InlineData("Return to  Camp Dragonhead ?", true)]
+    [InlineData("return to your home point?", true)]
+    [InlineData("Accept Raise?", true)]
+    [InlineData("Accept Raise from Y'shtola Rhul?", true)]
+    // Nothing filled in, or only one half of the text: not that question.
+    [InlineData("Return to ?", false)]
+    [InlineData("Return to", false)]
+    [InlineData("Return to New Gridania", false)]
+    // A quest's own question, left open when the character went down, is never taken for it.
+    [InlineData("Hand over the rigging component materials?", false)]
+    [InlineData("Will you return to the fight?", false)]
+    [InlineData("", false)]
+    public void TheQuestionsAKnockOutBringsUpAreKnownByTheirShape(string prompt, bool known)
+        => Assert.Equal(known, StepRules.FitsShape(prompt, KnockOut));
+
+    [Fact]
+    public void ATextThatIsAllFilledInSaysNothing()
+    {
+        // A sheet text with nothing before or after what the game fills in can't tell one question from another.
+        Assert.False(StepRules.FitsShape("Anything at all?", new[] { ("", "?", true) }));
+        Assert.False(StepRules.FitsShape("Anything at all?", new[] { ("", "", true), ("", "", false) }));
+        // A language that puts the place first: the rest of the sentence is enough to go by.
+        Assert.True(StepRules.FitsShape("グリダニアへ戻りますか？", new[] { ("", "へ戻りますか？", true) }));
+        Assert.False(StepRules.FitsShape("へ戻りますか？", new[] { ("", "へ戻りますか？", true) }));
+    }
 }

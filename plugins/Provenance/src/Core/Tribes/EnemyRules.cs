@@ -41,14 +41,17 @@ public readonly record struct EnemyJudgement(EnemyVerdict Verdict, string Why)
 /// only fill in where a quest has no listener for one.
 /// </para>
 /// <para>
-/// The filter, in order of trust (Tribes battle plan): what attacks the character or the chocobo is always fought
-/// (and what the run is already fighting stays in the fight while it fights nobody else); then a hostile mob of one
-/// of the quest's kinds that the quest marks (its handler's own icon, a quest icon drawn over it, or held by the
-/// handler where the quest puts its mobs); then, for a field-mob line, kind and name both matching, inside the marked
-/// area, with nobody else fighting it. One that was subdued gets the quest's item when the quest marks it or the run
-/// is the one that fought it. A mob of the same kind that fits none of these is never attacked. None of the marks is
-/// confirmed in game yet: the hand watch logs each of them per mob, with this filter's verdict, so a bug report shows
-/// whether they hold.
+/// The filter, in order of trust (Tribes battle plan): what attacks the character or the chocobo is always fought,
+/// given up on before or not (and what the run is already fighting stays in the fight while it fights nobody else);
+/// then a hostile mob of one of the quest's kinds that the quest marks (its handler's own icon; a quest icon drawn
+/// over it, for a kind the quest puts somewhere only where it puts it, and not over one the handler holds without an
+/// icon; or held by the handler where the quest puts its mobs); then, for a field-mob line, kind and name both
+/// matching, inside the marked area. Never one that someone else fights: its target says so, or it's in combat
+/// without a target and the run didn't begin that fight. One that was subdued gets the quest's item when the quest
+/// marks it or the run is the one that fought it. A mob of the same kind that fits none of these is never attacked.
+/// None of the marks is confirmed in game yet: the hand watch logs each of them per mob, with this filter's verdict,
+/// so a bug report shows whether they hold. What the filter can't tell (another player's quest enemy of the same
+/// kind at the same place) the game says when the fight starts: the fighter asks it, and leaves such a mob alone.
 /// </para>
 /// </remarks>
 public static class EnemyRules
@@ -174,11 +177,21 @@ public static class EnemyRules
     {
         if (!e.Targetable) return No("can't be targeted");
         // 1. It attacks the character or the chocobo: always. One the run is fighting stays in the fight while it's in
-        // combat with nobody else (between two attacks a mob can be without a target).
+        // combat with nobody else (between two attacks a mob can be without a target), unless the run gave it up.
         if (e.Hostile && e.AttacksMe) return new EnemyJudgement(EnemyVerdict.Attacker, "it attacks you or your chocobo");
-        if (e.Hostile && e.InCombat && !e.FightsOther && !e.Weakened && m?.Fought.Contains(e.Id) == true)
+        if (e.Hostile && e.InCombat && !e.FightsOther && !e.Weakened && m != null && m.Fought.Contains(e.Id) && !m.GivenUp.Contains(e.Id))
             return new EnemyJudgement(EnemyVerdict.Attacker, "the run is fighting it");
+        return Own(q, s, e, m);
+    }
 
+    /// <summary>
+    /// What the quest itself makes of a mob, whether or not it attacks: marked, a field mob it counts, subdued and
+    /// waiting for its item, or not the quest's. The quest mount's action goes by this (it's for the quest's enemies,
+    /// not for whatever attacks on the way).
+    /// </summary>
+    public static EnemyJudgement Own(QuestScript q, StepSnapshot s, StepEnemy e, StepMemory? m = null)
+    {
+        if (!e.Targetable) return No("can't be targeted");
         var lines = q.Enemies.Where(x => x.Base == e.BaseId && ActiveIn(x, s.Sequence)).ToList();
         if (lines.Count == 0) return No(q.Enemies.Any(x => x.Base == e.BaseId) ? "the quest's kind, but not at this step" : "not one of the quest's kinds");
         if (e.Fate != 0) return No("part of a FATE");
@@ -194,12 +207,18 @@ public static class EnemyRules
         bool? named = names.Count == 0 ? null : names.Contains(0) || names.Contains(e.NameId);
         var atSpawn = lines.Any(l => l.Spawn is { } p && p.Territory == s.Territory && Flat(p.Position, e.Position) <= SpawnLeash);
 
-        // 2. The quest marks it: its handler's own icon; a quest icon drawn over it (not over a field mob of another
-        // name: that one is another quest's); or held by the handler where the quest puts its mobs.
+        // 2. The quest marks it: its handler's own icon; a quest icon drawn over it; or held by the handler where the
+        // quest puts its mobs. The drawn icon comes from whichever quest, so it counts only where nothing speaks
+        // against it: not over a field mob of another name (another quest's), not over a mob this quest's handler
+        // holds without giving it an icon (the icon is someone else's then), and for a kind the quest puts somewhere
+        // only where it puts it (another quest can mark the same kind elsewhere).
+        var placed = lines.Any(l => l.Spawn != null);
         var mark = e.Icon != 0 ? "the quest's own icon is over it"
-            : QuestIcon(e.Drawn) && named != false ? "a quest icon is drawn over it"
+            : QuestIcon(e.Drawn) && named != false && !e.Held && (!placed || atSpawn) ? "a quest icon is drawn over it"
             : e.Held && atSpawn ? "the quest holds it, where the quest's enemies appear"
             : null;
+        // The run's own fight: it began it (the mob attacked, or lost health to the run), or its attack has just gone out.
+        var mine = m != null && (m.Fought.Contains(e.Id) || m.Striking == e.Id);
 
         // Subdued (it attacks no more, takes no damage and waits for the quest's item): the item goes on it when the
         // quest marks it or the run is the one that subdued it. Someone else's, at the same spawn point, is left alone.
@@ -212,6 +231,9 @@ public static class EnemyRules
         }
         if (!e.Hostile) return No("not hostile");
         if (e.FightsOther) return No("someone else is fighting it");
+        // In combat, but not with the character or the chocobo, and not a fight the run began: someone else's (a mob
+        // can be without a target between two attacks). As the order run's monster farming leaves such mobs alone.
+        if (e.InCombat && !e.AttacksMe && !mine) return No("in combat, and not with you");
         if (mark != null) return new EnemyJudgement(EnemyVerdict.Marked, mark);
 
         // 3. A field-mob line: kind and name match, inside the marked area. Close by, where the game would draw the
@@ -257,7 +279,9 @@ public static class EnemyRules
     /// <summary>
     /// The enemy to fight next: what attacks first, then one waiting for the quest's item, then the quest's marked
     /// ones, then its field mobs; the nearest of each. The one being fought (<paramref name="keep"/>) stays the target
-    /// until it's done, unless something else attacks while it doesn't. Those given up on are left out.
+    /// until it's done, unless something else attacks while it doesn't. Those given up on are left out, but never one
+    /// that attacks: that one is left out only while it can't be reached or hurt (<see cref="StepMemory.CantHit"/>),
+    /// and the step goes on meanwhile.
     /// </summary>
     public static StepEnemy? Next(QuestScript q, StepSnapshot s, StepMemory m, ulong keep = 0)
     {
@@ -267,9 +291,9 @@ public static class EnemyRules
         var bestAway = float.MaxValue;
         foreach (var e in s.Hostiles)
         {
-            if (m.GivenUp.Contains(e.Id)) continue;
             var verdict = Judge(q, s, e, m).Verdict;
             if (verdict == EnemyVerdict.No) continue;
+            if (verdict == EnemyVerdict.Attacker ? m.CantHit.Contains(e.Id) : m.GivenUp.Contains(e.Id)) continue;
             var rank = verdict switch { EnemyVerdict.Attacker => 0, EnemyVerdict.Subdued => 1, EnemyVerdict.Marked => 2, _ => 3 };
             var away = Vector3.DistanceSquared(e.Position, s.Player);
             if (e.Id == keep)
@@ -285,6 +309,46 @@ public static class EnemyRules
             }
         }
         return kept != null && (keptRank == 0 || bestRank != 0) ? kept : best;
+    }
+
+    /// <summary>
+    /// For the quest mount's action: the nearest mob that's the quest's own (<see cref="Own"/>: marked, a field mob it
+    /// counts, or subdued), whether or not it attacks; one that attacks before one that doesn't. Whatever else attacks
+    /// isn't a target (the mount rides on past it). Those the action did nothing to are left out.
+    /// </summary>
+    public static StepEnemy? NextOwn(QuestScript q, StepSnapshot s, StepMemory m)
+    {
+        StepEnemy? best = null;
+        var bestRank = int.MaxValue;
+        var bestAway = float.MaxValue;
+        foreach (var e in s.Hostiles)
+        {
+            if (m.GivenUp.Contains(e.Id) || !Own(q, s, e, m).Allowed) continue;
+            var rank = e.AttacksMe ? 0 : 1;
+            var away = Vector3.DistanceSquared(e.Position, s.Player);
+            if (rank > bestRank || (rank == bestRank && away >= bestAway)) continue;
+            best = e;
+            bestRank = rank;
+            bestAway = away;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Something attacks the character or the chocobo that the run couldn't reach or hurt (and so leaves for now): the
+    /// step goes on, by the last calm look, instead of the character standing there.
+    /// </summary>
+    public static bool AttackedBeyondReach(StepSnapshot s, StepMemory m)
+        => s.Hostiles.Any(e => e.Hostile && e.Targetable && e.AttacksMe && m.CantHit.Contains(e.Id));
+
+    /// <summary>The mob is of one of the quest's kinds at this sequence (by its kind alone: nothing says yet it's this quest's).</summary>
+    public static bool OfQuest(QuestScript q, StepSnapshot s, StepEnemy e) => q.Enemies.Any(x => x.Base == e.BaseId && ActiveIn(x, s.Sequence));
+
+    /// <summary>The quest wants nothing but its item used on this kind (no defeat): it isn't attacked unless it attacks.</summary>
+    public static bool ItemOnly(QuestScript q, StepSnapshot s, StepEnemy e)
+    {
+        var lines = q.Enemies.Where(x => x.Base == e.BaseId && ActiveIn(x, s.Sequence)).ToList();
+        return lines.Count > 0 && lines.All(l => l.Task == EnemyTask.UseItem);
     }
 
     // ------------------------------------------------------------------ the quest's item

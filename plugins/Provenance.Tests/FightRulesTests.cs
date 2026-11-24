@@ -32,10 +32,12 @@ public class FightRulesTests
 
     private static StepSnapshot Snap(QuestScript q, byte seq, uint zone, Vector3 me, IEnumerable<StepEnemy>? mobs = null, IEnumerable<StepObject>? objects = null,
         IEnumerable<StepMarker>? markers = null, Dictionary<uint, int>? items = null, uint job = Pld, uint accept = Pld, bool? fighter = null, bool combat = false,
-        bool read = true, bool busy = false, bool remembered = false, HashSet<uint>? statuses = null, bool mounted = false, uint mount = 0)
+        bool read = true, bool busy = false, bool remembered = false, HashSet<uint>? statuses = null, bool mounted = false, uint mount = 0, int hp = 100,
+        IEnumerable<TodoProgress>? todos = null)
         => new()
         {
             Quest = q.Quest, Accepted = true, Sequence = seq, AcceptJob = accept, Job = job, Fighter = fighter ?? !StepRules.HandOrLand(job), Territory = zone, Player = me,
+            Hp = hp, Todos = todos?.ToList() ?? new List<TodoProgress>(),
             Hostiles = mobs?.ToList() ?? new List<StepEnemy>(), Objects = objects?.ToList() ?? new List<StepObject>(), Markers = markers?.ToList() ?? new List<StepMarker>(),
             Items = items ?? new Dictionary<uint, int>(), InCombat = combat, ScriptRead = read, Busy = busy, Remembered = remembered,
             Statuses = statuses ?? new HashSet<uint>(), Mounted = mounted, Mount = mount,
@@ -209,12 +211,143 @@ public class FightRulesTests
         Assert.Equal(StepKind.Wait, plan.Kind);
         Assert.Contains("crafting waits", plan.What);
 
-        // On another class than the quest's: no change in combat (the game refuses it).
+        // On another class than the quest's: no change in combat (the game refuses it). The way to the step is made
+        // meanwhile (standing where one is attacked helps nothing); there, the wait, and the class once that's over.
         var other = new StepSnapshot
         {
             Quest = craft.Quest, Accepted = true, Sequence = 2, AcceptJob = Crp, Job = 9, Territory = 813, InCombat = true, Remembered = true, Hostiles = new[] { mob },
         };
-        Assert.Equal(StepKind.Wait, Decide(craft, other).Kind);
+        var walkOn = Decide(craft, other);
+        Assert.Equal(StepKind.Go, walkOn.Kind);
+        Assert.Equal(8368201u, walkOn.Level);
+        Assert.StartsWith("on the way while attacked", walkOn.What);
+        Assert.Equal(Crp, walkOn.Job);
+        var there = new StepSnapshot
+        {
+            Quest = craft.Quest, Accepted = true, Sequence = 2, AcceptJob = Crp, Job = 9, Territory = 813, Player = new Vector3(20, 0, 0), InCombat = true, Remembered = true,
+            Hostiles = new[] { mob },
+        };
+        var wait = Decide(craft, there);
+        Assert.Equal(StepKind.Wait, wait.Kind);
+        Assert.Contains("class can't be changed", wait.What);
+        // The attack over: the class.
+        var calm = new StepSnapshot { Quest = craft.Quest, Accepted = true, Sequence = 2, AcceptJob = Crp, Job = 9, Territory = 813, Player = new Vector3(20, 0, 0) };
+        Assert.Equal(StepKind.SwitchJob, Decide(craft, calm).Kind);
+    }
+
+    // ------------------------------------------------------------------ never standing in a fight without defending
+
+    [Fact]
+    public void WhatAttacksIsFoughtBeforeAnyReasonToAskThePlayer()
+    {
+        // Fights given up, defeats that didn't count, nothing changed for long: each would hand the step to the player,
+        // and a run that asks stops. With something on the character, the fight comes first.
+        var q = Shaft();
+        var melia = Mob(5, 5550, 4100, 296, 174, EnemyTarget.You);
+        var s = Snap(q, 1, Forelands, AtSurvey, new[] { melia }, combat: true, read: false);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, s, new StepMemory { GiveUps = StepRules.MaxGiveUps }, T0).Kind);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, s, new StepMemory { Kills = StepRules.MaxIdleKills }, T0).Kind);
+        var stale = new StepMemory();
+        stale.Observe("some state", T0 - StepRules.NoProgressLimit - TimeSpan.FromSeconds(1));
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, s, stale, T0).Kind);
+        // An enemy given up on that attacks is fought too.
+        var gaveUp = new StepMemory();
+        gaveUp.GivenUp.Add(5);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, s, gaveUp, T0).Kind);
+        // Nothing attacks: the player is asked.
+        var idle = Mob(6, 5550, 4100, 297, 176, drawn: 71224);
+        var calm = Snap(q, 1, Forelands, AtSurvey, new[] { idle });
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, calm, stale, T0).Kind);
+        Assert.Equal(StepKind.AskUser, StepRules.Decide(q, calm, new StepMemory { GiveUps = StepRules.MaxGiveUps }, T0).Kind);
+    }
+
+    [Fact]
+    public void AnAttackerThatCantBeHitDoesntKeepACombatJobStanding()
+    {
+        // The stepper found it couldn't reach or hurt what attacks. Nothing read (in combat): on to the next marked place.
+        var q = Errand();
+        var mob = Mob(7, 9999, 1, 2, 2, EnemyTarget.You);
+        var marker = new StepMarker(813, new Vector3(40, 0, 0), 1, 71223, 8368200, 0);
+        var m = new StepMemory();
+        var unread = Snap(q, 1, 813, Vector3.Zero, new[] { mob }, markers: new[] { marker }, combat: true, read: false);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, unread, m, T0).Kind);
+        m.CantHit.Add(7);
+        var on = StepRules.Decide(q, unread, m, T0);
+        Assert.Equal(StepKind.Go, on.Kind);
+        Assert.StartsWith("carry on while attacked", on.What);
+        // By the last calm look, when the quest hasn't moved since: the step itself.
+        var tinkerer = Obj(1, 1034103, 40, 0, StepObjectKind.Npc, 71223, "dwarven tinkerer");
+        var remembered = Snap(q, 1, 813, Vector3.Zero, new[] { mob }, new[] { tinkerer }, combat: true, remembered: true);
+        Assert.Equal(StepKind.Talk, StepRules.Decide(q, remembered, m, T0).Kind);
+        // In combat with nothing known to attack (the tail of a fight): still the wait.
+        var tail = Snap(q, 1, 813, Vector3.Zero, new[] { mob with { Target = EnemyTarget.None } }, markers: new[] { marker }, combat: true, read: false);
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, tail, m, T0).Kind);
+    }
+
+    [Fact]
+    public void NoFightIsPickedOnLowHealthButWhatAttacksIsFoughtAtOnce()
+    {
+        var q = Shaft();
+        var idle = Mob(6, 5550, 4100, 297, 176, drawn: 71224);
+        var m = new StepMemory();
+        var hurt = Snap(q, 1, Forelands, AtSurvey, new[] { idle }, hp: 40);
+        m.Observe(hurt.Signature(), T0);
+        var rest = StepRules.Decide(q, hurt, m, T0);
+        Assert.Equal(StepKind.Wait, rest.Kind);
+        Assert.Contains("health", rest.What);
+        // Still waiting a little under the limit; past it the fight is picked as it is.
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, hurt, m, T0 + StepRules.RestFor - TimeSpan.FromSeconds(1)).Kind);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, hurt, m, T0 + StepRules.RestFor + TimeSpan.FromSeconds(1)).Kind);
+        // Health back: the fight, and the clock starts over for the next time.
+        var fine = Snap(q, 1, Forelands, AtSurvey, new[] { idle }, hp: StepRules.FightFromHp);
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, fine, m, T0 + TimeSpan.FromSeconds(5)).Kind);
+        Assert.Equal(default, m.RestSince);
+        // What attacks is fought whatever the health.
+        var attacker = idle with { Target = EnemyTarget.You, InCombat = true };
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, Snap(q, 1, Forelands, AtSurvey, new[] { attacker }, combat: true, read: false, hp: 10), new StepMemory(), T0).Kind);
+    }
+
+    [Fact]
+    public void NothingThatCallsTheQuestsEnemiesIsDoneOnLowHealthWhenItsCloseBy()
+    {
+        var q = Shaft();
+        var destination = Obj(1, 2006882, 296, 172, name: "destination");
+        var m = new StepMemory();
+        var hurt = Snap(q, 1, Forelands, AtSurvey, objects: new[] { destination }, hp: 55);
+        m.Observe(hurt.Signature(), T0);
+        Assert.Equal(StepKind.Wait, StepRules.Decide(q, hurt, m, T0).Kind);
+        Assert.Equal(StepKind.Talk, StepRules.Decide(q, hurt, m, T0 + StepRules.RestFor + TimeSpan.FromSeconds(1)).Kind);
+        // A long way off the health comes back on the way: no wait.
+        var far = Snap(q, 1, Forelands, new Vector3(0, -70, 0), hp: 55);
+        var m2 = new StepMemory();
+        m2.Observe(far.Signature(), T0);
+        Assert.Equal(StepKind.Go, StepRules.Decide(q, far, m2, T0).Kind);
+        // The report has no fight ahead: no wait there either.
+        var keeneye = Obj(2, 1016803, 57, -174, StepObjectKind.Npc, 71225, "Vath keeneye");
+        Assert.Equal(StepKind.Talk, Decide(q, Snap(q, 255, Forelands, new Vector3(57, -47, -170), objects: new[] { keeneye }, hp: 20)).Kind);
+    }
+
+    [Fact]
+    public void APhraseOrEmoteIsNotSentWhileInCombat()
+    {
+        // A crafter attacked carries on with its step, but what's sent once only waits for the fight to be over.
+        var spot = new ScriptSpot(9100001, 813, new Vector3(40, 0, 0), 1034103, false);
+        var q = new QuestScript
+        {
+            Quest = 65536 + 3903, Name = "A Word", Giver = 1033712, TargetEnd = 1033712,
+            Todos = new[] { new ScriptTodo(0, 1, 1, new[] { spot }, "Say “Lali-ho” to the dwarven tinkerer.") },
+            Say = new Dictionary<int, string> { [0] = "Lali-ho" },
+        };
+        var tinkerer = Obj(1, 1034103, 40, 0, StepObjectKind.Npc, 71223, "dwarven tinkerer");
+        var mob = Mob(7, 9999, 1, 2, 2, EnemyTarget.You);
+        // A way off: the way there is made.
+        var far = Decide(q, Snap(q, 1, 813, Vector3.Zero, new[] { mob }, new[] { tinkerer }, job: Crp, accept: Crp, combat: true, remembered: true));
+        Assert.Equal(StepKind.Say, far.Kind);
+        // There: not said while attacked.
+        var there = Decide(q, Snap(q, 1, 813, new Vector3(38, 0, 0), new[] { mob }, new[] { tinkerer }, job: Crp, accept: Crp, combat: true, remembered: true));
+        Assert.Equal(StepKind.Wait, there.Kind);
+        Assert.Contains("phrase waits", there.What);
+        Assert.Equal(StepKind.Say, Decide(q, Snap(q, 1, 813, new Vector3(38, 0, 0), objects: new[] { tinkerer }, job: Crp, accept: Crp)).Kind);
     }
 
     // ------------------------------------------------------------------ 2261 "Getting the Shaft": survey, then what appears
@@ -288,14 +421,16 @@ public class FightRulesTests
     public void FightsGivenUpAndDefeatsThatDontCountAskThePlayer()
     {
         var q = Shaft();
-        var melia = Mob(5, 5550, 4100, 296, 174, EnemyTarget.You);
-        var s = Snap(q, 1, Forelands, AtSurvey, new[] { melia }, combat: true, read: false);
+        var melia = Mob(5, 5550, 4100, 296, 174, drawn: 71224);
+        var s = Snap(q, 1, Forelands, AtSurvey, new[] { melia });
         var gaveUp = new StepMemory { GiveUps = StepRules.MaxGiveUps };
         var ask = StepRules.Decide(q, s, gaveUp, T0);
         Assert.Equal(StepKind.AskUser, ask.Kind);
         Assert.Contains("given up", ask.What);
 
-        var idle = new StepMemory { Kills = StepRules.MaxIdleKills + 1 };
+        // At the fifteenth defeat that didn't count, not the sixteenth.
+        Assert.Equal(StepKind.Fight, StepRules.Decide(q, s, new StepMemory { Kills = StepRules.MaxIdleKills - 1 }, T0).Kind);
+        var idle = new StepMemory { Kills = StepRules.MaxIdleKills };
         Assert.Equal(StepKind.AskUser, StepRules.Decide(q, s, idle, T0).Kind);
         // A defeat that counts moves the quest on, which starts the count over.
         idle.Observe("moved on", T0);
@@ -544,6 +679,23 @@ public class FightRulesTests
         var biting = ant with { Target = EnemyTarget.You, InCombat = true };
         var attacked = Decide(q, Snap(q, 2, Fringes, new Vector3(470, 42, 345), new[] { biting }, mounted: true, mount: Marid, combat: true, read: false));
         Assert.Equal(StepKind.MountAction, attacked.Kind);
+    }
+
+    [Fact]
+    public void OnTheQuestMountWhateverElseAttacksIsRiddenPast()
+    {
+        // A field mob of the Fringes bites the marid: Trample is for the ants, and getting off would lose the mount.
+        var q = Ants();
+        var stranger = Mob(9, 9999, 1, 471, 346, EnemyTarget.You);
+        var marker = new StepMarker(Fringes, new Vector3(474.1f, 40.2f, 348.2f), 30, 60491, 7232992, 0);
+        var plan = Decide(q, Snap(q, 2, Fringes, new Vector3(400, 42, 345), new[] { stranger }, markers: new[] { marker }, mounted: true, mount: Marid, combat: true, read: false));
+        Assert.Equal(StepKind.Go, plan.Kind);
+        Assert.Null(plan.Enemy);
+        // With an ant in view as well, the ant gets the action.
+        var ant = Mob(5, 8593, 7100, 483, 352, drawn: 71224);
+        var both = Decide(q, Snap(q, 2, Fringes, new Vector3(470, 42, 345), new[] { stranger, ant }, mounted: true, mount: Marid, combat: true, read: false));
+        Assert.Equal(StepKind.MountAction, both.Kind);
+        Assert.Equal(5ul, both.Enemy!.Id);
     }
 
     [Fact]
