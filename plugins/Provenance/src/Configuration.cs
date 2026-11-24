@@ -277,11 +277,17 @@ public sealed class AfterOrderSettings
     public bool AfterCosmic { get; set; }
 }
 
-/// <summary>Farming monster drops with a basic combo.</summary>
+/// <summary>
+/// Fighting with a basic combo (Settings, Monster drops): farming monster drops in an order run, and in the Tribes run
+/// the battle societies' dailies and the fights of the Ixal's dailies.
+/// </summary>
 [Serializable]
 public sealed class CombatSettings
 {
-    /// <summary>Combat job (ClassJob row) to fight with, in its highest item level gearset. 0: none picked yet.</summary>
+    /// <summary>
+    /// Combat job (ClassJob row) to fight with, in its highest item level gearset. 0: none picked yet (monster drops
+    /// then wait for one; battle dailies are only taken on a combat job that's already on).
+    /// </summary>
     public uint ClassJob { get; set; }
     /// <summary>Summon the chocobo companion with Gysahl Greens from the bags.</summary>
     public bool Chocobo { get; set; } = true;
@@ -428,7 +434,7 @@ public sealed class TribeSettings
 {
     /// <summary>The goal picked; null: "Rank up" while any ticked society is below its top rank, otherwise "Currency".</summary>
     public Core.Tribes.TribeGoal? Goal { get; set; }
-    /// <summary>Societies left out (BeastTribe rows); every other unlocked society takes part.</summary>
+    /// <summary>Societies left out (BeastTribe rows); every other unlocked society takes part, battle societies included.</summary>
     public HashSet<uint> LeftOut { get; set; } = new();
     /// <summary>Pause the run for quest cutscenes, so they can be watched; otherwise the run skips them.</summary>
     public bool PauseForCutscenes { get; set; }

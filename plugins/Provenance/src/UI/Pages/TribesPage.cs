@@ -80,7 +80,8 @@ internal sealed class TribesPage : Page
     }
 
     /// <summary>What the page shows, read from the game at most twice a second.</summary>
-    private sealed record Snapshot(List<TribeToday> Days, List<AcceptedTribeQuest> Accepted, int Allowances, List<ClassInfo> Classes, uint Current);
+    /// <param name="Who">The player's classes, the class that's on and the combat job picked under Settings, Monster drops.</param>
+    private sealed record Snapshot(List<TribeToday> Days, List<AcceptedTribeQuest> Accepted, int Allowances, PlayerClasses Who);
 
     private Snapshot Read(TribeData data)
     {
@@ -88,7 +89,7 @@ internal sealed class TribesPage : Page
         var accepted = Game.Accepted(data);
         var slots = Game.DailySlots();
         var days = data.Tribes.Select(t => Game.Today(data, t, accepted, slots)).ToList();
-        snapshot = new Snapshot(days, accepted, Game.AllowancesLeft, Game.Classes(), Integrations.GameState.CurrentJob);
+        snapshot = new Snapshot(days, accepted, Game.AllowancesLeft, Plugin.TribePlanning.Who());
         snapshotAt = DateTime.UtcNow;
         return snapshot;
     }
@@ -334,7 +335,7 @@ internal sealed class TribesPage : Page
         var s = Ui.S;
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Goal");
-        var taking = snap.Days.Where(d => d.Tribe.CraftOrGather && d.Unlocked && !S.LeftOut.Contains(d.Tribe.Id)).ToList();
+        var taking = snap.Days.Where(d => d.Unlocked && !S.LeftOut.Contains(d.Tribe.Id)).ToList();
         var effective = TribeGoals.Effective(S.Goal, taking);
         var shown = Goals.First(g => g.Goal == effective).Label;
         if (Ui.DropdownField("##tribegoal", shown, "Pick a goal", 320 * s, FontAwesomeIcon.Flag, detail: S.Goal == null ? "picked for you" : null))
@@ -445,7 +446,7 @@ internal sealed class TribesPage : Page
         if (!day.Unlocked) return State.Locked;
         if (snap.Accepted.Any(a => a.Leftover && a.Quest.TribeId == day.Tribe.Id)) return State.Leftover;
         if (day.RankQuestReady != null) return State.RankQuest;
-        if (day.Tribe.CraftOrGather && S.LeftOut.Contains(day.Tribe.Id)) return State.LeftOut;
+        if (S.LeftOut.Contains(day.Tribe.Id)) return State.LeftOut;
         if (day.Offers.Any() && day.LeftToday(Game.DailyAllowance) == 0)
             return day.Offers.All(o => o.State == OfferState.Done) ? State.DoneToday : State.UnderWay;
         if (day.AtTop) return State.Top;
@@ -555,18 +556,15 @@ internal sealed class TribesPage : Page
         }
         else
         {
-            if (t.CraftOrGather)
+            var include = !S.LeftOut.Contains(t.Id);
+            ImGui.PushID((int)t.Id);
+            if (Ui.Checkbox("Include in the run", ref include, "Left out, the run doesn't visit this society."))
             {
-                var include = !S.LeftOut.Contains(t.Id);
-                ImGui.PushID((int)t.Id);
-                if (Ui.Checkbox("Include in the run", ref include, "Left out, the run doesn't visit this society."))
-                {
-                    if (include) S.LeftOut.Remove(t.Id);
-                    else S.LeftOut.Add(t.Id);
-                    Config.Save();
-                }
-                ImGui.PopID();
+                if (include) S.LeftOut.Remove(t.Id);
+                else S.LeftOut.Add(t.Id);
+                Config.Save();
             }
+            ImGui.PopID();
             foreach (var left in snap.Accepted.Where(a => a.Leftover && a.Quest.TribeId == t.Id))
                 Ui.Wrapped($"\"{left.Quest.Name}\" is left over from before the reset: hand it in or abandon it, and the giver offers today's dailies.", Palette.Warn);
             DrawRank(data, day, snap);
@@ -670,13 +668,12 @@ internal sealed class TribesPage : Page
     {
         var s = Ui.S;
         var q = offer.Quest;
-        var judgement = QuestPolicy.Judge(q, day.Tribe, new PolicyOptions(S.LeaveOutSay, offer.AcceptedAs));
-        var job = offer.State == OfferState.Accepted ? offer.AcceptedAs
-            : TribeClasses.Choose(q, snap.Classes, snap.Current, S.Goal == TribeGoal.Levelling);
+        var levelling = S.Goal == TribeGoal.Levelling;
+        var judgement = QuestPolicy.Judge(q, new PolicyOptions(S.LeaveOutSay, offer.AcceptedAs));
+        var job = offer.State == OfferState.Accepted ? offer.AcceptedAs : TribeClasses.Choose(q, snap.Who, levelling);
         QuestReadiness? ready = null;
         if (offer.State == OfferState.Open && judgement.RunCanDo)
-            ready = TribeClasses.Readiness(q, snap.Classes, snap.Current, S.Goal == TribeGoal.Levelling, Game.OnHand, Game.Owns,
-                catalog.ItemName, catalog.ItemNamePlural);
+            ready = TribeClasses.Readiness(q, snap.Who, levelling, Game.OnHand, Game.Owns, catalog.ItemName, catalog.ItemNamePlural);
         if (ready is { Ready: true }) job = ready.ClassJob;
 
         // The chip says where the quest stands; the line under the name says why, or what it asks.

@@ -52,6 +52,7 @@ internal sealed class TribePlanning
         {
             var accepted = Game.Accepted(data);
             var slots = Game.DailySlots();
+            var who = Who();
             return TribePlanner.Plan(new TribePlanInput
             {
                 Days = data.Tribes.Select(t => Game.Today(data, t, accepted, slots)).ToList(),
@@ -60,11 +61,14 @@ internal sealed class TribePlanning
                 Goal = Settings.Goal,
                 LeftOut = Settings.LeftOut,
                 LeaveOutSay = Settings.LeaveOutSay,
-                Classes = Game.Classes(),
-                CurrentJob = GameState.CurrentJob,
+                Classes = who.All,
+                CurrentJob = who.Current,
+                CombatJob = who.CombatJob,
+                ClassHistory = who.History,
                 Territory = Services.ClientState.TerritoryType,
                 Owns = Game.Owns,
                 ItemName = catalog.ItemName,
+                ItemNamePlural = catalog.ItemNamePlural,
                 ClassName = ClassJobs.Abbreviation,
                 CraftsLeft = CraftsLeft,
                 Excluded = excluded ?? new Dictionary<uint, string>(),
@@ -76,6 +80,45 @@ internal sealed class TribePlanning
             Services.Log.Warning(e, "Planning the allied society dailies failed");
             return TribePlan.Empty;
         }
+    }
+
+    /// <summary>The classes that have been on since the run started, the first first; only the class on now while no run is going.</summary>
+    private readonly List<uint> history = new();
+
+    /// <summary>
+    /// The player's classes as the choice of one for a quest sees them (<see cref="Game.Who"/>), with the classes that
+    /// have been on since the run started. The run changes class from visit to visit and plans again after each, so
+    /// without them a crafter's dailies would move to the best-geared crafter once a battle society's visit put the
+    /// combat job on (and the crystals fetched before the tour would be another recipe's).
+    /// </summary>
+    public PlayerClasses Who()
+    {
+        var who = Game.Who(plugin.Config);
+        var running = plugin.TribeLoop is { Active: true };
+        if (!running) history.Clear();
+        if (who.Current != 0 && !history.Contains(who.Current)) history.Add(who.Current);
+        who = who with { History = history.ToArray() };
+        if (running) Note(who);
+        return who;
+    }
+
+    private string noted = "";
+
+    /// <summary>
+    /// While the run goes: what the class choice went by, to the debug log whenever it changes (the class on, the
+    /// classes it has been on, the Monster drops job, and the combat jobs it could fight on).
+    /// </summary>
+    private void Note(PlayerClasses who)
+    {
+        static string Yes(bool b) => b ? "yes" : "no";
+        var picked = who.CombatJob == 0 ? "none"
+            : who.Of(who.CombatJob) is { } c ? $"{ClassJobs.Abbreviation(c.ClassJob)} (level {c.Level}, gearset {Yes(c.HasGearset)}, combo {Yes(c.Fights)})"
+            : $"{who.CombatJob} (not a combat job of this character)";
+        var text = $"classes: on {ClassJobs.Abbreviation(who.Current)}, been on [{string.Join(", ", who.History.Select(ClassJobs.Abbreviation))}], Monster drops job {picked}, "
+                   + $"combat jobs with a combo [{string.Join(", ", who.All.Where(x => x.Fights && x.Level > 0).Select(x => $"{ClassJobs.Abbreviation(x.ClassJob)} {x.Level}{(x.HasGearset ? "" : " no gearset")}"))}]";
+        if (text == noted) return;
+        noted = text;
+        DebugLog.Write("tribes", text);
     }
 
     /// <summary>

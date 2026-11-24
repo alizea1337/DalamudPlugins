@@ -9,11 +9,11 @@ public enum PolicyRule
     Run,
     /// <summary>Never automated, whatever the version (minigames, FATEs, Ixal "Deliverance").</summary>
     Never,
-    /// <summary>A battle society: comes with step 4.</summary>
-    BattleSociety,
-    /// <summary>An Ixal daily with more than crafting in it (a fight, a /say, another class's step).</summary>
-    IxalNotCraftOnly,
-    /// <summary>A step the engine can't do reliably yet (aiming the Dwarves' cannon).</summary>
+    /// <summary>A step on another class partway through (nine Ixal dailies gather or fish as Miner, Botanist or Fisher).</summary>
+    OtherClass,
+    /// <summary>Done unseen under a spell that runs out (three Sylph dailies).</summary>
+    Stealth,
+    /// <summary>A step the engine can't do reliably yet (aiming the Dwarves' cannon, an emote nobody is named for).</summary>
     NeedsHint,
     /// <summary>A rank quest: the page offers a button for it in a later version.</summary>
     RankQuest,
@@ -38,20 +38,27 @@ public sealed record QuestJudgement(PolicyRule Rule, string? Reason)
 public readonly record struct PolicyOptions(bool LeaveOutSay = false, uint AcceptedAs = 0);
 
 /// <summary>
-/// Which society quests step 2's run can do and why not, as one table, so the page, the planner and the run agree.
+/// Which society quests the run can do and why not, as one table, so the page, the planner and the run agree. A daily
+/// of any of the 20 societies is the run's unless a line here says otherwise: the fights of the battle societies' dailies
+/// and of the Ixal's are done with the basic combat, the errands by the step engine.
 /// </summary>
 /// <remarks>
-/// <para>Decided with the user (see the Tribes build plan):</para>
+/// <para>Decided with the user (see the Tribes build plans):</para>
 /// <list type="bullet">
 /// <item>Never automated: the snipe and bow minigames (the only automation known fakes the minigame's result), the nine
 /// ARR FATE dailies, and Ixal "Deliverance" (a quota of hand-ins, not quest steps). These aren't accepted.</item>
-/// <item>Not in this version: battle societies, Ixal dailies with anything besides crafting (a fight, a /say, another
-/// class's gathering or fishing step), and gatherer dailies on Fisher (the data has no spot or bait for the quest
-/// fish), so those are taken as Miner or Botanist only.</item>
+/// <item>Do it yourself for now: the three Sylph stealth dailies ("Now You See Me", "Waterbringer", "Mist
+/// Opportunities": done while a spell keeps you unseen, which runs out and is topped up at blooms on the way); the nine
+/// Ixal dailies with a step for a Miner, Botanist or Fisher partway through; rank quests (a button for them comes
+/// later) and story quests.</item>
+/// <item>Gatherer dailies on Fisher (the data has no spot or bait for the quest fish): taken as Miner or Botanist only.</item>
 /// <item>The Dwarves' "Demolition Demo" (3923) and "Substitute Tester" (3929) fire the Rolling Tankard's cannon, a line
 /// in front of the mount (Action 20121, cast type 12, 20 yalms): the mount has to face each target, and 3929 picks its
 /// dummies at random. They count as doable only once the step engine turns the mount to face a target
 /// (<see cref="CannonAims"/>).</item>
+/// <item>An emote goes only to someone the quest's to-do line names. Where the line points at an area or an object
+/// (<see cref="StepKinds.EmoteUnnamed"/>: two crafter-society dailies and the seven battle-society ones with an
+/// emote), the quest stays with the player until the engine knows who the emote is for.</item>
 /// </list>
 /// </remarks>
 public static class QuestPolicy
@@ -67,18 +74,23 @@ public static class QuestPolicy
     public static readonly IReadOnlySet<ushort> CannonQuests = new HashSet<ushort> { 3923, 3929 };
 
     /// <summary>
-    /// Dailies whose emote goes to people the quest's to-do lines don't name (the lines point at an area: Moogles 2318
-    /// /psych and /slap, Yok Huy 5346 /poke). The engine only emotes at someone a line names, so these stay with the
-    /// player until the watch logs show who the targets are.
+    /// The first two dailies found whose emote goes to people the quest's to-do lines don't name (the lines point at an
+    /// area: Moogles 2318 /psych and /slap, Yok Huy 5346 /poke). The game data now marks every such daily
+    /// (<see cref="StepKinds.EmoteUnnamed"/>, these two among them); they stay listed here so they're refused whatever
+    /// the data says. The engine only emotes at someone a line names.
     /// </summary>
     public static readonly IReadOnlySet<ushort> EmoteAtArea = new HashSet<ushort> { 2318, 5346 };
 
     private const string Minigame = "A shooting minigame: Provenance doesn't fake its result";
     private const string Fate = "A FATE quest: the run doesn't take part in FATEs";
+    private const string Stealth = "A stealth quest, done while a spell keeps you unseen and before it runs out: do it yourself for now";
+    private const string OtherClass = "Has a step for a Miner, Botanist or Fisher partway through, and the run doesn't change to a gatherer inside a quest yet: do it yourself for now";
+    private const string Emote = "An emote the quest names nobody for (it points at an area or an object): Provenance only emotes at someone it's sure of, so do this one yourself for now";
 
     /// <summary>
-    /// The society quests with a snipe or bow minigame: Namazu's daily, three battle dailies, two rank quests. Not all of
-    /// them name it in their script (2991 and 3707 have no <c>SNP</c> argument), so the data reads the minigame from here too.
+    /// The society quests with a snipe or bow minigame: Namazu's daily, three battle dailies, two rank quests. Their
+    /// scripts name it under several spellings (<c>SNP0</c>, <c>SNP_0</c>, <c>SNIPE_0</c>), so the data reads the minigame
+    /// from here too.
     /// </summary>
     public static readonly IReadOnlySet<ushort> Minigames = new HashSet<ushort> { 3124, 2991, 3060, 3707, 2974, 3100 };
 
@@ -96,12 +108,12 @@ public static class QuestPolicy
     /// <summary>Miner and Botanist: the classes gatherer dailies are taken on.</summary>
     public static bool GatherClass(uint classJob) => classJob is 16 or 17;
 
-    /// <summary>The verdict on a quest of a society.</summary>
-    public static QuestJudgement Judge(TribeQuest quest, TribeKind society, PolicyOptions options = default)
+    /// <summary>The verdict on a society quest.</summary>
+    public static QuestJudgement Judge(TribeQuest quest, PolicyOptions options = default)
     {
         if (Never.TryGetValue(quest.Number, out var never)) return new QuestJudgement(PolicyRule.Never, never);
-        if (society == TribeKind.Battle || quest.Classes == TribeKind.Battle)
-            return new QuestJudgement(PolicyRule.BattleSociety, "A battle society's quest: those come in a later version");
+        // A minigame the list above doesn't have yet (a later patch's): the data still shows it.
+        if (quest.Has(StepKinds.Snipe)) return new QuestJudgement(PolicyRule.Never, Minigame);
         switch (quest.Kind)
         {
             case TribeQuestKind.RankUp:
@@ -109,19 +121,11 @@ public static class QuestPolicy
             case TribeQuestKind.Unlock or TribeQuestKind.Side:
                 return new QuestJudgement(PolicyRule.StoryQuest, "A story quest: the run only does dailies");
         }
-        if (quest.TribeId == IxalId)
-        {
-            if (quest.Has(StepKinds.Combat))
-                return new QuestJudgement(PolicyRule.IxalNotCraftOnly, "Has a fight on a combat job: Ixal's fighting dailies come in a later version");
-            if (quest.Has(StepKinds.OtherClass))
-                return new QuestJudgement(PolicyRule.IxalNotCraftOnly, "Gathers or fishes partway through on another class: comes in a later version");
-            if (quest.Has(StepKinds.Say))
-                return new QuestJudgement(PolicyRule.IxalNotCraftOnly, "Ixal's dailies with a /say phrase come in a later version");
-        }
+        if (quest.Has(StepKinds.Stealth)) return new QuestJudgement(PolicyRule.Stealth, Stealth);
+        if (quest.Has(StepKinds.OtherClass)) return new QuestJudgement(PolicyRule.OtherClass, OtherClass);
         if (CannonQuests.Contains(quest.Number) && !CannonAims)
             return new QuestJudgement(PolicyRule.NeedsHint, "Fires the Rolling Tankard's cannon, which has to be aimed: Provenance can't aim it yet");
-        if (EmoteAtArea.Contains(quest.Number))
-            return new QuestJudgement(PolicyRule.NeedsHint, "An emote at people the quest doesn't name: Provenance only emotes at someone it's sure of, so do this one yourself for now");
+        if (quest.Has(StepKinds.EmoteUnnamed) || EmoteAtArea.Contains(quest.Number)) return new QuestJudgement(PolicyRule.NeedsHint, Emote);
         if (options.AcceptedAs == FisherId && quest.Has(StepKinds.Gather | StepKinds.Fish))
             return new QuestJudgement(PolicyRule.TakenAsFisher, "Taken as Fisher: the run does gatherer dailies as Miner or Botanist only");
         if (options.LeaveOutSay && quest.Has(StepKinds.Say))
@@ -129,10 +133,14 @@ public static class QuestPolicy
         return QuestJudgement.Run;
     }
 
-    /// <summary>The verdict on a society's quest, with the society's kind.</summary>
-    public static QuestJudgement Judge(TribeQuest quest, Tribe society, PolicyOptions options = default) => Judge(quest, society.Kind, options);
+    /// <summary>
+    /// The verdict on a quest of a society of a kind. No verdict depends on the society's kind any more (a battle
+    /// society's dailies are judged like the others); this is <see cref="Judge(TribeQuest, PolicyOptions)"/> for the
+    /// callers that pass it.
+    /// </summary>
+    public static QuestJudgement Judge(TribeQuest quest, TribeKind society, PolicyOptions options = default) => Judge(quest, options);
 
-    /// <summary>The Ixal (<c>BeastTribe</c> 5): only their craft-only dailies are in this version.</summary>
+    /// <summary>The Ixal (<c>BeastTribe</c> 5): crafters whose dailies also fight, say a password, or take a gatherer partway through.</summary>
     public const uint IxalId = 5;
 
     private const uint FisherId = 18;

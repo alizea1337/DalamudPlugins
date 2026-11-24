@@ -21,13 +21,16 @@ public class TribeClassesTests
         => list.Select(c => new ClassInfo(c.Job, c.Level, c.Gearset, c.ItemLevel)).ToList();
 
     private static QuestReadiness Ready(TribeQuest q, List<ClassInfo> classes, uint current, int crystals = 999, bool owns = true, bool levelling = false)
-        => TribeClasses.Readiness(q, classes, current, levelling, _ => crystals, _ => owns, id => "Item " + id, id => "Items " + id);
+        => TribeClasses.Readiness(q, new PlayerClasses(classes, current), levelling, _ => crystals, _ => owns, id => "Item " + id, id => "Items " + id);
+
+    private static uint Choose(TribeQuest q, List<ClassInfo> classes, uint current, bool levelling = false)
+        => TribeClasses.Choose(q, new PlayerClasses(classes, current), levelling);
 
     [Fact]
     public void TheCurrentClassTakesItWhenItQualifies()
     {
         var classes = Classes((8, 100, true, 700), (9, 95, true, 710));
-        Assert.Equal(8u, TribeClasses.Choose(Quest(TribeKind.Crafter, 90), classes, 8));
+        Assert.Equal(8u, Choose(Quest(TribeKind.Crafter, 90), classes, 8));
     }
 
     [Fact]
@@ -35,22 +38,22 @@ public class TribeClassesTests
     {
         var classes = Classes((8, 100, true, 700), (9, 95, true, 710), (16, 100, true, 750));
         // On a gatherer: the crafters qualify, Blacksmith's gear is better.
-        Assert.Equal(9u, TribeClasses.Choose(Quest(TribeKind.Crafter, 90), classes, 16));
+        Assert.Equal(9u, Choose(Quest(TribeKind.Crafter, 90), classes, 16));
     }
 
     [Fact]
     public void LevellingTakesTheLowestThatQualifies()
     {
         var classes = Classes((8, 100, true, 700), (9, 92, true, 710), (10, 80, true, 600));
-        Assert.Equal(9u, TribeClasses.Choose(Quest(TribeKind.Crafter, 90), classes, 8, levelling: true));
+        Assert.Equal(9u, Choose(Quest(TribeKind.Crafter, 90), classes, 8, levelling: true));
     }
 
     [Fact]
     public void AClassWithoutAGearsetOnlyCountsWhileItIsOn()
     {
         var classes = Classes((8, 100, false, 0), (9, 100, false, 0));
-        Assert.Equal(8u, TribeClasses.Choose(Quest(TribeKind.Crafter, 90), classes, 8));
-        Assert.Equal(0u, TribeClasses.Choose(Quest(TribeKind.Crafter, 90), classes, 16));
+        Assert.Equal(8u, Choose(Quest(TribeKind.Crafter, 90), classes, 8));
+        Assert.Equal(0u, Choose(Quest(TribeKind.Crafter, 90), classes, 16));
     }
 
     [Fact]
