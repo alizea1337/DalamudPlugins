@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.9
+
+- The Firmament: the run stopped 4 yalms from an aethernet shard, which is too far to use it; the game said
+  "You can't do that from there" and only the next try worked. It now walks to within 3 yalms.
+
 ## 0.22.8
 
 - Arriving at an NPC still in the air, the run talked to it from up there; the game answered "Target is too far

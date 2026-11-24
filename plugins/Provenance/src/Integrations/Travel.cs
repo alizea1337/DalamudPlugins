@@ -53,6 +53,8 @@ internal sealed unsafe partial class Travel
     private Vector2 firmamentFrom;
     private uint firmamentTo;
     private const float ShardRange = 3.5f;
+    /// <summary>The Firmament's aethernet shards (arriving at 4 yalms, using one failed: "You can't do that from there").</summary>
+    private const float FirmamentShardRange = 3f;
     /// <summary>The aethernet window open this long without the destination in it: give up.</summary>
     private static readonly TimeSpan ListPatience = TimeSpan.FromSeconds(6);
 
@@ -749,7 +751,8 @@ internal sealed unsafe partial class Travel
         hopTo = to;
         Note($"{what}: taking the Firmament's aethernet to {PlaceText(to)}");
         crystalTrip = new Travel { hopped = true };
-        crystalTrip.GoTo("the aethernet shard", Firmament, from, 4f, () => FirmamentShardObject(from)?.Position);
+        // From 4 yalms the game answered "You can't do that from there"; 3 is safely within reach.
+        crystalTrip.GoTo("the aethernet shard", Firmament, from, FirmamentShardRange, () => FirmamentShardObject(from)?.Position);
         crystalTrip.hopped = true;
         Enter(State.ToCrystal, 120);
     }
