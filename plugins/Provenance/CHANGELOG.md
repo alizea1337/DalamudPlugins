@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.7
+
+- Trips to an NPC inside a building (all runs): the run found an open spot near the building but then hovered
+  just above the ground there for 20 seconds without landing, gave up and flew at the wall (R'dhyanki in
+  Labyrinthos). Hovering low over the spot, it now presses Dismount, which lands, and gets off.
+- It also lands in a better place: it asks vnavmesh for the walking path from the open spot to the NPC (that
+  path goes through the door) and lands where the path comes out of the building, just outside the door, then
+  walks in. When vnavmesh can't say within a few seconds, it lands at the open spot as before. The idea is
+  GatherBuddyReborn's (Apache-2.0).
+
 ## 0.22.6
 
 - Custom Deliveries and order runs: an NPC inside a building was flown at from outside, so the character ended

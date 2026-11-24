@@ -119,4 +119,8 @@ internal static class Vnav
         => Ipc.Func<Vector3, float, float, Vector3?>("vnavmesh.Query.Mesh.NearestPoint", near, halfXz, halfY);
 
     public static void Stop() => Ipc.Action("vnavmesh.Path.Stop");
+
+    /// <summary>The walking path (no flying) between two points, worked out in the background; null when it can't be asked.</summary>
+    public static System.Threading.Tasks.Task<System.Collections.Generic.List<Vector3>>? GroundPath(Vector3 from, Vector3 to)
+        => Ipc.Func<Vector3, Vector3, bool, System.Threading.Tasks.Task<System.Collections.Generic.List<Vector3>>>("vnavmesh.Nav.Pathfind", from, to, false);
 }

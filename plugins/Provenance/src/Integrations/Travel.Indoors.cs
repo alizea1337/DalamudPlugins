@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
+using System.Threading.Tasks;
 using Dalamud.Game.ClientState.Conditions;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
@@ -34,6 +36,12 @@ internal sealed unsafe partial class Travel
     private const int DescentPaths = 4;
     /// <summary>Getting off right above the floor point again after this long, when the first didn't take.</summary>
     private static readonly TimeSpan DropAgainAfter = TimeSpan.FromSeconds(3);
+    /// <summary>Hovering low over the floor point: Dismount again after this long (the first press lands, the next gets off).</summary>
+    private static readonly TimeSpan LandAgainAfter = TimeSpan.FromSeconds(1.5);
+    /// <summary>Landed and still mounted: Dismount again after this long.</summary>
+    private static readonly TimeSpan GetOffAgainAfter = TimeSpan.FromSeconds(1.5);
+    /// <summary>The walking path to a covered target: waited for at most this long, then the open spot as found is used.</summary>
+    private static readonly TimeSpan DoorPatience = TimeSpan.FromSeconds(6);
     /// <summary>How close to the open spot near a covered target to fly, and within how far of it the coming down starts.</summary>
     private const float LandingSpotWithin = 1f;
     private const float LandingSpotReach = 2.5f;
@@ -49,6 +57,12 @@ internal sealed unsafe partial class Travel
     private bool floorLooked;
     private Vector3 floorFor;
     private Vector3? floorAtTarget;
+    // The walk in from the open spot (GatherBuddyReborn's idea, Apache-2.0): the walking path to the target goes
+    // through the door, so the landing is where that path comes out into the open.
+    private Task<List<Vector3>>? doorPath;
+    private DateTime doorSince;
+    private bool doorDone;
+    private Vector3? doorSpot;
 
     // The walk (from the start of each, after a teleport too).
     private bool startLooked;
@@ -76,6 +90,7 @@ internal sealed unsafe partial class Travel
             landingSearch = null;
             floorLooked = false;
             floorAtTarget = null;
+            ResetDoor();
         }
         startLooked = false;
         walkingOut = false;
@@ -84,6 +99,13 @@ internal sealed unsafe partial class Travel
         landFirstLooked = false;
         dropRefusedNoted = false;
         descent = Descent.None;
+    }
+
+    private void ResetDoor()
+    {
+        doorPath = null;
+        doorDone = false;
+        doorSpot = null;
     }
 
     /// <summary>These rules apply: not carrying something on foot, not on a quest mount, not under water, and coming down hasn't failed.</summary>
@@ -96,7 +118,7 @@ internal sealed unsafe partial class Travel
     private bool HeadingForLanding => IndoorsApplies && roofOverTarget == true && !onFootRest && Services.Condition[ConditionFlag.Mounted];
 
     /// <summary>Where the path goes instead of the target: the open spot near a covered target while mounted; null otherwise.</summary>
-    private Vector3? LandingSpot => HeadingForLanding && landingSearch is { Done: true, Found: { } spot } ? spot : null;
+    private Vector3? LandingSpot => HeadingForLanding && landingSearch is { Done: true, Found: { } spot } ? doorSpot ?? spot : null;
 
     /// <summary>In the air and not right above the spot: getting off here would drop the character beside it.</summary>
     private static bool InAirBeside(Vector3 me, Vector3 spot)
@@ -113,6 +135,7 @@ internal sealed unsafe partial class Travel
         roofFor = real;
         roofOverTarget = RoofOver(real);
         landingSearch = null;
+        ResetDoor();
         Note($"{what}: {(roofOverTarget == true ? "a roof over the target" : "the target is in the open")} at {Where(real)}");
     }
 
@@ -189,9 +212,13 @@ internal sealed unsafe partial class Travel
 
         if (landingSearch.Found is { } spot)
         {
-            // On the way the path goes to the spot (LandingSpot); there, come down and get off.
-            if (Landing.Flat(me, spot) > LandingSpotReach) return false;
-            StartDescent(spot, $"at the open spot {Where(spot)}; coming down, then walking in");
+            // Where the walk in from the spot comes out of the building: the landing moves there (LandingSpot).
+            if (!doorDone) LookForDoor(spot);
+            var landAt = doorSpot ?? spot;
+            // On the way the path goes to the spot; there, come down and get off (once the walk in is known, or given up).
+            if (Landing.Flat(me, landAt) > LandingSpotReach) return false;
+            if (!doorDone) return true;
+            StartDescent(landAt, $"at the {(doorSpot != null ? "spot outside the door" : "open spot")} {Where(landAt)}; coming down, then walking in");
             return true;
         }
 
@@ -208,6 +235,48 @@ internal sealed unsafe partial class Travel
         indoorsOff = true;
         Note($"{what}: no floor found below {Where(me)} to come down on; going on as before");
         return false;
+    }
+
+    /// <summary>
+    /// The walking path from the open spot to the target, asked of vnavmesh in the background (once per target), and
+    /// where it comes out into the open: the door. Bounded by <see cref="DoorPatience"/>; without an answer the open spot
+    /// as found is used.
+    /// </summary>
+    private void LookForDoor(Vector3 spot)
+    {
+        var now = DateTime.UtcNow;
+        if (doorPath == null)
+        {
+            doorSince = now;
+            doorPath = Vnav.GroundPath(spot, roofFor);
+            if (doorPath == null)
+            {
+                doorDone = true;
+                Note($"{what}: the walk in from the open spot can't be asked of vnavmesh; landing there");
+            }
+            return;
+        }
+        if (!doorPath.IsCompleted)
+        {
+            if (now - doorSince <= DoorPatience) return;
+            doorDone = true;
+            Note($"{what}: the walk in from the open spot took longer than {DoorPatience.TotalSeconds:0} seconds to work out; landing there");
+            return;
+        }
+        doorDone = true;
+        if (!doorPath.IsCompletedSuccessfully || doorPath.Result is not { Count: >= 2 } path)
+        {
+            Note($"{what}: no walk in from the open spot {Where(spot)}; landing there");
+            return;
+        }
+        if (Landing.DoorOut(path, RoofOver) is { } outside && Vnav.NearestPoint(outside, 2f, 3f) is { } door
+            && MathF.Abs(door.Y - roofFor.Y) <= Landing.MaxHeightOff && !RoofOver(door))
+        {
+            doorSpot = door;
+            Note($"{what}: the walk in from the open spot is {path.Count} points long and comes out of the building at {Where(door)},"
+                 + $" {Vector3.Distance(door, roofFor):0} yalms from the target; landing there");
+        }
+        else Note($"{what}: the walk in from the open spot has no open point near its door; landing at the open spot");
     }
 
     /// <summary>
@@ -297,8 +366,8 @@ internal sealed unsafe partial class Travel
                     Note($"{what}: down on the ground at {Where(me)}; getting off");
                     descent = Descent.GettingOff;
                     descentSince = now;
-                    // Getting off in the air right above the spot finishes by itself once down.
-                    if (dropAt == default) GetOff();
+                    // Getting off high above the spot finishes by itself once down; landing from a low hover needs one more press.
+                    GetOff();
                     return true;
                 }
                 if (now - descentSince > DescentPatience)
@@ -308,6 +377,19 @@ internal sealed unsafe partial class Travel
                     indoorsOff = true;
                     Vnav.Stop();
                     walkingTo = null;
+                    return true;
+                }
+                // Hovering low over the spot: a flight never touches down by itself (vnavmesh keeps hovering), so Dismount
+                // lands from here, as GatherBuddyReborn does within 3 yalms of the ground.
+                if (Landing.Flat(me, descentTo) <= LandingSpotReach && MathF.Abs(me.Y - descentTo.Y) < Landing.LowHover)
+                {
+                    if (dropAt == default || now - dropAt > LandAgainAfter)
+                    {
+                        if (dropAt == default) Note($"{what}: hovering {me.Y - descentTo.Y:0.#} yalms above {Where(descentTo)}; landing");
+                        Vnav.Stop();
+                        dropAt = now;
+                        GetOff();
+                    }
                     return true;
                 }
                 if (Vnav.Busy) return true;
@@ -332,7 +414,7 @@ internal sealed unsafe partial class Travel
 
             case Descent.GettingOff:
                 if (!Services.Condition[ConditionFlag.Mounted]) { EndDescent(me); return true; }
-                if (now - descentSince < TimeSpan.FromSeconds(3)) return true;
+                if (now - descentSince < GetOffAgainAfter) return true;
                 if (!getOffRetried)
                 {
                     getOffRetried = true;

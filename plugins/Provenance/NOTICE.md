@@ -28,6 +28,11 @@ Adapted files:
   `GatherBuddy/AutoGather/`.
 - `Resources/ilvconvert.csv`: base Gathering and Perception per gathering item level, from
   `GatherBuddy/CustomInfo/IlvConvertTable.csv`.
+- `src/Core/Run/Landing.cs` (`DoorOut`) and `src/Integrations/Travel.Indoors.cs`: landing on the
+  walking path to the target and walking the rest, and pressing Dismount when hovering low over
+  the landing point, after `GatherBuddy/AutoGather/AutoGather.Movement.cs` (`FindCombinedPath`,
+  `ForceLandAndDismount`). Written anew for targets under a roof: the landing is where the walking
+  path comes out of the building.
 - `src/Run/Appraiser.cs`: the collectable appraiser window callbacks (job tab, row, submit, the
   scrip-cap prompt) and reading its item list, from `GatherBuddy/AutoGather/Collectables/`.
 - `tools/VendorTable`: corrected positions of two collectable appraisers, from
