@@ -31,6 +31,8 @@ public enum StepKind
     MountAction,
     /// <summary>Go where the game points (a marker or a to-do spot) and look there.</summary>
     Go,
+    /// <summary>Fight an enemy: one of the quest's, or whatever attacks. The quest's item goes on it when it wants one.</summary>
+    Fight,
 }
 
 /// <summary>How a key item is used.</summary>
@@ -40,6 +42,8 @@ public enum ItemUse { Target, Ground, Self }
 public sealed record StepPlan(StepKind Kind, string What)
 {
     public StepObject? Target { get; init; }
+    /// <summary>The enemy to fight, or to use the quest mount's action on.</summary>
+    public StepEnemy? Enemy { get; init; }
     /// <summary>Where to go or act when there's no object (a marker, a to-do spot).</summary>
     public Vector3? Spot { get; init; }
     /// <summary>The zone of the target or spot.</summary>
@@ -73,6 +77,7 @@ public sealed record StepPlan(StepKind Kind, string What)
     public override string ToString()
     {
         var on = Target != null ? $" -> {Target.Name} ({Target.BaseId}) at {V(Target.Position)}"
+            : Enemy != null ? $" -> {Enemy.Name} ({Enemy.BaseId}/{Enemy.NameId}) at {V(Enemy.Position)}"
             : Spot is { } p ? $" -> {V(p)} in {Territory}" : "";
         var extra = Kind switch
         {
@@ -85,7 +90,7 @@ public sealed record StepPlan(StepKind Kind, string What)
             StepKind.Gather => $" {Count}x item {Id}",
             _ => "",
         };
-        return $"{Kind}{extra}{on}{(Kind is StepKind.Talk or StepKind.Say or StepKind.Emote or StepKind.UseItem or StepKind.MountAction or StepKind.Go ? $" within {Within:0.#}" : "")}"
+        return $"{Kind}{extra}{on}{(Kind is StepKind.Talk or StepKind.Say or StepKind.Emote or StepKind.UseItem or StepKind.MountAction or StepKind.Go or StepKind.Fight ? $" within {Within:0.#}" : "")}"
                + (OnFoot ? " on foot" : "") + $": {What}";
     }
 
@@ -134,6 +139,17 @@ public sealed class StepMemory
     public int DropTeleports { get; set; }
     /// <summary>Rounds of crafting that brought no high-quality copy of an item only those count for.</summary>
     public int HqMisses { get; set; }
+    /// <summary>
+    /// Enemies given up on (by game object id): a fight that took too long, one that couldn't be reached or hurt, one
+    /// the quest's item did nothing to. Not fought again while this quest is worked on.
+    /// </summary>
+    public HashSet<ulong> GivenUp { get; } = new();
+    /// <summary>How many were given up on since the player last took over: after <see cref="StepRules.MaxGiveUps"/> the player is asked.</summary>
+    public int GiveUps { get; set; }
+    /// <summary>Enemies defeated since the quest last moved on (a defeat that counts moves it on).</summary>
+    public int Kills { get; set; }
+    /// <summary>Times the quest's item was used on an enemy, by game object id.</summary>
+    public Dictionary<ulong, int> ItemUses { get; } = new();
 
     private string decoyLines = "";
     private readonly HashSet<ulong> decoys = new();
@@ -146,6 +162,7 @@ public sealed class StepMemory
         var first = Signature.Length == 0;
         Signature = signature;
         ProgressAt = now;
+        Kills = 0;
         if (!first)
         {
             Tried.Clear();
@@ -314,21 +331,91 @@ public static class StepRules
     /// <summary>How often a public action is sent for one step at most: a /say once (the player was told so), an emote once more.</summary>
     public static int PublicTries(StepKind kind) => kind == StepKind.Say ? 1 : 2;
 
+    /// <summary>How close the trip brings the character to an enemy before the fight takes over (it closes the rest to its own reach).</summary>
+    public const float EngageWithin = 20f;
+    /// <summary>Enemies given up on (a fight over its time, one out of reach) before the player is asked.</summary>
+    public const int MaxGiveUps = 2;
+    /// <summary>Enemies defeated without the quest moving on before the player is asked (a defeat that counts moves it on).</summary>
+    public const int MaxIdleKills = 15;
+    /// <summary>"Weakness" and "Brink of Death": the statuses a knock-out leaves behind. No fight is started with them.</summary>
+    public static readonly IReadOnlySet<uint> KnockOutStatuses = new HashSet<uint> { 43, 44 };
+
+    /// <summary>A class that doesn't fight: a crafter (8–15) or a gatherer (16–18).</summary>
+    public static bool HandOrLand(uint job) => job is >= 8 and <= 18;
+
     /// <summary>The next step.</summary>
-    public static StepPlan Decide(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay = false)
+    /// <param name="combatJob">
+    /// The job a quest accepted as a crafter or gatherer is fought on (the Ixal's: Settings, Monster drops); 0 when none
+    /// is picked. A battle society's quest is fought on the job it was accepted as.
+    /// </param>
+    public static StepPlan Decide(QuestScript q, StepSnapshot s, StepMemory m, DateTime now, bool leaveOutSay = false, uint combatJob = 0)
     {
         if (!s.Accepted)
             return s.Completed ? new StepPlan(StepKind.Done, "The quest is complete.") : new StepPlan(StepKind.Failed, "The quest isn't in the journal any more.");
         // Before the wait for a busy game: a game that stays busy doesn't stop the clock.
         if (m.ProgressAt != default && now - m.ProgressAt > NoProgressLimit)
             return Ask($"Nothing has changed for {NoProgressLimit.TotalMinutes:0} minutes; do this step yourself, then resume.");
-        if (s.Busy || !s.ScriptRead) return new StepPlan(StepKind.Wait, "busy");
-
-        // The class first: as another class nobody (the facility supervisor neither) moves the quest on.
-        if (s.AcceptJob != 0 && s.Job != s.AcceptJob)
-            return new StepPlan(StepKind.SwitchJob, "the quest goes on only as the class it was accepted as") { Id = s.AcceptJob };
+        if (s.Busy) return new StepPlan(StepKind.Wait, "busy");
 
         var riding = q.Mount is { } qm && s.Mounted && s.Mount == qm.Mount;
+
+        // Enemies come before everything else, and before the wait while in combat (a run that is attacked mustn't
+        // stand there): on a combat job, whatever attacks and the quest's own enemies in view are fought.
+        if (m.GiveUps >= MaxGiveUps)
+            return Ask($"{m.GiveUps} of the quest's fights were given up (too long, or the enemy couldn't be reached or hurt); do this step yourself, then resume.");
+        if (m.Kills > MaxIdleKills)
+            return Ask($"{m.Kills} enemies were defeated without the quest moving on; do this step yourself, then resume.");
+        if (s.Fighter && EnemyRules.Next(q, s, m) is { } enemy)
+        {
+            var why = EnemyRules.Judge(q, s, enemy);
+            if (riding)
+            {
+                // On the quest mount its action is the weapon (the Ananta's marid tramples the ants); with none, ride on.
+                if (MountAttack(q.Mount!, s, m, enemy) is { } attack) return attack;
+            }
+            else if (why.Verdict != EnemyVerdict.Attacker && s.Statuses.Overlaps(KnockOutStatuses))
+                return new StepPlan(StepKind.Wait, "weak from a knock-out: no fight is started until that wears off");
+            else return Fight(s, enemy, why);
+        }
+        if (s.InCombat)
+        {
+            // Nothing of the run's to fight (the end of a fight, or someone else's): wait it out. The busy watch bounds it.
+            if (s.Fighter && !riding) return new StepPlan(StepKind.Wait, "in combat");
+            // A class that doesn't fight carries on: by the last calm look when the quest hasn't moved since (below),
+            // else on to the next marked place, away from whatever attacks.
+            if (!s.ScriptRead)
+                return Where(q, s, m) is { } on
+                    ? on with { What = "carry on while attacked: " + on.What, NoFly = riding && !q.Mount!.CanFly }
+                    : new StepPlan(StepKind.Wait, "in combat");
+        }
+        if (!s.ScriptRead) return new StepPlan(StepKind.Wait, "busy");
+
+        // The class first: as another class nobody (the facility supervisor neither) moves the quest on. A fight of a
+        // quest accepted as a crafter or gatherer (the Ixal's) is done on the combat job, for the whole of its sequence:
+        // the job can't be changed once the enemy is there.
+        var fights = EnemyRules.Fights(q, s.Sequence);
+        if (s.AcceptJob != 0)
+        {
+            var wanted = s.AcceptJob;
+            if (fights && HandOrLand(s.AcceptJob))
+            {
+                if (combatJob == 0 || HandOrLand(combatJob))
+                    return Ask("This step has a fight, and no combat job is picked under Settings, Monster drops. Pick one (or do the fight yourself), then resume.");
+                wanted = combatJob;
+            }
+            if (s.Job != wanted)
+            {
+                if (s.InCombat) return new StepPlan(StepKind.Wait, "in combat: the class can't be changed now");
+                return new StepPlan(StepKind.SwitchJob, wanted == s.AcceptJob ? "the quest goes on only as the class it was accepted as" : "the quest's fight is done on your combat job") { Id = wanted };
+            }
+        }
+        // A fight ahead on a class the basic combat has no actions for (a quest already in the journal can have been
+        // accepted as any combat class): the player's, before anything calls the enemy.
+        if (fights && !s.Fighter)
+            return Ask("This step has a fight, and Provenance's basic combat has no actions for the class you're on; do the fight yourself, then resume.");
+        // Weak from a knock-out, with a fight ahead: wait until it wears off (it lasts under two minutes).
+        if (fights && s.Statuses.Overlaps(KnockOutStatuses))
+            return new StepPlan(StepKind.Wait, "weak from a knock-out: no fight is started until that wears off");
 
         // Crafting: the to-do line is about the product, or (older quests) the materials are in the bags and products
         // are still short. Short of both: talk to whoever the step marks (a crate, the materials NPC hands more out).
@@ -345,13 +432,15 @@ public static class StepRules
                 }
                 if (craft.Hq && m.HqMisses >= MaxHqMisses)
                     return Ask($"The quest only counts its item made high quality, and {m.HqMisses} tries came out normal quality; craft it high quality yourself (food, medicine or better gear help), then resume.");
+                if (s.InCombat) return new StepPlan(StepKind.Wait, "in combat: the crafting waits");
                 return craft;
             }
             craftShort = true;
         }
 
         // Gathering: the to-do line is about the item for the class the quest was accepted as.
-        if (Gather(q, s, m) is { } gather && gather.Count > 0) return gather;
+        if (Gather(q, s, m) is { } gather && gather.Count > 0)
+            return s.InCombat ? new StepPlan(StepKind.Wait, "in combat: the gathering waits") : gather;
 
         if (riding) return Riding(q, s, m);
 
@@ -372,14 +461,18 @@ public static class StepRules
         // A key item to use: the line names it ("Use the firecrackers ..."), or it's the only one held and the line
         // points at objects (not people) to use it on ("Salt the designated locations").
         var usable = q.KeyItems.Where(k => k.Usable && s.Count(k.Id) > 0).ToList();
-        foreach (var item in usable)
+        // Where the sequence has a fight, the quest's listeners say what the item goes on: the objects they name, and
+        // no object at all when they name only enemies (the item is for the enemy then: the fight uses it).
+        var itemObjects = fights ? q.ItemObjects.Where(o => o.Sequence == s.Sequence).Select(o => o.Object).ToHashSet() : new HashSet<uint>();
+        var itemForEnemies = fights && itemObjects.Count == 0 && EnemyRules.Active(q, s.Sequence).Any(e => e.Task == EnemyTask.UseItem);
+        foreach (var item in itemForEnemies ? new List<KeyItemFact>() : usable)
         {
             // Any of its names whole; its title's last word too (not the singular's or plural's: "sacks" is too common).
             var naming = lines.Where(l => item.Words.Any(w => l.Text.Contains(w, StringComparison.CurrentCultureIgnoreCase)) || Names(l.Text, item.Name)).ToList();
             var named = naming.Count > 0;
             var spotObjects = SpotObjects(named ? naming : lines);
             var onObjects = usable.Count == 1 && lines.Count > 0 && Live(q, s, m).Any(o => o.Kind == StepObjectKind.Object && spotObjects.Contains(o.BaseId));
-            if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects) is { } use) return use;
+            if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects, itemObjects) is { } use) return use;
         }
 
         // Once the crafting or gathering is done: to whoever the items go to, and nobody else: whoever the quest is
@@ -405,10 +498,50 @@ public static class StepRules
 
         if (Where(q, s, m) is { } go) return go with { OnFoot = carrying };
 
+        // Nothing marked is left and none of the quest's enemies is in view: where the quest puts them, and around
+        // the marked area for field mobs.
+        if (fights)
+        {
+            if (EnemyRules.Search(q, s, m) is { } look) return look with { OnFoot = carrying };
+            return Ask("Couldn't find the quest's enemies (none in view that the quest marks, and nowhere left to look); do this step yourself, then resume.");
+        }
         if (craftShort)
             return Ask("Out of the materials for the quest's item, and nobody marked hands out more; get them from the quest's NPC, then resume.");
         return Ask("Can't tell what this step wants (nothing marked nearby, no map marker); do it yourself, then resume.");
     }
+
+    /// <summary>A fight with an enemy the filter allows: the trip gets near it, the fight closes in and does the rest.</summary>
+    private static StepPlan Fight(StepSnapshot s, StepEnemy enemy, EnemyJudgement why)
+        => new(StepKind.Fight, why.Verdict switch
+        {
+            EnemyVerdict.Attacker => "fight back: " + why.Why,
+            EnemyVerdict.Subdued => "use the quest's item on it: " + why.Why,
+            _ => "the quest's enemy: " + why.Why,
+        })
+        {
+            Enemy = enemy, Spot = enemy.Position, Territory = s.Territory, Within = EngageWithin, Key = $"fight:{enemy.Id}",
+        };
+
+    /// <summary>
+    /// The quest mount's action on an enemy (null when the mount has none). An enemy it did nothing to in
+    /// <see cref="InteractTries"/> tries is given up on by the stepper.
+    /// </summary>
+    private static StepPlan? MountAttack(MountFact mount, StepSnapshot s, StepMemory m, StepEnemy enemy)
+    {
+        if (mount.Action == 0) return null;
+        var key = $"action:{enemy.Id}";
+        return new StepPlan(StepKind.MountAction, "the quest mount's action on the quest's enemy")
+        {
+            Enemy = enemy, Spot = enemy.Position, Territory = s.Territory, Within = ActionWithin(mount), Id = mount.ActionFor(m.Count(key)),
+            Face = mount.Line, NoFly = !mount.CanFly, Key = key, Use = mount.Ground ? ItemUse.Ground : ItemUse.Target,
+        };
+    }
+
+    /// <summary>How close to ride for the mount's action: inside its line, inside its reach around the rider, or inside its range on a target.</summary>
+    private static float ActionWithin(MountFact mount)
+        => mount.Line ? Math.Clamp(mount.EffectRange * 0.6f, 4f, 12f)
+            : mount.Range <= 0 ? Math.Max(2f, mount.EffectRange - 2f)
+            : Math.Max(2f, mount.Range - 2f);
 
     /// <summary>
     /// On the quest mount: its action on the next target, riding into the area, or (at the report) getting off. Before
@@ -424,13 +557,12 @@ public static class StepRules
         if (mount.Action != 0 && targets.Count > 0)
         {
             var t = Nearest(targets, s.Player);
-            var self = mount.Range <= 0;
-            var within = mount.Line ? Math.Clamp(mount.EffectRange * 0.6f, 4f, 12f)
-                : self ? Math.Max(2f, mount.EffectRange - 2f)
-                : Math.Max(2f, mount.Range - 2f);
+            var key = $"action:{t.Key}";
+            // A mount with several actions (a colour of gulal per target): the next one on a target the last did nothing to.
             return new StepPlan(StepKind.MountAction, "the quest mount's action on the next target")
             {
-                Target = t, Territory = s.Territory, Within = within, Id = mount.Action, Face = mount.Line, NoFly = noFly, Key = $"action:{t.Key}",
+                Target = t, Territory = s.Territory, Within = ActionWithin(mount), Id = mount.ActionFor(m.Count(key)), Face = mount.Line, NoFly = noFly, Key = key,
+                Use = mount.Ground ? ItemUse.Ground : ItemUse.Target,
             };
         }
         if (s.Sequence == 255)
@@ -441,6 +573,8 @@ public static class StepRules
         var behind = q.Todos.Where(t => t.Sequence < s.Sequence).SelectMany(t => t.Spots).Select(p => p.Level).ToHashSet();
         if ((Where(q, s, m, behind) ?? Where(q, s, m)) is { } go)
             return go with { NoFly = noFly, What = mount.Action == 0 ? "ride into the marked area" : go.What };
+        // The mount's action is for enemies the quest puts somewhere (the marid's ants): ride to where they appear.
+        if (EnemyRules.Search(q, s, m) is { } look) return look with { NoFly = noFly };
         return Ask("On the quest mount with nothing left in view to use it on and nowhere marked; do this step yourself, then resume.");
     }
 
@@ -583,11 +717,18 @@ public static class StepRules
     /// Using a key item: on the target, on the ground at it, or on yourself next to it. Thrown on the ground (a wrong
     /// spot can use it up), or used without the line naming it, it's aimed only at an object the line's spots name.
     /// </summary>
-    private static StepPlan? UseItem(QuestScript q, StepSnapshot s, StepMemory m, KeyItemFact item, bool carrying, bool named, IReadOnlySet<uint> spotObjects)
+    private static StepPlan? UseItem(QuestScript q, StepSnapshot s, StepMemory m, KeyItemFact item, bool carrying, bool named, IReadOnlySet<uint> spotObjects,
+        IReadOnlySet<uint>? itemObjects = null)
     {
         var use = item.Ground ? ItemUse.Ground : item.Self ? ItemUse.Self : ItemUse.Target;
         var strict = use == ItemUse.Ground || !named;
         Func<StepObject, bool>? only = strict ? o => spotObjects.Contains(o.BaseId) && (named || o.Kind == StepObjectKind.Object) : null;
+        // In a sequence with a fight: only what the quest's listeners say the item goes on.
+        if (itemObjects is { Count: > 0 })
+        {
+            var before = only;
+            only = o => itemObjects.Contains(o.BaseId) && (before?.Invoke(o) ?? true);
+        }
         var target = Pick(q, s, m, only);
         var within = use == ItemUse.Self ? 2f : Math.Max(1.5f, item.Range - 1f);
         if (target != null)
