@@ -174,17 +174,21 @@ keeps it from sliding things around.
     - Key items: where a quest has an item for a weakened enemy, the run stops attacking and uses it. An item
       that can be thrown from 10 yalms or more is thrown first, and where the quest wants nothing else of the
       enemy only the item is used.
-    - Health: before starting the next fight the run waits for health to come back to 70%.
+    - Health: before going after the next of the quest's enemies, or a step close by that can call some up,
+      the run waits for health to come back to 70% (at most 40 seconds). Whatever attacks is fought at once.
     - When a fight goes badly: an enemy that isn't attacking and can't be reached or hurt is left after a
       time (45 seconds without reaching it, 30 seconds without hurting it, 3 minutes in all). Something that
-      attacks is always fought. After two enemies left like that, or 15 defeats that didn't move the quest on,
-      the run pauses and asks you, once the fighting is over.
+      attacks is fought for as long as it takes, with a notification after 3 minutes; one that can't be
+      reached or hurt is left for 30 seconds while the run carries on with its step, then tried again. After
+      two enemies left, or 15 defeats that didn't move the quest on, the run pauses and asks you once the
+      fighting is over (at the latest after 3 minutes, saying you're still in combat). A paused run doesn't
+      fight back.
     - Knock-outs count against the *Knock-outs* limit (Settings, Security). The run returns, leaves the quest
       it happened in to you for today, waits for Weakness to wear off before the next fight, and plans the day
-      again.
-    - Ixal dailies with a fight are accepted as a crafter like the Ixal's others. The run changes to the
-      *Monster drops* job for the fight and back to the crafter for talks and hand-overs, always out of
-      combat. That job needs level 50 and a saved gearset; without it the quest shows "needs …" and isn't
+      again. When the game doesn't offer the return within 90 seconds, the run stops and tells you.
+    - Ixal dailies with a fight are accepted as a crafter like the Ixal's others. For the part of the quest
+      with the fight the run changes to the *Monster drops* job, and back to the crafter at the NPC for talks
+      and hand-overs, always out of combat. That job needs level 50 and a saved gearset; without it the quest shows "needs …" and isn't
       accepted.
   - Goals: *Rank up* first takes the dailies that fill each society's bar, the lowest rank first;
     allowances still left after that go to more dailies, since they still pay currency, gil, crystals and

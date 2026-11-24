@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.23.0
+
+- Tribes: the run now does the dailies of the 11 battle societies (Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu
+  Vanu, Vath, Kojin, Ananta, Pixies, Arkasodara and Pelupelu), and the Ixal's dailies with a fight or a
+  password. They're new and still being tested: please send a bug report when one goes wrong.
+  - Battle dailies are accepted and fought on the job picked under *Monster drops* (Settings), with the basic
+    combo and the chocobo; when that job doesn't qualify, on the combat job you're on. *Levelling* takes a
+    battle quest only on a job at least 5 levels above it, the lowest such job.
+  - The run fights the quest's own enemies and whatever attacks you or your chocobo, and leaves other monsters,
+    FATE monsters and enemies someone else is fighting alone. It uses a quest's key item on a weakened enemy,
+    and a quest mount's action on the quest's enemies.
+  - Before going after the next enemy it waits for health to come back to 70%. Something that attacks is
+    always dealt with; the run never stands in a fight without defending itself, and it only stops to ask you
+    once the fighting is over.
+  - A knock-out leaves the quest it happened in to you for today; the run waits for Weakness to wear off and
+    plans the day again. The *Knock-outs* limit (Settings, Security) applies as in an order run.
+  - Ixal dailies with a fight are accepted as a crafter; for the fight the run changes to the *Monster drops*
+    job (level 50 or more, with a saved gearset) and back to the crafter for talks and hand-overs.
+  - Not done yet, and marked "do it yourself" with the reason: the Sylphs' three stealth dailies, the nine
+    Ixal dailies with a gathering or fishing step, and dailies whose emote goes to someone the quest doesn't
+    name (now nine of them).
+- If you used Tribes before: the battle societies are ticked from the start. With a *Monster drops* job set,
+  the day's 12 allowances now also go to them, and battle dailies already in your journal are picked up and
+  fought. Untick a society on the Tribes page to leave it out.
+- Tribes: without a goal picked, the run only chooses *Rank up* for a society whose dailies it can actually
+  do today; before, a battle society below its top rank turned it on even with no combat job set.
+- Tribes, *Levelling*: among classes of the same level, the *Monster drops* job comes first, then the
+  better-geared class.
+- The hand watch (society quests done by hand) writes much less to the log in combat, and the bug report
+  shows the enemies it last saw.
+
 ## 0.22.9
 
 - The Firmament: the run stopped 4 yalms from an aethernet shard, which is too far to use it; the game said
