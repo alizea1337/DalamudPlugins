@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.22.5
+
+- Other automation plugins: Provenance now deals with the three that get in a run's way most.
+  - YesAlready and TextAdvance stand aside while a run is working (orders, Cosmic Exploration, Custom
+    Deliveries, Tribes) and carry on as soon as it pauses, finishes or stops. Provenance uses their own
+    "stand aside" lists for this, so their settings stay as they are. *Pause YesAlready and TextAdvance while a
+    run is going* (Settings, Security) turns it off.
+  - Questionable can't be paused from outside, so a run won't start while it's running its quests, and a run
+    that is going stops when Questionable starts.
+  - The Security page has an "Other plugins" card that says what each of the three is doing right now, and the
+    run pages show a warning only when one of them is actually in the way.
+  - The bug report says which of the three are loaded, running and paused.
+- The README and the FAQ list the other plugins whose automatic features are best switched off during a run.
+
 ## 0.22.4
 
 - Tribes: some crafting dailies only count their item made high quality: 59 of them, most of the Ixal's and
