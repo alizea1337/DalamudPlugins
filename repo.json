@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Arriving at an NPC still in the air, the run talked to it from up there; the game answered \"Target is too far\n  below you\" and the delivery was skipped (Nitowikwe). It now lands first, for up to 5 seconds.\n- Aetherytes stand on a plinth, so a run on foot at the bottom step tried for 30 seconds to \"get down (or up)\"\n  to it and gave up (Foundation, on the way to the Firmament). On the ground, a target that is used from\n  farther away, like an aetheryte, now also counts as reached from lower down.\n- Stuck on the mount close to an NPC inside a building (rubbing along the wall on the way to the spot outside\n  its door), the run now comes down right there and walks in, instead of trying other ways to fly there.\r\n",
+    "Changelog": "- The Firmament: the run stopped 4 yalms from an aethernet shard, which is too far to use it; the game said\n  \"You can't do that from there\" and only the next try worked. It now walks to within 3 yalms.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.22.8.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.8/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.8/latest.zip",
+    "AssemblyVersion": "0.22.9.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.9/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.9/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795559331
+    "LastUpdate": 1795559885
   }
 ]
