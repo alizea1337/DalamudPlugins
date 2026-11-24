@@ -22,9 +22,11 @@ namespace Provenance.Run.Tribes;
 /// The allied society run: plan the day's dailies, get the crystals the crafting ones may need (bags, then retainers,
 /// then gathering, else the quest is left out), then a tour of the givers. At each giver: the dailies already in the
 /// journal, then the class change, the accepts, and each new daily's steps (<see cref="QuestStepper"/>; the crafting
-/// through <see cref="Crafter"/>, the gathering at the quest's own nodes through <see cref="Gatherer"/>). After each
-/// visit the day is planned again: a visit can change the offers (a rank-up day) and the allowances. Ticked on the
-/// framework thread.
+/// through <see cref="Crafter"/>, the gathering at the quest's own nodes through <see cref="Gatherer"/>; the fights are
+/// the stepper's own, on the job a battle society's daily was accepted as, or for the Ixal's on the job under Settings,
+/// Monster drops). After each visit the day is planned again: a visit can change the offers (a rank-up day) and the
+/// allowances. A knock-out is handled as the order run does: back up, then the day is planned again, up to the Security
+/// tab's limit. Ticked on the framework thread.
 /// </summary>
 /// <remarks>
 /// Safety (Tribes build plan): nothing that's an addon callback is sent while the game has scene tasks pending
@@ -100,6 +102,14 @@ internal sealed unsafe class TribeRun
     private bool yielding;
     private int equipTries;
 
+    // Knock-outs (as the order run handles them).
+    private int knockOuts;
+    private bool knockedOut;
+    private DateTime knockedOutAt;
+    private DateTime revivedAt;
+    /// <summary>A pause was asked for when the character went down: it lands once the character is back up.</summary>
+    private bool pauseWhenUp;
+
     public TribeRun(Plugin plugin)
     {
         this.plugin = plugin;
@@ -110,7 +120,8 @@ internal sealed unsafe class TribeRun
     }
 
     public bool Active => step is not (Step.Idle or Step.Finished);
-    public bool Working => Active && !Paused;
+    /// <summary>The run acts on its own right now: not paused, not waiting to get back up from a knock-out.</summary>
+    public bool Working => Active && !Paused && !knockedOut;
     public bool Paused { get; private set; }
     public bool Pausing { get; private set; }
     public string Status { get; private set; } = "";
@@ -180,6 +191,9 @@ internal sealed unsafe class TribeRun
         crafting = gathering = false;
         Paused = Pausing = false;
         stopReason = null;
+        knockOuts = 0;
+        knockedOut = false;
+        pauseWhenUp = false;
         lastPlanLog = lastPlanLine = "";
         plan = first;
         Travel.AdvancedUnstuck = plugin.Config.Security.AdvancedUnstuck;
@@ -188,6 +202,10 @@ internal sealed unsafe class TribeRun
         DebugLog.Write("tribes", $"run: goal {Settings.Goal?.ToString() ?? "automatic"} ({first.Goal}), left out [{string.Join(",", Settings.LeftOut)}], "
                                  + $"pause for cutscenes {Settings.PauseForCutscenes}, leave out /say {Settings.LeaveOutSay}, {Game.AllowancesLeft} allowances, seed {Game.Seed}, "
                                  + $"job {GameState.CurrentJob}, cutscene skipper hooked {DeliveryWindow.CutsceneSkipperHooked?.ToString() ?? "unknown"}");
+        var combat = plugin.Config.Combat;
+        DebugLog.Write("tribes", $"fights: on the job a battle daily is accepted as; for a quest accepted as a crafter (the Ixal's) on job {combat.ClassJob} "
+                                 + $"(gearset {(combat.ClassJob != 0 ? GameState.BestGearset(combat.ClassJob) + 1 : 0)}), chocobo {combat.Chocobo} stance {combat.ChocoboStance}, "
+                                 + $"heal below {combat.HealBelow}%, knock-outs before the run stops {plugin.Config.Security.MaxKnockOuts}");
         Log("Started.", false);
         Go(Step.Planning);
         return null;
@@ -243,6 +261,15 @@ internal sealed unsafe class TribeRun
             Status = "Pausing after this retainer";
             return;
         }
+        // Mid-fight: the enemy being fought is finished first (stopping there would leave it on the character).
+        if (step == Step.Tour && quest != null && stepper.MidFight)
+        {
+            stepper.HoldAfterFight = true;
+            Pausing = true;
+            Status = "Pausing after this fight";
+            Log("Pause asked for; finishing the enemy being fought first.", false);
+            return;
+        }
         PauseNow();
     }
 
@@ -272,6 +299,7 @@ internal sealed unsafe class TribeRun
             // Never mind the pause asked for.
             if (crafting) crafter.Resume();
             if (step == Step.Retainers) retainers.Resume();
+            stepper.HoldAfterFight = false;
             return;
         }
         equipTries = 0;
@@ -333,6 +361,7 @@ internal sealed unsafe class TribeRun
         if (!Active || Paused) return;
         try
         {
+            if (HandleKnockOut()) return;
             if (stopReason != null || Pausing && crafting)
             {
                 crafter.Tick();
@@ -356,6 +385,12 @@ internal sealed unsafe class TribeRun
                 if (!gatherer.OnNode && !Services.Condition[ConditionFlag.Gathering]) PauseNow();
                 return;
             }
+            if (Pausing && step == Step.Tour && stepper.MidFight)
+            {
+                // The enemy being fought is finished; the stepper starts on no other.
+                stepper.Tick();
+                return;
+            }
             if (Pausing) { PauseNow(); return; }
 
             // The stepper, the crafter and the gatherer need every frame.
@@ -374,6 +409,85 @@ internal sealed unsafe class TribeRun
             Services.Log.Error(e, "Allied society run tick failed");
             Finish("Something went wrong: " + e.Message, true);
         }
+    }
+
+    /// <summary>
+    /// Knocked out: what the order run does. A moment for someone passing to raise, then whatever the game offers is
+    /// taken (a raise, or the way back to the home point). Once back up, the day is planned again: the quest that was
+    /// under way is still in the journal, so it's carried on from where it stands. Past the Security tab's limit the run
+    /// stops, with the reason. True while the character is down or just getting up.
+    /// </summary>
+    private bool HandleKnockOut()
+    {
+        var me = Services.Objects.LocalPlayer;
+        var now = DateTime.UtcNow;
+        if (me is { IsDead: true })
+        {
+            if (!knockedOut)
+            {
+                knockedOut = true;
+                knockedOutAt = now;
+                revivedAt = default;
+                knockOuts++;
+                var max = plugin.Config.Security.MaxKnockOuts;
+                DebugLog.Write("tribes", $"[!] knocked out ({knockOuts} of {max}) in zone {Services.ClientState.TerritoryType}{(quest != null ? $", on {quest.Quest.Number}" : "")}, "
+                                         + $"step {step}/{visitStep}, stepper {stepper.State} \"{stepper.Status}\"");
+                foreach (var l in stepper.DescribeFight()) DebugLog.Write("tribes", "  " + l);
+                // Whatever was under way ends here.
+                stepper.Stop();
+                travel.Cancel();
+                if (step == Step.Retainers) retainers.Cancel();
+                StopGatherer();
+                Vnav.Stop();
+                crafting = gathering = false;
+                quest = null;
+                visit = null;
+                pauseWhenUp = Pausing;
+                Pausing = false;
+                if (stopReason is { } asked)
+                {
+                    stopReason = null;
+                    Finish(asked, false);
+                    return true;
+                }
+                if (knockOuts > max)
+                {
+                    Finish($"Knocked out {knockOuts} times; stopping.", true);
+                    return true;
+                }
+                Status = "Knocked out";
+                Log($"Knocked out ({knockOuts} of {max}); getting back up, then planning the day again.", true);
+            }
+            if (now - knockedOutAt > TimeSpan.FromSeconds(4) && now >= waitUntil && Interact.Ready("SelectYesno") != null)
+            {
+                Interact.Yes();
+                Wait(1);
+            }
+            return true;
+        }
+        if (!knockedOut) return false;
+        // On the way to the home point there's no character for a moment.
+        if (me == null || QuestSteps.Loading)
+        {
+            revivedAt = default;
+            return true;
+        }
+        if (revivedAt == default) revivedAt = now;
+        if (now - revivedAt < TimeSpan.FromSeconds(4)) return true;
+        knockedOut = false;
+        revivedAt = default;
+        Go(Step.Planning);
+        if (pauseWhenUp)
+        {
+            // The pause asked for before the knock-out lands now; Resume plans the day again.
+            pauseWhenUp = false;
+            Log("Back up.", false);
+            PauseNow();
+            return true;
+        }
+        Log("Back up; planning the day again.", false);
+        Wait(1);
+        return false;
     }
 
     // ------------------------------------------------------------------ planning and crystals
@@ -971,7 +1085,8 @@ internal sealed unsafe class TribeRun
             quest = next;
             lastState = StepperState.Idle;
             equipTries = 0;
-            stepper.Begin(next.Quest.RowId, new StepOptions(Settings.PauseForCutscenes, Settings.LeaveOutSay));
+            // The combat job (Settings, Monster drops) is for a fight of a quest accepted as a crafter (the Ixal's).
+            stepper.Begin(next.Quest.RowId, new StepOptions(Settings.PauseForCutscenes, Settings.LeaveOutSay, plugin.Config.Combat.ClassJob));
             Log($"Working on \"{next.Quest.Name}\" ({next.Quest.Number}).", false);
             return;
         }
@@ -1157,10 +1272,12 @@ internal sealed unsafe class TribeRun
         yield return $"step {step}, visit step {visitStep}, {(Active ? "running" : "idle")}{(Paused ? ", paused" : "")}{(Pausing ? ", pausing" : "")}, status \"{Status}\"";
         if (Waiting != null) yield return $"waiting for the player{(WaitingForCutscene ? " (cutscene)" : "")}: {Waiting}";
         if (Problem != null) yield return "stopped on: " + Problem;
-        yield return $"done {Completed}, accepted {AcceptedCount}, visits {visits}, crafting {crafting}, gathering {gathering}";
+        yield return $"done {Completed}, accepted {AcceptedCount}, visits {visits}, crafting {crafting}, gathering {gathering}, "
+                     + $"knock-outs {knockOuts} of {plugin.Config.Security.MaxKnockOuts}{(knockedOut ? " (down now)" : "")}";
         if (visit is { } v) yield return $"visiting {v.Tribe.Name}, giver {v.Giver.NpcId}, class {v.ClassJob}, queue [{string.Join(",", queue.Select(q => q.Quest.Number))}], accepted here [{string.Join(",", acceptedHere.Select(q => q.Quest.Number))}]";
         yield return $"stepper: {stepper.State}{(stepper.Paused ? " (paused)" : "")}, quest {(stepper.Quest > 0 ? stepper.Quest - 0x10000 : 0)}, status \"{stepper.Status}\""
                      + (stepper.Problem != null ? $", problem \"{stepper.Problem}\"" : "") + (stepper.Plan != null ? $", plan {stepper.Plan}" : "");
+        foreach (var l in stepper.DescribeFight()) yield return "stepper " + l;
         if (stepper.Craft is { } c) yield return "stepper wants crafted: " + c;
         if (stepper.Gather is { } g) yield return "stepper wants gathered: " + g;
         foreach (var (row, why) in excluded) yield return $"given up today: {row - 0x10000}: {why}";
