@@ -376,6 +376,33 @@ When a player sets the Tripwire off, the debug log writes their name and world b
 it doesn't read at a glance in a bug report. Base64 is an encoding, not a hash: anyone can decode it, which is
 what makes it useful for debugging. Remove that line before you post a report if you'd rather not share it.
 
+### Which plugins get in Provenance's way?
+
+Plugins that click through the game's windows or play the character by themselves. Provenance takes care of
+three of them itself:
+
+- YesAlready and TextAdvance are paused while a run is going, and carry on as soon as it pauses, finishes or
+  stops. That's *Pause YesAlready and TextAdvance while a run is going* (Settings, Security; on to start).
+  Their own settings stay as they are. With it off, YesAlready is still paused while custom deliveries are
+  handed in.
+- Questionable can't be paused from outside. A run won't start while it's running its quests, and a run under
+  way stops when it starts: two plugins can't drive the character at once.
+
+The Security page shows what each of the three is doing, and the run pages warn while one of them is in the way.
+
+Turn these off yourself while a run is going:
+
+- Pandora's Box: the features that act by themselves, such as filling in hand-overs, mounting up and
+  interacting with things.
+- Artisan: its automatic action mode. Provenance crafts by itself.
+- GatherBuddy Reborn's auto-gather, and AutoHook. Provenance needs neither.
+- AutoRetainer: switching itself on when the summoning bell is opened, and Multi Mode.
+- Rotation plugins' autorotation, and BossMod's AI.
+- Any other automation for the same content, such as another plugin for Cosmic Exploration missions, custom
+  deliveries or allied society quests.
+
+Plugins that only show things, and teleport plugins, are fine.
+
 ### What's in a bug report, and how do I send one?
 
 *Copy bug report* (Settings, General) or `/prov bugreport` copies what Provenance knows right now: settings,

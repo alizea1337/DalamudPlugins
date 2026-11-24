@@ -228,6 +228,13 @@ Tracked in [Issues](https://github.com/alizea1337/DalamudPlugins/issues), where 
 vnavmesh. Planning works without it; the General settings page shows whether it is loaded. GatherBuddy
 Reborn and AutoHook are no longer needed.
 
+Other automation plugins can get in a run's way. Provenance pauses YesAlready and TextAdvance by itself
+while a run is going (*Pause YesAlready and TextAdvance while a run is going*, Settings, Security) and
+lets them carry on when the run pauses, finishes or stops. Questionable can't be paused from outside, so
+a run won't start while it's running its quests, and a run under way stops when it starts. Anything else
+that acts by itself is yours to turn off for the run: the
+[FAQ](docs/faq.md#which-plugins-get-in-provenances-way) lists what to look for.
+
 Orders with fish also need:
 
 - a gearset saved for Fisher, and the Fisher level the fishing holes ask for (the plan says what's
