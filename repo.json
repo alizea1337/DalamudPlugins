@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Tribes: the run now does the dailies of the 11 battle societies (Amalj'aa, Sylphs, Kobolds, Sahagin, Vanu\n  Vanu, Vath, Kojin, Ananta, Pixies, Arkasodara and Pelupelu), and the Ixal's dailies with a fight or a\n  password. They're new and still being tested: please send a bug report when one goes wrong.\n  - Battle dailies are accepted and fought on the job picked under *Monster drops* (Settings), with the basic\n    combo and the chocobo; when that job doesn't qualify, on the combat job you're on. *Levelling* takes a\n    battle quest only on a job at least 5 levels above it, the lowest such job.\n  - The run fights the quest's own enemies and whatever attacks you or your chocobo, and leaves other monsters,\n    FATE monsters and enemies someone else is fighting alone. It uses a quest's key item on a weakened enemy,\n    and a quest mount's action on the quest's enemies.\n  - Before going after the next enemy it waits for health to come back to 70%. Something that attacks is\n    always dealt with; the run never stands in a fight without defending itself, and it only stops to ask you\n    once the fighting is over.\n  - A knock-out leaves the quest it happened in to you for today; the run waits for Weakness to wear off and\n    plans the day again. The *Knock-outs* limit (Settings, Security) applies as in an order run.\n  - Ixal dailies with a fight are accepted as a crafter; for the fight the run changes to the *Monster drops*\n    job (level 50 or more, with a saved gearset) and back to the crafter for talks and hand-overs.\n  - Not done yet, and marked \"do it yourself\" with the reason: the Sylphs' three stealth dailies, the nine\n    Ixal dailies with a gathering or fishing step, and dailies whose emote goes to someone the quest doesn't\n    name (now nine of them).\n- If you used Tribes before: the battle societies are ticked from the start. With a *Monster drops* job set,\n  the day's 12 allowances now also go to them, and battle dailies already in your journal are picked up and\n  fought. Untick a society on the Tribes page to leave it out.\n- Tribes: without a goal picked, the run only chooses *Rank up* for a society whose dailies it can actually\n  do today; before, a battle society below its top rank turned it on even with no combat job set.\n- Tribes, *Levelling*: among classes of the same level, the *Monster drops* job comes first, then the\n  better-geared class.\n- The hand watch (society quests done by hand) writes much less to the log in combat, and the bug report\n  shows the enemies it last saw.\r\n",
+    "Changelog": "- Custom Deliveries: *Rank up* can't be picked any more when every client is at the top level (its button is\n  greyed out, and says why on hover). A run whose goal was set to Rank up before that goes for scrips instead,\n  with a line under the goal saying so.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.23.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.0/latest.zip",
+    "AssemblyVersion": "0.23.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795560226
+    "LastUpdate": 1795560685
   }
 ]
