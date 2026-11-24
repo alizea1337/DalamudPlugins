@@ -72,8 +72,12 @@ internal sealed record GatherNeed(uint ItemId, int Remaining, uint PointBase, ui
 /// window, three times at most; every wait for the game is bounded (<see cref="BlockWatch"/>). Fighting: nothing is
 /// attacked that the enemy filter doesn't allow; no fight is started from a mount (off it first); in combat the quest's
 /// script is asked nothing, so the quest's progress is read from its sequence and variables and the mobs from the object
-/// table; a fight with one enemy is given up after three minutes (or when it can't be reached or hurt), and after two
-/// given up the player is asked; a class that doesn't fight carries on with its step instead of standing there.
+/// table; what attacks the character or the chocobo is always fought, and never left out for having been given up on;
+/// a fight with an enemy that isn't attacking is given up after three minutes (or when it can't be reached or hurt), and
+/// after two given up the player is asked; one that attacks is fought for as long as it can be hit (a notification
+/// after three minutes), and when it can't be reached or hurt the step goes on meanwhile, as it does for a class that
+/// doesn't fight; the player is asked only once the fight is over (<see cref="AskUser"/>), so a pause never leaves the
+/// character standing in a fight without defending itself.
 /// </remarks>
 internal sealed unsafe class QuestStepper
 {
@@ -109,6 +113,23 @@ internal sealed unsafe class QuestStepper
     private static readonly TimeSpan SpawnWait = TimeSpan.FromSeconds(2.5);
     /// <summary>The next enemy further off than this is travelled to (mounted when it's a long way), not walked to in the fight.</summary>
     private const float FightOnWithin = StepRules.EngageWithin + 10f;
+    /// <summary>An enemy that attacks but couldn't be reached or hurt is left for this long (the step goes on), then tried again.</summary>
+    private static readonly TimeSpan CantHitFor = TimeSpan.FromSeconds(30);
+    /// <summary>Tries at an enemy that attacks but can't be reached or hurt; after them it's left for good (until the player takes over).</summary>
+    private const int CantHitTries = 3;
+    /// <summary>
+    /// A step that's the player's, come up while in combat, waits for the fight to end, this long at most: the time a
+    /// fight with one enemy gets before the player is told of it (<see cref="QuestFighter.FightFor"/>). Past that the
+    /// run can't be seen to need the player, which is worse than pausing mid-fight with a notification saying so.
+    /// </summary>
+    private static readonly TimeSpan AskWaitsFor = QuestFighter.FightFor;
+    /// <summary>...and no longer than this once nothing attacks that the run can fight (there's nothing left to defend against).</summary>
+    private static readonly TimeSpan AskQuietFor = TimeSpan.FromSeconds(10);
+    /// <summary>On one's own mount, attacked by something that isn't the quest's: the trip rides on for this long before the fight is taken up after all.</summary>
+    private static readonly TimeSpan RideOnFor = TimeSpan.FromSeconds(20);
+    /// <summary>Refusals of the quest mount's action on one target (out of range, not ready for long) before the target is left.</summary>
+    private const int MountRefusals = 8;
+    private static readonly Random Rng = new();
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
@@ -179,6 +200,29 @@ internal sealed unsafe class QuestStepper
     /// <summary>The trip under way started while the character was attacked (on foot: the game mounts nobody in combat).</summary>
     private bool tripInCombat;
     private bool knockedOut;
+    /// <summary>
+    /// What the player is to be asked once the fight is over (null: nothing), since when, and since when nothing has
+    /// attacked that the run can fight.
+    /// </summary>
+    private string? pendingAsk;
+    private DateTime pendingSince;
+    private DateTime pendingQuietSince;
+    /// <summary>Enemies that attack but couldn't be hit: until when each is left, and how often that happened.</summary>
+    private readonly Dictionary<ulong, DateTime> cantHitUntil = new();
+    private readonly Dictionary<ulong, int> cantHitRounds = new();
+    /// <summary>The player was told that the fight under way is over its three minutes.</summary>
+    private bool overtimeTold;
+    /// <summary>Something for the player's eyes at once (a notification), for the run to pass on.</summary>
+    private string? notice;
+    /// <summary>The next enemy that isn't attacking, and when the fight with it starts (a breath after the last one).</summary>
+    private ulong engageNext;
+    private DateTime engageAt;
+    /// <summary>Since when the trip under way has ridden on past something that attacks.</summary>
+    private DateTime rodeOnSince;
+    /// <summary>The quest mount's action last sent on an enemy: which, and its health just before.</summary>
+    private ulong firedAt;
+    private uint firedHp;
+    private bool firedSent;
 
     public QuestStepper(Plugin plugin, Action<string, bool> log)
     {
@@ -208,12 +252,21 @@ internal sealed unsafe class QuestStepper
     /// <summary>Waiting because a cutscene plays and the options say to pause for them (not a problem: Resume carries on).</summary>
     public bool PausedForCutscene => State == StepperState.WaitingForUser && cutscenePaused;
     /// <summary>In a fight with an enemy that isn't done yet (a pause asked for now lands after it).</summary>
-    public bool MidFight => State == StepperState.Working && !Paused && phase == Phase.Fight && fighter.Active;
+    public bool MidFight => State == StepperState.Working && !Paused && pendingAsk == null && phase == Phase.Fight && fighter.Active;
     /// <summary>
-    /// Set by the run when a pause is asked for mid-fight: the enemy being fought is finished, no other is started on,
-    /// and <see cref="MidFight"/> turns false (the run pauses then). Cleared by Pause, Resume and Stop.
+    /// Set by the run when a pause is asked for mid-fight: the enemy being fought is finished, then whatever still
+    /// attacks; no other is started on, and <see cref="MidFight"/> turns false (the run pauses then). Cleared by
+    /// Pause, Resume and Stop.
     /// </summary>
     public bool HoldAfterFight { get; set; }
+
+    /// <summary>Something to show the player at once (a fight over its three minutes), since the last call; null when there's nothing.</summary>
+    public string? TakeNotice()
+    {
+        var text = notice;
+        notice = null;
+        return text;
+    }
 
     // ------------------------------------------------------------------ control
 
@@ -246,6 +299,7 @@ internal sealed unsafe class QuestStepper
         if (State is StepperState.Idle or StepperState.Done or StepperState.Failed || Paused) return;
         Paused = true;
         HoldAfterFight = false;
+        pendingAsk = null;
         travel.Cancel();
         if (fighter.Active) Note($"the fight with {fighter.Name} stops for the pause");
         fighter.Stop();
@@ -268,10 +322,15 @@ internal sealed unsafe class QuestStepper
         {
             State = StepperState.Working;
             Problem = null;
-            // The player took over for a moment: the counts that asked for it start over.
+            // The player took over for a moment: the counts that asked for it start over, and the enemies given up on
+            // are tried afresh (the player may have dealt with what was in the way).
             memory.GiveUps = 0;
             memory.Kills = 0;
+            memory.GivenUp.Clear();
+            ForgetCantHit();
         }
+        pendingAsk = null;
+        memory.RestSince = default;
         memory.Touch(DateTime.UtcNow);
         phase = Phase.Decide;
         lastPlan = "";
@@ -372,6 +431,14 @@ internal sealed unsafe class QuestStepper
         spawnWaited = false;
         tripInCombat = false;
         knockedOut = false;
+        pendingAsk = null;
+        ForgetCantHit();
+        overtimeTold = false;
+        notice = null;
+        engageNext = 0;
+        rodeOnSince = default;
+        firedAt = 0;
+        firedSent = false;
         defeated.Clear();
         engagedAt = "";
         engagedKind = 0;
@@ -393,11 +460,19 @@ internal sealed unsafe class QuestStepper
                 Note($"[!] knocked out while {phase}{(fighter.Active ? $", fighting {fighter.Name}" : "")}");
                 fighter.Stop();
                 travel.Cancel();
+                pendingAsk = null;
             }
             return;
         }
         knockedOut = false;
         var now = DateTime.UtcNow;
+
+        // A step that's the player's came up mid-fight: until the fight is over only the defence goes on.
+        if (pendingAsk != null)
+        {
+            TickPending(now);
+            return;
+        }
 
         // While the run crafts or gathers, only the item counts (and the facility access) are looked at.
         if (State is StepperState.NeedsCraft or StepperState.NeedsGather)
@@ -446,6 +521,7 @@ internal sealed unsafe class QuestStepper
             defeated.Clear();
         }
         SettleDefeats(now);
+        TryAgain(now);
         if (phase == Phase.Settle && InEvent) sawEvent = true;
         NoteHolds(snap);
 
@@ -581,6 +657,9 @@ internal sealed unsafe class QuestStepper
             : enemy != null ? () => QuestSteps.FindEnemy(enemy.Id)?.Position
             : null;
         tripInCombat = snap.InCombat;
+        rodeOnSince = default;
+        // A trip to an enemy that gets stuck isn't started over from the aetheryte: the enemy is left instead.
+        travel.FailFast = enemy != null;
         travel.GoTo(Describe(p), zone, to, within, seen);
         Status = Capital(Describe(p));
         phase = Phase.Travel;
@@ -592,18 +671,31 @@ internal sealed unsafe class QuestStepper
     {
         Status = travel.Status;
         var p = plan!;
-        // Attacked on the way, on a combat job: the fight comes first (not from the air: nothing follows there).
+        // Attacked on the way, on a combat job: the fight comes first (not from the air: nothing follows there). On
+        // one's own mount the trip rides on past what isn't of the quest's kinds (it's soon left behind); that is
+        // fought once on foot, when it keeps up for long, or when it's still there on arrival.
+        if (!snap.InCombat) rodeOnSince = default;
         if (snap.InCombat && snap.Fighter && !snap.Flying && !travel.AtPortal)
         {
             var back = StepRules.Decide(script!, snap, memory, now, options.LeaveOutSay, options.CombatJob);
             if (back.Enemy != null && back.Enemy.Id != p.Enemy?.Id && back.Kind is StepKind.Fight or StepKind.MountAction)
             {
-                Note($"attacked on the way: {back}");
-                NoteEnemies(snap);
-                travel.Cancel();
-                lastPlan = back.ToString();
-                Approach(back, snap);
-                return;
+                var ownMount = snap.Mounted && !(script!.Mount is { } ridden && snap.Mount == ridden.Mount);
+                var rideOn = ownMount && back.Kind == StepKind.Fight && !EnemyRules.OfQuest(script!, snap, back.Enemy);
+                if (rideOn && rodeOnSince == default)
+                {
+                    rodeOnSince = now;
+                    Note($"attacked on the way by {back.Enemy.Name} ({back.Enemy.BaseId}), not one of the quest's kinds: riding on");
+                }
+                if (!rideOn || now - rodeOnSince > RideOnFor)
+                {
+                    Note($"attacked on the way{(rideOn ? $" for over {RideOnFor.TotalSeconds:0} seconds" : "")}: {back}");
+                    NoteEnemies(snap);
+                    travel.Cancel();
+                    lastPlan = back.ToString();
+                    Approach(back, snap);
+                    return;
+                }
             }
         }
         if (p.Kind != StepKind.Go && (p.Target != null || p.Enemy != null) && !travel.AtPortal && snap.Territory == (p.Territory != 0 ? p.Territory : snap.Territory)
@@ -629,10 +721,12 @@ internal sealed unsafe class QuestStepper
         }
         if (travel.Current == QuestTravel.State.Failed)
         {
-            // An enemy that can't be got to is given up on (the next one, or the player after two).
+            // An enemy that can't be got to is given up on (the next one, or the player after two); one that attacks
+            // is left for now, and the step goes on.
             if (p.Enemy != null)
             {
-                GiveUp(p.Enemy.Id, p.Enemy.Name, $"couldn't get to it ({travel.Failure})");
+                if (snap.Hostiles.Any(e => e.Id == p.Enemy.Id && e.AttacksMe)) CantHit(p.Enemy.Id, p.Enemy.Name, $"couldn't get to it ({travel.Failure})", now);
+                else GiveUp(p.Enemy.Id, p.Enemy.Name, $"couldn't get to it ({travel.Failure})");
                 phase = Phase.Decide;
                 lastPlan = "";
                 return;
@@ -692,6 +786,24 @@ internal sealed unsafe class QuestStepper
         // An event, a cast or loading holds a step back. Combat alone doesn't: the fight is fought, and a class that
         // doesn't fight tries its step anyway (the game says whether it lets it happen).
         if (QuestSteps.Occupied) { phase = Phase.Decide; Wait(0.3); return; }
+        // Arrived as another class than the step is done as (an Ixal hand-over is travelled to on the combat job):
+        // decided afresh, which puts the class on first.
+        if (p.Job != 0 && snap.Job != p.Job)
+        {
+            Note($"arrived as {Abbreviation(snap.Job)}; the step is done as {Abbreviation(p.Job)}: deciding afresh");
+            phase = Phase.Decide;
+            lastPlan = "";
+            Wait(0.3);
+            return;
+        }
+        // A phrase or an emote is sent once only: not while in combat, where the game may not count it (talks and key
+        // items are tried all the same).
+        if (p.Public && QuestSteps.InCombat)
+        {
+            phase = Phase.Decide;
+            Wait(0.5);
+            return;
+        }
 
         // Talking, emotes and key items don't work from one's own mount (the quest mount's action does), and no fight is
         // started from it.
@@ -803,9 +915,14 @@ internal sealed unsafe class QuestStepper
         var used = p.Use == ItemUse.Ground && target != null
             ? QuestSteps.UseMountAction(p.Id, null, out why, target.Position)
             : QuestSteps.UseMountAction(p.Id, self ? null : target, out why);
-        memory.Note(p.Key, now);
+        // Only a use the game took is a try: a refusal (the recast, out of range) is counted on its own, and waited out
+        // for a moment only. An enemy's health just before tells afterwards whether the action did anything to it.
+        memory.Note(used ? p.Key : p.Key + ":refused", now);
+        firedSent = used;
+        firedAt = p.Enemy?.Id ?? 0;
+        firedHp = used && target is IBattleNpc hit ? hit.CurrentHp : 0;
         phase = Phase.Settle;
-        settleUntil = now + SettleTalk;
+        settleUntil = now + (used ? SettleTalk : TimeSpan.FromSeconds(1.5));
         Status = $"Using the mount's action on {target?.Name.TextValue ?? "the spot"}";
         Note($"mount action {p.Id} on {target?.Name.TextValue ?? "self"} ({target?.BaseId ?? 0}) {(target != null ? Interact.Distance(target).ToString("0.0") + " yalms" : "")}"
              + $"{(p.Face ? $", facing {(target != null && QuestSteps.Facing(target.Position) ? "yes" : "no")}" : "")}{(p.Use == ItemUse.Ground ? ", at its place on the ground" : "")}: {(used ? "sent" : "refused")}, status {why}, try {memory.Count(p.Key)}");
@@ -867,11 +984,32 @@ internal sealed unsafe class QuestStepper
             memory.Decoy(StepRules.LineKey(script!, snap), decoy.Key);
             Note($"{decoy.Name} ({decoy.BaseId}) played its scene without anything changing: a decoy on these lines");
         }
-        else if (!p.Public && p.Enemy != null && memory.Count(p.Key) >= StepRules.InteractTries)
+        else if (p.Kind == StepKind.MountAction && !firedSent)
         {
-            // The quest mount's action did nothing to that enemy.
-            memory.Attempts.Remove(p.Key);
-            GiveUp(p.Enemy.Id, p.Enemy.Name, "the quest mount's action did nothing to it");
+            // The game keeps refusing the action on it (never in range, never ready): on to something else.
+            if (memory.Count(p.Key + ":refused") >= MountRefusals)
+            {
+                memory.Attempts.Remove(p.Key + ":refused");
+                if (p.Enemy != null) Leave(p.Enemy.Id, p.Enemy.Name, $"the game refused the quest mount's action on it {MountRefusals} times");
+                else if (p.Target != null)
+                {
+                    memory.Tried.Add(p.Target.Key);
+                    Note($"the game refused the quest mount's action on {p.Target.Name} ({p.Target.BaseId}) {MountRefusals} times; trying something else");
+                }
+            }
+        }
+        else if (p.Kind == StepKind.MountAction && p.Enemy != null)
+        {
+            // Whether the action did anything to that enemy is its health before and after (or it being gone). A use
+            // that did isn't a try that came to nothing; after a few that did nothing the enemy is left (not counted
+            // among the fights given up: the mount rides on to the next).
+            var mob = QuestSteps.FindEnemy(p.Enemy.Id);
+            if (mob == null || mob.IsDead || (firedAt == p.Enemy.Id && mob.CurrentHp < firedHp)) memory.Attempts.Remove(p.Key);
+            else if (memory.Count(p.Key) >= StepRules.InteractTries)
+            {
+                memory.Attempts.Remove(p.Key);
+                Leave(p.Enemy.Id, p.Enemy.Name, $"the quest mount's action did nothing to it in {StepRules.InteractTries} uses (its health stayed at {mob.CurrentHp * 100 / Math.Max(1, mob.MaxHp)}%)");
+            }
         }
         else if (!p.Public && p.Target != null && memory.Count(p.Key) >= StepRules.InteractTries)
         {
@@ -980,19 +1118,26 @@ internal sealed unsafe class QuestStepper
         }
         phase = Phase.Fight;
         fightProgress = QuestSteps.Progress(script!.Quest);
+        engageNext = 0;
         Engage(enemy, snap);
     }
 
-    /// <summary>Hands an enemy to the fighter, with everything the filter went by in the log.</summary>
+    /// <summary>
+    /// Hands an enemy to the fighter, with everything the filter went by in the log. It isn't one the run fought yet:
+    /// that's once it turns on the character or loses health to the run's attack (<see cref="NoteStrikes"/>).
+    /// </summary>
     private void Engage(StepEnemy enemy, StepSnapshot snap)
     {
-        fighter.Engage(enemy);
-        memory.Fought.Add(enemy.Id);
+        var onlyItem = EnemyRules.ItemOnly(script!, snap, enemy);
+        fighter.Engage(enemy, onlyItem);
+        memory.Striking = 0;
+        memory.RestSince = default;
+        overtimeTold = false;
         engagedAt = QuestSteps.Progress(script!.Quest);
         engagedKind = enemy.BaseId;
         Status = $"Fighting {enemy.Name}";
-        Note($"fight {QuestSteps.EnemyLine(script!, snap, enemy, memory)}");
-        Log($"Fighting {enemy.Name}.", false);
+        Note($"fight {QuestSteps.EnemyLine(script!, snap, enemy, memory)}{(onlyItem ? "; the quest wants only its item used on this kind: no attack unless it attacks" : "")}");
+        Log(onlyItem ? $"Going for {enemy.Name} with the quest's item." : $"Fighting {enemy.Name}.", false);
     }
 
     /// <summary>
@@ -1012,34 +1157,24 @@ internal sealed unsafe class QuestStepper
             fightProgress = progress;
             memory.Kills = 0;
         }
-        if (fighter.Active) Status = fighter.Status;
-        else
+        if (fighter.Active)
         {
-            // The enemy that was being fought is done.
-            switch (fighter.Outcome)
-            {
-                case QuestFighter.End.Defeated:
-                    memory.Kills++;
-                    defeated.Add((engagedKind, engagedAt, now));
-                    Note($"defeated {fighter.Name} ({fighter.Defeated} this quest, {memory.Kills} since the quest last moved on)");
-                    break;
-                case QuestFighter.End.Gone:
-                    Note($"{fighter.Name} is gone from view");
-                    break;
-                case QuestFighter.End.GaveUp:
-                    GiveUp(fighter.Target, fighter.Name, fighter.Why);
-                    break;
-            }
-            fighter.Stop();
-            if (HoldAfterFight)
-            {
-                EndFight("a pause was asked for");
-                return;
-            }
+            Status = fighter.Status;
+            NoteStrikes(snap);
+            TellOvertime();
         }
+        // The enemy that was being fought is done.
+        else FighterDone(now);
 
         NoteEnemies(snap);
         var next = EnemyRules.Next(script, snap, memory, fighter.Active ? fighter.Target : 0);
+        var attacks = next != null && EnemyRules.Judge(script, snap, next, memory).Verdict == EnemyVerdict.Attacker;
+        // A pause was asked for: the enemy being fought is finished, then whatever still attacks; no other is started on.
+        if (HoldAfterFight && !fighter.Active && !attacks)
+        {
+            EndFight("a pause was asked for, and nothing attacks any more");
+            return;
+        }
         if (next == null)
         {
             if (fighter.Active)
@@ -1047,13 +1182,25 @@ internal sealed unsafe class QuestStepper
                 var was = snap.Hostiles.FirstOrDefault(e => e.Id == fighter.Target);
                 Note($"{fighter.Name} isn't the run's to fight any more ({(was != null ? EnemyRules.Judge(script, snap, was, memory).Why : "not in view")})");
                 fighter.Stop();
+                memory.Striking = 0;
             }
-            EndFight("none of the quest's enemies is left in view, and nothing attacks");
+            EndFight(EnemyRules.AttackedBeyondReach(snap, memory)
+                ? "what still attacks can't be reached or hurt for now; the step goes on meanwhile"
+                : "none of the quest's enemies is left in view, and nothing attacks");
             return;
         }
         if (!fighter.Active || next.Id != fighter.Target)
         {
-            if (fighter.Active) Note($"{fighter.Name} is left for now: {next.Name} comes first");
+            if (fighter.Active)
+            {
+                Note($"{fighter.Name} is left for now: {next.Name} comes first");
+                // What attacks is taken on at once (below); for one that doesn't, the fight under way ends first.
+                if (!attacks)
+                {
+                    fighter.Stop();
+                    memory.Striking = 0;
+                }
+            }
             // A way off: the trip gets there (mounted when it's far), then the fight.
             if (Vector3.Distance(next.Position, snap.Player) > FightOnWithin)
             {
@@ -1061,6 +1208,30 @@ internal sealed unsafe class QuestStepper
                 EndFight($"the next one, {next.Name}, is {Vector3.Distance(next.Position, snap.Player):0} yalms off");
                 return;
             }
+            if (!attacks)
+            {
+                // Fights given up, or defeats that didn't count, up to where the player is asked: that's the rules'
+                // to say (they ask once nothing attacks), so no further enemy is picked here.
+                if (memory.GiveUps >= StepRules.MaxGiveUps || memory.Kills >= StepRules.MaxIdleKills)
+                {
+                    EndFight($"{memory.GiveUps} fights given up and {memory.Kills} defeats since the quest last moved on: no further enemy is picked");
+                    return;
+                }
+                // One that isn't attacking is the run's choice: once the health is back, and a breath after the last
+                // one (not the same every time). Whatever attacks meanwhile is fought at once.
+                if (StepRules.Rest(snap, memory, now) is { } rest)
+                {
+                    Status = Capital(rest.What);
+                    return;
+                }
+                if (engageNext != next.Id)
+                {
+                    engageNext = next.Id;
+                    engageAt = now.AddSeconds(0.5 + Rng.NextDouble());
+                }
+                if (now < engageAt) return;
+            }
+            engageNext = 0;
             Engage(next, snap);
             if (!fighter.Active) return;
         }
@@ -1077,8 +1248,64 @@ internal sealed unsafe class QuestStepper
         }
     }
 
+    /// <summary>How the fight with the last enemy ended, noted and counted; once (the fighter is cleared after).</summary>
+    private void FighterDone(DateTime now)
+    {
+        switch (fighter.Outcome)
+        {
+            case QuestFighter.End.None:
+                return;
+            case QuestFighter.End.Defeated:
+                memory.Kills++;
+                defeated.Add((engagedKind, engagedAt, now));
+                Note($"defeated {fighter.Name} ({fighter.Defeated} this quest, {memory.Kills} since the quest last moved on)");
+                break;
+            case QuestFighter.End.Gone:
+                Note($"{fighter.Name} is gone from view");
+                break;
+            case QuestFighter.End.GaveUp:
+                GiveUp(fighter.Target, fighter.Name, fighter.Why);
+                break;
+            case QuestFighter.End.CantHit:
+                CantHit(fighter.Target, fighter.Name, fighter.Why, now);
+                break;
+            case QuestFighter.End.NotOurs:
+                Leave(fighter.Target, fighter.Name, fighter.Why);
+                break;
+        }
+        fighter.Stop();
+        memory.Striking = 0;
+        overtimeTold = false;
+    }
+
+    /// <summary>
+    /// The enemy being fought becomes one the run fought once it turns on the character or the chocobo, or loses
+    /// health to the run's attack: not on being walked up to (another player can get to it first). An attack that
+    /// has just gone out is told to the filter too: the game takes a moment to show whom the mob turned on.
+    /// </summary>
+    private void NoteStrikes(StepSnapshot snap)
+    {
+        memory.Striking = fighter.Striking ? fighter.Target : 0;
+        if (memory.Fought.Contains(fighter.Target)) return;
+        var mob = snap.Hostiles.FirstOrDefault(e => e.Id == fighter.Target);
+        if (mob == null || !(mob.AttacksMe || fighter.HurtIt)) return;
+        memory.Fought.Add(mob.Id);
+        Note($"{mob.Name} ({mob.BaseId}) is the run's fight now: {(mob.AttacksMe ? "it turned on you or your chocobo" : "it lost health to the run's attack")}");
+    }
+
+    /// <summary>A fight over its three minutes that goes on (the enemy attacks, and can be hit): the player is told, once.</summary>
+    private void TellOvertime()
+    {
+        if (overtimeTold || !fighter.Overtime) return;
+        overtimeTold = true;
+        var text = $"The fight with {fighter.Name} has gone on for over {QuestFighter.FightFor.TotalMinutes:0} minutes. It still attacks, so the run fights on.";
+        Note("[!] " + text);
+        Log(text, true);
+        notice = text;
+    }
+
     /// <summary>The game is given this long to count a defeat before it's taken as one that didn't count.</summary>
-    private static readonly TimeSpan CountsWithin = TimeSpan.FromSeconds(2.5);
+    private static readonly TimeSpan CountsWithin = TimeSpan.FromSeconds(4.5);
 
     /// <summary>
     /// Whether each defeat counted, once the game has had a moment to count it: the quest's state moved since that
@@ -1114,16 +1341,126 @@ internal sealed unsafe class QuestStepper
         phase = Phase.Decide;
         lastPlan = "";
         nextSnap = default;
+        engageNext = 0;
         Wait(1);
     }
 
-    /// <summary>An enemy the run leaves alone from now on, with why; the rules ask the player after <see cref="StepRules.MaxGiveUps"/>.</summary>
+    /// <summary>
+    /// An enemy that wasn't attacking and is left alone from now on, with why; the rules ask the player after
+    /// <see cref="StepRules.MaxGiveUps"/>. Should it attack later, it's fought all the same.
+    /// </summary>
     private void GiveUp(ulong id, string name, string why)
     {
         memory.GivenUp.Add(id);
         memory.GiveUps++;
         Note($"[!] gave up on {name}: {why} (given up on {memory.GiveUps} of {StepRules.MaxGiveUps} before the player is asked)");
         Log($"Left {name} alone: {why}.", true);
+    }
+
+    /// <summary>
+    /// An enemy that isn't the run's after all (the game doesn't let the character attack it; the quest mount's action
+    /// does nothing to it): left alone without counting as a fight given up.
+    /// </summary>
+    private void Leave(ulong id, string name, string why)
+    {
+        memory.GivenUp.Add(id);
+        Note($"left {name} alone: {why} (not counted among the fights given up)");
+        Log($"Left {name} alone: {why}.", false);
+    }
+
+    /// <summary>
+    /// An enemy that attacks but couldn't be reached or hurt: left for a while, during which the step goes on by the
+    /// last calm look (<see cref="StepRules.Decide"/>), then tried again; after <see cref="CantHitTries"/> tries it's
+    /// left for good. Not a fight given up: nothing here asks the player (a run that asks stops, and it's attacked).
+    /// </summary>
+    private void CantHit(ulong id, string name, string why, DateTime now)
+    {
+        var round = cantHitRounds.GetValueOrDefault(id) + 1;
+        cantHitRounds[id] = round;
+        memory.CantHit.Add(id);
+        cantHitUntil[id] = round >= CantHitTries ? DateTime.MaxValue : now + CantHitFor;
+        Note($"[!] {name} attacks but couldn't be fought: {why} (try {round} of {CantHitTries}); the step goes on meanwhile, "
+             + (round >= CantHitTries ? "and it's left for good" : $"and it's tried again in {CantHitFor.TotalSeconds:0} seconds"));
+        Log($"Couldn't fight back against {name} ({why}); carrying on with the step.", true);
+    }
+
+    /// <summary>Enemies that attacked but couldn't be fought come up for another try once their time is over.</summary>
+    private void TryAgain(DateTime now)
+    {
+        if (cantHitUntil.Count == 0) return;
+        foreach (var id in cantHitUntil.Where(kv => now >= kv.Value).Select(kv => kv.Key).ToList())
+        {
+            cantHitUntil.Remove(id);
+            memory.CantHit.Remove(id);
+        }
+    }
+
+    private void ForgetCantHit()
+    {
+        cantHitUntil.Clear();
+        cantHitRounds.Clear();
+        memory.CantHit.Clear();
+    }
+
+    /// <summary>
+    /// A step that's the player's came up while in combat (<see cref="AskUser"/>). Pausing there would stop the
+    /// character defending itself, so the ask is held back, and until it lands nothing is done but fighting what
+    /// attacks: no trip, no window (an unknown question or menu stays open), no step. Out of combat the step is decided
+    /// afresh, and whatever still needs the player asks again and pauses at once. Still in combat, the pause lands once
+    /// nothing has attacked for <see cref="AskQuietFor"/> that the run can fight (there's nothing left to defend
+    /// against), or after <see cref="AskWaitsFor"/> at the latest.
+    /// </summary>
+    private void TickPending(DateTime now)
+    {
+        if (fighter.Active) fighter.Tick();
+        if (now < nextSnap) return;
+        nextSnap = now + LookEvery;
+        if (!QuestSteps.InCombat)
+        {
+            Note("no longer in combat: deciding the step afresh (the player is asked now if it's still theirs)");
+            pendingAsk = null;
+            fighter.Stop();
+            memory.Striking = 0;
+            phase = Phase.Decide;
+            lastPlan = "";
+            blocked.Reset();
+            nextSnap = default;
+            return;
+        }
+        if (fighter.TakeNote() is { } said) Note(said);
+        if (!fighter.Active) FighterDone(now);
+        if (!QuestSteps.Loading && QuestSteps.Snapshot(script!) is { } snap)
+        {
+            TryAgain(now);
+            if (fighter.Active)
+            {
+                NoteStrikes(snap);
+                TellOvertime();
+            }
+            // On the quest mount nothing is fought on foot (getting off would lose it).
+            var riding = script!.Mount is { } qm && snap.Mounted && snap.Mount == qm.Mount;
+            var next = snap.Fighter && !riding ? EnemyRules.Next(script, snap, memory, fighter.Active ? fighter.Target : 0) : null;
+            if (next != null && EnemyRules.Judge(script, snap, next, memory).Verdict == EnemyVerdict.Attacker)
+            {
+                pendingQuietSince = now;
+                if (!fighter.Active || fighter.Target != next.Id) Engage(next, snap);
+                if (fighter.Active) Status = fighter.Status;
+            }
+            else if (fighter.Active)
+            {
+                Note($"{fighter.Name} no longer attacks");
+                fighter.Stop();
+                memory.Striking = 0;
+            }
+        }
+        var quiet = now - pendingQuietSince > AskQuietFor;
+        if (!quiet && now - pendingSince <= AskWaitsFor) return;
+        var why = pendingAsk!;
+        pendingAsk = null;
+        Note(quiet
+            ? "still in combat, but nothing attacks that the run can fight: the player is asked now"
+            : $"still fighting after {AskWaitsFor.TotalMinutes:0} minutes: the player is asked now");
+        AskUser(why + " (You're still in combat.)", now: true);
     }
 
     /// <summary>The mobs around and what the filter makes of each, to the debug log when it changed (so a bug report shows what was fought and why).</summary>
@@ -1145,7 +1482,10 @@ internal sealed unsafe class QuestStepper
         if (script.Enemies.Count == 0 && fighter.Target == 0) yield break;
         yield return $"quest enemies [{QuestSteps.EnemyData(script)}]; phase {phase}, given up on [{string.Join(",", memory.GivenUp)}] ({memory.GiveUps} since the player last took over), "
                      + $"defeats since the quest last moved on {memory.Kills}, defeats seen to count {memory.DefeatsCount}, kinds whose defeats didn't count [{string.Join(",", memory.IdleDefeats.Select(kv => $"{kv.Key}x{kv.Value}"))}], "
-                     + $"item uses [{string.Join(",", memory.ItemUses.Select(kv => $"{kv.Key}x{kv.Value}"))}], hold after this fight {HoldAfterFight}";
+                     + $"item uses [{string.Join(",", memory.ItemUses.Select(kv => $"{kv.Key}x{kv.Value}"))}], hold after this fight {HoldAfterFight}, "
+                     + $"attacking but not to be hit [{string.Join(",", cantHitRounds.Select(kv => $"{kv.Key}x{kv.Value}{(memory.CantHit.Contains(kv.Key) ? " (left for now)" : "")}"))}], "
+                     + $"fought [{string.Join(",", memory.Fought)}]"
+                     + (pendingAsk != null ? $"; the player is to be asked once the fight is over (for {(DateTime.UtcNow - pendingSince).TotalSeconds:0} s): {pendingAsk}" : "");
         foreach (var l in fighter.Describe()) yield return "fighter: " + l;
         if (enemiesSeen.Length > 0) yield return "mobs at the last look: " + enemiesSeen;
     }
@@ -1196,7 +1536,7 @@ internal sealed unsafe class QuestStepper
                 {
                     cutscenePaused = true;
                     travel.Cancel();
-                    AskUser("Paused for the cutscene; resume carries on.");
+                    AskUser("Paused for the cutscene; resume carries on.", now: true);
                 }
                 return true;
             }
@@ -1515,8 +1855,25 @@ internal sealed unsafe class QuestStepper
 
     private static string Capital(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
-    private void AskUser(string why)
+    /// <summary>
+    /// The step is the player's: the stepper waits for Resume. Not in the middle of a fight, though: a run that waits
+    /// doesn't defend the character. In combat on a class that fights, the ask is held back until the fight is over
+    /// (<see cref="TickPending"/>, which also says how long at most), and only the defence goes on meanwhile.
+    /// </summary>
+    /// <param name="now">Ask at once, in combat or not (a cutscene to pause for; the ask that was held back).</param>
+    private void AskUser(string why, bool now = false)
     {
+        if (!now && QuestSteps.InCombat && QuestFighter.CanFight)
+        {
+            if (pendingAsk != null) return;
+            pendingAsk = why;
+            pendingSince = pendingQuietSince = DateTime.UtcNow;
+            travel.Cancel();
+            Status = "In combat; then waiting for you";
+            Note("[!] in combat: the player is asked once the fight is over: " + why);
+            return;
+        }
+        pendingAsk = null;
         travel.Cancel();
         fighter.Stop();
         State = StepperState.WaitingForUser;

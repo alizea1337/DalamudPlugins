@@ -434,6 +434,7 @@ internal static unsafe class QuestSteps
             Busy = occupied,
             InCombat = inCombat,
             Fighter = Combat.BasicCombo.For(player.ClassJob.RowId) != null,
+            Hp = player.MaxHp > 0 ? (int)(player.CurrentHp * 100 / player.MaxHp) : 100,
             ScriptRead = read,
             Remembered = remembered,
             Todos = todos,
@@ -488,12 +489,7 @@ internal static unsafe class QuestSteps
             var held = marks != null && marks.TryGetValue(n.GameObjectId, out icon);
             if (!hostile && !held && kinds?.Contains(n.BaseId) != true) continue;
             var chara = (Character*)n.Address;
-            var targetId = n.TargetObjectId;
-            var target = targetId is 0 or 0xE000_0000 ? EnemyTarget.None
-                : targetId == me.GameObjectId ? EnemyTarget.You
-                : buddy != 0 && targetId == buddy ? EnemyTarget.YourChocobo
-                : Services.Objects.SearchById(targetId) is IPlayerCharacter ? EnemyTarget.OtherPlayer
-                : EnemyTarget.Other;
+            var target = TargetOf(n, me.GameObjectId, buddy);
             list.Add(new StepEnemy(n.GameObjectId, n.BaseId, n.NameId, n.Name.TextValue, n.Position)
             {
                 Radius = n.HitboxRadius,
@@ -518,6 +514,29 @@ internal static unsafe class QuestSteps
     /// and it waits for the quest's item (FFXIVClientStructs' note on the field; battle-society research).
     /// </summary>
     private const byte SubduedFlag = 0x40;
+
+    /// <summary>Whom a mob has as its target (its own field: safe whatever the game is doing).</summary>
+    private static EnemyTarget TargetOf(IBattleNpc mob, ulong me, ulong buddy)
+    {
+        var targetId = mob.TargetObjectId;
+        return targetId is 0 or 0xE000_0000 ? EnemyTarget.None
+            : targetId == me ? EnemyTarget.You
+            : buddy != 0 && targetId == buddy ? EnemyTarget.YourChocobo
+            : Services.Objects.SearchById(targetId) is IPlayerCharacter ? EnemyTarget.OtherPlayer
+            : EnemyTarget.Other;
+    }
+
+    /// <summary>
+    /// The mob fights the character or the character's chocobo right now (in combat, with one of them as its target),
+    /// as <see cref="StepEnemy.AttacksMe"/> says of a snapshot's mob. Read fresh from the object table: the fight asks
+    /// every frame, between two looks at the quest.
+    /// </summary>
+    public static bool AttacksMe(IBattleNpc mob)
+    {
+        if (Services.Objects.LocalPlayer is not { } me || !mob.StatusFlags.HasFlag(StatusFlags.InCombat)) return false;
+        var buddy = Services.Buddies.CompanionBuddy?.GameObject?.GameObjectId ?? 0;
+        return TargetOf(mob, me.GameObjectId, buddy) is EnemyTarget.You or EnemyTarget.YourChocobo;
+    }
 
     /// <summary>The loaded mob for an id, when it's still there.</summary>
     public static IBattleNpc? FindEnemy(ulong gameObjectId) => gameObjectId == 0 ? null : Services.Objects.SearchById(gameObjectId) as IBattleNpc;
@@ -1119,6 +1138,65 @@ internal static unsafe class QuestSteps
         var sheet = Services.Data.GetExcelSheet<Addon>();
         return rows.Select(r => sheet.GetRowOrDefault(r)?.Text.ExtractText() ?? "").Where(t => t.Length > 0).Distinct().ToList();
     }
+
+    /// <summary>
+    /// The questions a knock-out brings up, in the client's language, as shapes for <see cref="StepRules.FitsShape"/>:
+    /// "Return to (the home point)?" (Addon 111 and 196, the same text), "Return to your home point?" (117), and a
+    /// raise: "Accept Raise?" (112) and "Accept Raise from (a name)?" (3787). The place and the name are filled in by
+    /// the game, so the text before and after them is what's gone by.
+    /// </summary>
+    /// <remarks>
+    /// The rows were found by their text in the Addon sheet (7.58); which of them the game shows when the character is
+    /// down in the open world isn't confirmed in game. The shapes cover all of them.
+    /// </remarks>
+    public static IReadOnlyList<(string Before, string After, bool Hole)> KnockOutQuestions => knockOut.Value;
+
+    private static readonly Lazy<IReadOnlyList<(string Before, string After, bool Hole)>> knockOut = new(() => AddonShapes(111, 196, 117, 112, 3787));
+
+    /// <summary>
+    /// Addon texts split around what the game fills in: the plain text before the first filled-in part and after the
+    /// last one. Line breaks, hyphens and non-breaking spaces are text; any other macro is a filled-in part.
+    /// </summary>
+    private static IReadOnlyList<(string Before, string After, bool Hole)> AddonShapes(params uint[] rows)
+    {
+        var sheet = Services.Data.GetExcelSheet<Addon>();
+        var list = new List<(string Before, string After, bool Hole)>();
+        foreach (var r in rows)
+        {
+            if (sheet.GetRowOrDefault(r) is not { } row) continue;
+            var before = new System.Text.StringBuilder();
+            var after = new System.Text.StringBuilder();
+            var hole = false;
+            foreach (var payload in row.Text)
+            {
+                string? text = payload.Type switch
+                {
+                    Lumina.Text.ReadOnly.ReadOnlySePayloadType.Text => System.Text.Encoding.UTF8.GetString(payload.Body.Span),
+                    Lumina.Text.ReadOnly.ReadOnlySePayloadType.Macro => payload.MacroCode switch
+                    {
+                        Lumina.Text.Payloads.MacroCode.NewLine => "\n",
+                        Lumina.Text.Payloads.MacroCode.NonBreakingSpace => " ",
+                        Lumina.Text.Payloads.MacroCode.Hyphen => "-",
+                        Lumina.Text.Payloads.MacroCode.SoftHyphen => "",
+                        _ => null,
+                    },
+                    _ => "",
+                };
+                if (text == null)
+                {
+                    hole = true;
+                    after.Clear();
+                }
+                else (hole ? after : before).Append(text);
+            }
+            var shape = (before.ToString(), after.ToString(), hole);
+            if ((shape.Item1.Trim().Length > 0 || shape.Item2.Trim().Length > 0) && !list.Contains(shape)) list.Add(shape);
+        }
+        return list;
+    }
+
+    /// <summary>The open Yes/No question is one a knock-out brings up (the way back to the home point, or a raise).</summary>
+    public static bool IsKnockOutQuestion(string question) => StepRules.FitsShape(question, KnockOutQuestions);
 
     public static string ItemName(uint id)
     {

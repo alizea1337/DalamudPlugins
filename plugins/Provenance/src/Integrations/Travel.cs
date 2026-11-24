@@ -131,6 +131,13 @@ internal sealed unsafe partial class Travel
     public bool KeepMount { get; set; }
 
     /// <summary>
+    /// Stuck a second time, the trip fails instead of trying harder or starting over from the zone's aetheryte: for a
+    /// trip to an enemy (the Tribes run's fights), which isn't worth a teleport and is better left for another. Off
+    /// for every other trip, which goes exactly as it always did. Set before <see cref="GoTo"/>; it stays until changed.
+    /// </summary>
+    public bool FailFast { get; set; }
+
+    /// <summary>
     /// The rules for buildings and raised floors (Travel.Indoors.cs): out of a building on foot first, a target under a
     /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to quest
     /// NPCs (the Tribes run turns it on); off, a trip goes exactly as it always did (gathering under tree canopies, cliff
@@ -567,6 +574,12 @@ internal sealed unsafe partial class Travel
         walkingTo = null;
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
         Note($"{what}: stuck ({stuckCount}) at {Where(me)}, {Vector3.Distance(me, target):0} yalms to go");
+        // A trip that's to fail fast (to an enemy): one more path, then it's over. No teleport, no long unsticking.
+        if (FailFast && stuckCount >= 2)
+        {
+            Fail($"Got stuck on the way to {what}.");
+            return;
+        }
         if (AdvancedUnstuck && Unstuck(me, target)) return;
         if (stuckCount == 2 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {

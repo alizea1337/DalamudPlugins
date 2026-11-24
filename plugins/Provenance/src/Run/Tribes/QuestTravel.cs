@@ -57,6 +57,8 @@ internal sealed class QuestTravel
     public bool NoFly { get => travel.NoFly; set => travel.NoFly = value; }
     /// <summary>Riding a quest mount: arrive by the distance on the ground, never dismount on the way.</summary>
     public bool KeepMount { get => travel.KeepMount; set => travel.KeepMount = value; }
+    /// <summary>A trip to an enemy: stuck a second time it fails (the enemy is left) instead of starting over from the aetheryte.</summary>
+    public bool FailFast { get => travel.FailFast; set => travel.FailFast = value; }
 
     /// <summary>The question the portal being taken asks (answered Yes), while at it; null otherwise.</summary>
     public string? ExpectedQuestion => Current == State.AtPortal && leg != null ? Portals.Question(leg.Portal.Warp) : null;
