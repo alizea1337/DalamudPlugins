@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.8
+
+- Arriving at an NPC still in the air, the run talked to it from up there; the game answered "Target is too far
+  below you" and the delivery was skipped (Nitowikwe). It now lands first, for up to 5 seconds.
+- Aetherytes stand on a plinth, so a run on foot at the bottom step tried for 30 seconds to "get down (or up)"
+  to it and gave up (Foundation, on the way to the Firmament). On the ground, a target that is used from
+  farther away, like an aetheryte, now also counts as reached from lower down.
+- Stuck on the mount close to an NPC inside a building (rubbing along the wall on the way to the spot outside
+  its door), the run now comes down right there and walks in, instead of trying other ways to fly there.
+
 ## 0.22.7
 
 - Trips to an NPC inside a building (all runs): the run found an open spot near the building but then hovered

@@ -69,6 +69,10 @@ internal sealed unsafe partial class Travel
     private const float MaxRise = 3f;
     private DateTime landingSince;
     private bool dismountTried;
+    /// <summary>Arrived beside the target still in the air: landing first (talking from up there fails).</summary>
+    private DateTime airArrivalSince;
+    private DateTime airArrivalPress;
+    private static readonly TimeSpan AirArrivalPatience = TimeSpan.FromSeconds(5);
 
     private uint territory;
     private Vector2 approx;
@@ -160,6 +164,8 @@ internal sealed unsafe partial class Travel
         firmamentHop = false;
         landingSince = default;
         dismountTried = false;
+        airArrivalSince = default;
+        airArrivalPress = default;
         lastPath = null;
         pathFailNoted = false;
         ResetIndoors(trip: true);
@@ -421,10 +427,14 @@ internal sealed unsafe partial class Travel
         var flat = Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z));
         // Height matters once the real target (an NPC, a crystal) is in sight: above it on a roof or a mount is too far to talk.
         var rise = seen is { } at && !KeepMount ? Math.Abs(me.Y - at.Y) : 0f;
-        if (flat <= range && rise <= MaxRise)
+        // On the ground, a big target (an aetheryte on its plinth, range 6) is reached from lower down than an NPC.
+        var maxRise = Services.Condition[ConditionFlag.InFlight] ? MaxRise : Math.Max(MaxRise, range - 1f);
+        if (flat <= range && rise <= maxRise)
         {
             // In the air beside it with no floor right below at its height: getting off here would drop the character beside it.
             if (LandFirst(me, target, seen)) return;
+            // Still in the air beside an NPC: the game won't talk from up there ("Target is too far below you"); land first.
+            if (seen != null && !KeepMount && LandOnArrival(flat)) return;
             Vnav.Stop();
             Note($"{what}: arrived, {flat:0.0} yalms from the target");
             Current = State.Arrived;
@@ -432,7 +442,7 @@ internal sealed unsafe partial class Travel
             return;
         }
         // (Heading for the open spot near a target under a roof: the way in is on foot from there, not down through the roof.)
-        if (flat <= range + 2f && rise > MaxRise && !HeadingForLanding)
+        if (flat <= range + 2f && rise > maxRise && !HeadingForLanding)
         {
             if (landingSince == default)
             {
@@ -567,6 +577,8 @@ internal sealed unsafe partial class Travel
         walkingTo = null;
         Services.Log.Information("Travel: stuck on the way to {What} ({Count})", what, stuckCount);
         Note($"{what}: stuck ({stuckCount}) at {Where(me)}, {Vector3.Distance(me, target):0} yalms to go");
+        // Stuck in the air near a target under a roof (rubbing along its wall): come down right here and walk in.
+        if (LandWhereStuck(me, target)) return;
         if (AdvancedUnstuck && Unstuck(me, target)) return;
         if (stuckCount == 2 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
@@ -575,6 +587,36 @@ internal sealed unsafe partial class Travel
             return;
         }
         if (stuckCount >= 3) Fail($"Got stuck on the way to {what}. vnavmesh can't find a way there from here; move a bit and start again.");
+    }
+
+    /// <summary>
+    /// Arrived in the air beside the target: Dismount lands (the first press brings the mount down, it doesn't get off),
+    /// pressed again every 1.5 seconds, for at most <see cref="AirArrivalPatience"/>. True while it takes the tick.
+    /// </summary>
+    private bool LandOnArrival(float flat)
+    {
+        if (!Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return false;
+        var now = DateTime.UtcNow;
+        if (airArrivalSince == default)
+        {
+            airArrivalSince = now;
+            Vnav.Stop();
+            Note($"{what}: {flat:0.0} yalms from the target but still in the air; landing first");
+        }
+        if (now - airArrivalSince > AirArrivalPatience)
+        {
+            if (airArrivalPress != DateTime.MaxValue) Note($"{what}: still in the air after {AirArrivalPatience.TotalSeconds:0} seconds; going on");
+            airArrivalPress = DateTime.MaxValue;
+            return false;
+        }
+        if (airArrivalPress == default || now - airArrivalPress > TimeSpan.FromSeconds(1.5))
+        {
+            airArrivalPress = now;
+            var am = ActionManager.Instance();
+            if (am != null && am->GetActionStatus(ActionType.GeneralAction, Dismount) == 0) am->UseAction(ActionType.GeneralAction, Dismount);
+        }
+        Status = "Landing near " + what;
+        return true;
     }
 
     /// <summary>

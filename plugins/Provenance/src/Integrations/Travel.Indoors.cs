@@ -238,6 +238,20 @@ internal sealed unsafe partial class Travel
     }
 
     /// <summary>
+    /// Stuck on a mount near a target under a roof (the flight to the spot outside its door rubbed along a wall): come
+    /// down on the floor right below, when it's open sky here and that floor is at about the target's level, and walk
+    /// the rest. True when it started that.
+    /// </summary>
+    private bool LandWhereStuck(Vector3 me, Vector3 target)
+    {
+        if (!IndoorsApplies || roofOverTarget != true || onFootRest || descent != Descent.None) return false;
+        if (!Services.Condition[ConditionFlag.Mounted] || Landing.Flat(me, target) > NoSpotLandWithin || RoofOver(me)) return false;
+        if (FloorBelow(me, target) is not { } below || MathF.Abs(below.Y - target.Y) > Landing.MaxHeightOff) return false;
+        StartDescent(below, $"stuck {Landing.Flat(me, target):0} yalms from the target under a roof; coming down right here at {Where(below)}, then walking in");
+        return true;
+    }
+
+    /// <summary>
     /// The walking path from the open spot to the target, asked of vnavmesh in the background (once per target), and
     /// where it comes out into the open: the door. Bounded by <see cref="DoorPatience"/>; without an answer the open spot
     /// as found is used.
