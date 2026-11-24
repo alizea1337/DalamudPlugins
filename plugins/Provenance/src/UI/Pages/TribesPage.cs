@@ -106,6 +106,7 @@ internal sealed class TribesPage : Page
         Ui.Heading("Tribes", "The allied societies' daily quests: twelve a day between them, three from each giver. Open a society for "
                              + "today's quests, how far its next rank is, and what its ranks open.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        OtherPluginsNotice.Draw(Plugin, w);
         if (startProblem != null && !Loop.Active)
         {
             Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);

@@ -2,11 +2,16 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Provenance.Core.Run;
+using Provenance.Integrations;
 using Provenance.UI.Theme;
 
 namespace Provenance.UI.Pages;
 
-/// <summary>Getting unstuck, trades from other players, the tripwire (being moved, players around), and limits that keep a run from going too far.</summary>
+/// <summary>
+/// Getting unstuck, trades from other players, other automation plugins (paused, or a run steps aside), the tripwire
+/// (being moved, players around), and limits that keep a run from going too far.
+/// </summary>
 internal sealed class SecurityPage : Page
 {
     public SecurityPage(Plugin plugin) : base(plugin) { }
@@ -49,6 +54,19 @@ internal sealed class SecurityPage : Page
         }
         Ui.EndCard();
 
+        // Other plugins: YesAlready and TextAdvance paused while a run works, and what each loaded one is doing
+        Ui.BeginCard(width: w);
+        using (Ui.F.Strong.Push()) Ui.Text("Other plugins");
+        Ui.Wrapped("Plugins that click through the game's windows or play by themselves get in a run's way.");
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        v = c.PauseOtherPlugins;
+        if (Ui.Checkbox(PluginConflicts.PauseSetting, ref v,
+                "Both stand aside while a run works and carry on as soon as it pauses, finishes or stops; their own settings stay as they are. "
+                + "Off: only YesAlready is paused, and only while custom deliveries are handed in."))
+        { c.PauseOtherPlugins = v; Save(); }
+        DrawOtherPlugins(c.PauseOtherPlugins);
+        Ui.EndCard();
+
         // Tripwire: being moved and players around
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Tripwire");
@@ -87,6 +105,58 @@ internal sealed class SecurityPage : Page
         Slider("Free slots", "##slots", c.MinFreeSlots, 1, 20, "stop at %d free inventory slots", x => c.MinFreeSlots = x);
         Ui.Wrapped("The time limit waits for the item being crafted, so no materials are lost.", Palette.TextMuted);
         Ui.EndCard();
+    }
+
+    /// <summary>
+    /// One row for each of the three plugins that's loaded: its name, its state as a chip (an icon and words, never
+    /// the colour alone) and a sentence more where that helps. Names and states each keep to a column, the names' as
+    /// wide as the page's other labels.
+    /// </summary>
+    private static void DrawOtherPlugins(bool pauseOthers)
+    {
+        var s = Ui.S;
+        var statuses = PluginConflicts.Statuses(OtherPlugins.State, pauseOthers, OtherPlugins.Held);
+        ImGui.Dummy(new Vector2(0, 2 * s));
+        if (statuses.Count == 0)
+        {
+            Ui.Wrapped("YesAlready, TextAdvance and Questionable aren't loaded, so none of them is in a run's way.", Palette.TextMuted);
+            return;
+        }
+
+        var column = 130 * s;
+        using (Ui.F.Strong.Push())
+            foreach (var status in statuses) column = MathF.Max(column, ImGui.CalcTextSize(status.Plugin).X + 14 * s);
+        var chipH = 20 * s;
+        var dl = ImGui.GetWindowDrawList();
+        foreach (var status in statuses)
+        {
+            var (color, icon) = status.Tone switch
+            {
+                StatusTone.Fine => (Palette.Accent, FontAwesomeIcon.Pause),
+                StatusTone.Warning => (Palette.Warn, FontAwesomeIcon.ExclamationTriangle),
+                _ => (Palette.TextMuted, FontAwesomeIcon.InfoCircle),
+            };
+            var start = ImGui.GetCursorScreenPos();
+            // Beside the name; under it when the card is too narrow (or the text too large) for both.
+            var beside = column + Ui.ChipWidth(status.State, icon) <= Ui.CardInnerWidth;
+            if (beside)
+            {
+                // The chip is taller than a line of text: the name sits on its middle.
+                using (Ui.F.Strong.Push())
+                    dl.AddText(new Vector2(start.X, start.Y + (chipH - ImGui.GetTextLineHeight()) / 2), Palette.U32(Palette.Text), status.Plugin);
+                ImGui.SetCursorScreenPos(new Vector2(start.X + column, start.Y));
+            }
+            else
+            {
+                using (Ui.F.Strong.Push()) Ui.Text(status.Plugin);
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 4 * s);
+            }
+            Ui.Chip(status.State, color, icon);
+            if (status.Note == null) continue;
+            // The sentence belongs to its chip: under it, and closer to it than to the next row.
+            ImGui.SetCursorScreenPos(new Vector2(start.X + (beside ? column : 0), ImGui.GetCursorScreenPos().Y - 6 * s));
+            using (Ui.F.Small.Push()) Ui.Wrapped(status.Note, Palette.TextMuted);
+        }
     }
 
     private void Slider(string label, string id, int value, int min, int max, string format, Action<int> set)

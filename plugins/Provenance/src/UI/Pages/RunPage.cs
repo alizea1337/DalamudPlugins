@@ -133,6 +133,7 @@ internal sealed class RunPage : Page
         var left = Runs.TimeLeft();
         Ui.Muted(Elapsed().TrimStart(',', ' ') + (left is { } l && l > TimeSpan.Zero ? ", " + Core.Estimating.Estimator.Describe(l) + " left" : ""));
         Ui.EndCard();
+        OtherPluginsNotice.Draw(Plugin);
 
         if (Runs.Stage == RunStage.Gather)
         {
@@ -474,6 +475,7 @@ internal sealed class RunPage : Page
         var s = Ui.S;
         Ui.Heading("Run", "A run takes the order from start to finish in these steps and stops on its own when the order is done.");
         ImGui.Dummy(new Vector2(0, 4 * s));
+        OtherPluginsNotice.Draw(Plugin, startBlockerShown: true);
 
         var why = Runs.StartBlocker();
         Ui.BeginCard(Palette.WithAlpha(why == null ? Palette.Accent : Palette.Warn, 0.07f));

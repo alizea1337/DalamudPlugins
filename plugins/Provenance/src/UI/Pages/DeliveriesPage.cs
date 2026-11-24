@@ -76,6 +76,7 @@ internal sealed unsafe class DeliveriesPage : Page
         Ui.Heading("Custom Deliveries", "Collectables for the clients below, 12 a week between them. Start makes what this week's plan needs "
                                         + "(crafted and gathered requests for now), then hands it all in.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        OtherPluginsNotice.Draw(Plugin, w);
         if (startProblem != null && !Loop.Active)
         {
             Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);

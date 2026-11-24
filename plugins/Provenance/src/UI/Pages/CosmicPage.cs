@@ -72,6 +72,7 @@ internal sealed class CosmicPage : Page
         Ui.Heading("Cosmic Exploration", "Stellar missions on the planets. The loop takes the best-paying mission each ticked crafter reliably golds with "
                                          + "its gear (silver when none does), crafts it and reports it, until the goal is met.");
         ImGui.Dummy(new Vector2(0, 2 * s));
+        OtherPluginsNotice.Draw(Plugin, w);
         if (startProblem != null && !Loop.Active)
         {
             Ui.Icon(FontAwesomeIcon.ExclamationTriangle, Palette.Warn, small: true);
