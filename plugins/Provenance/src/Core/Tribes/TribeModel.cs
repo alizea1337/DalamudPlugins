@@ -8,7 +8,7 @@ namespace Provenance.Core.Tribes;
 /// <summary>Which classes a society's quests take (<c>Quest.ClassJobCategory0</c> of its dailies).</summary>
 public enum TribeKind
 {
-    /// <summary>Disciples of war and magic (category 142).</summary>
+    /// <summary>Disciples of war and magic, limited jobs left out (category 142).</summary>
     Battle,
     /// <summary>Disciples of the hand (category 33).</summary>
     Crafter,
@@ -25,10 +25,14 @@ public enum TribeGoal
     RankUp,
     /// <summary>
     /// Society currency (and gil and crystals): as many dailies as the day allows. Most societies pay the same for every
-    /// daily; the Ixal pay Ixali Oaknots only at their Respected and Honored givers, so their lower givers come last.
+    /// daily; the Ixal pay Ixali Oaknots only at their Respected and Honored givers, and the four ARR battle societies
+    /// their tokens only at the Friendly giver, so the givers that pay none come last (<see cref="TribeGiver.PaysCurrency"/>).
     /// </summary>
     Currency,
-    /// <summary>Class levels: the lowest class that qualifies takes each quest.</summary>
+    /// <summary>
+    /// Class levels: the lowest class that qualifies takes each quest; a battle quest the lowest combat job that's at
+    /// least <see cref="TribeClasses.LevellingMargin"/> levels above it.
+    /// </summary>
     Levelling,
 }
 
@@ -71,7 +75,10 @@ public enum StepKinds : uint
     KeyItem = 1 << 7,
     /// <summary>Uses a key item on something (an event item with an action).</summary>
     UseItem = 1 << 8,
-    /// <summary>Fights quest enemies (<c>ENEMY*</c>).</summary>
+    /// <summary>
+    /// Fights: field monsters whose kills the quest counts, or enemies that appear for the quest (<c>ENEMY*</c>, and
+    /// the battle NPCs the quest listens to for a defeat).
+    /// </summary>
     Combat = 1 << 9,
     /// <summary>Carries an object in both arms (status 404 "Transporting").</summary>
     Carry = 1 << 10,
@@ -79,12 +86,27 @@ public enum StepKinds : uint
     EnterArea = 1 << 11,
     /// <summary>Goes into another zone the society's steps use (Zirgorteh, Elysion, a portal's other side).</summary>
     SubZone = 1 << 12,
-    /// <summary>A first-person shooting minigame (<c>SNP*</c>).</summary>
+    /// <summary>A first-person shooting minigame (<c>SNP*</c>, <c>SNIPE_*</c>).</summary>
     Snipe = 1 << 13,
     /// <summary>Takes another class partway through (Ixal: <c>ClassJobCategory1</c>, a gatherer or fisher step).</summary>
     OtherClass = 1 << 14,
     /// <summary>Someone walks along with the player (<c>BIND_LEAD_*</c>, <c>SEQEV_TSURE*</c>).</summary>
     Escort = 1 << 15,
+    /// <summary>
+    /// Done unseen: a spell hides the player for a while and the steps have to be done before it runs out (status 416
+    /// "Transparent"; three Sylph dailies and a Sylph rank quest).
+    /// </summary>
+    Stealth = 1 << 16,
+    /// <summary>
+    /// Uses a key item on one of the quest's enemies, on most of them once the fight has weakened it (the quest listens
+    /// to a battle NPC for an item).
+    /// </summary>
+    ItemOnEnemy = 1 << 17,
+    /// <summary>
+    /// An emote whose to-do line names no NPC to aim it at: the line points at an area or an object (the Kobolds'
+    /// pygmy bombs, the Vanu Vanu's dancers and totem, the Moogles' malingerer…).
+    /// </summary>
+    EmoteUnnamed = 1 << 18,
 }
 
 /// <summary>A recipe that makes a crafting daily's item for one crafter, with the crystals one craft takes.</summary>
@@ -165,11 +187,30 @@ public sealed record TribeQuest(
 
     /// <summary>This quest as the daily pick sees it.</summary>
     public DailyCandidate Candidate => new(RowId, Rank, Exclusive);
+
+    /// <summary>
+    /// The field monsters whose kills it counts, by name (plural, in the client's language): the quest listens for
+    /// them by name. Empty when it fights nothing, or only enemies that appear for the quest (the sheets don't name those).
+    /// </summary>
+    public IReadOnlyList<string> FieldEnemies { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Its reward includes the society's currency. False for the dailies that pay something else: those of the Ixal's
+    /// givers below Respected and of the ARR battle societies' Neutral and Recognized givers (a Venture).
+    /// </summary>
+    public bool PaysCurrency { get; init; } = true;
 }
 
 /// <summary>A daily quest giver: who, where, and the ranks of its dailies (ARR givers each serve one rank).</summary>
 /// <param name="Position">World position from its <c>Level</c> row.</param>
-public sealed record TribeGiver(uint NpcId, string Name, uint Territory, string Place, Vector3 Position, int MinRank, int MaxRank);
+public sealed record TribeGiver(uint NpcId, string Name, uint Territory, string Place, Vector3 Position, int MinRank, int MaxRank)
+{
+    /// <summary>
+    /// Its dailies pay the society's currency (<see cref="TribeQuest.PaysCurrency"/>). All do but the Ixal's givers
+    /// below Respected and the ARR battle societies' Neutral and Recognized givers, whose dailies pay a Venture.
+    /// </summary>
+    public bool PaysCurrency { get; init; } = true;
+}
 
 /// <summary>A quest on the way to unlocking a society, with where to get it.</summary>
 /// <param name="Npc">The NPC who offers it, and where (zone name and map coordinates).</param>
@@ -247,6 +288,6 @@ public sealed record Tribe(
     /// <summary>The dailies one giver offers, sorted by quest id (the order the daily pick works on).</summary>
     public IReadOnlyList<TribeQuest> DailiesOf(uint giver) => Dailies.Where(q => q.Giver == giver).OrderBy(q => q.RowId).ToList();
 
-    /// <summary>A crafter society, a gatherer society or the Namazu (either): the ones step 2's run covers.</summary>
+    /// <summary>A crafter society, a gatherer society or the Namazu (either), as against a battle society: the page lists the two apart.</summary>
     public bool CraftOrGather => Kind != TribeKind.Battle;
 }
