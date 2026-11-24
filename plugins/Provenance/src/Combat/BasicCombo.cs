@@ -18,7 +18,11 @@ internal static unsafe class BasicCombo
     /// <param name="Combo">Weaponskill chain, or a single spell.</param>
     /// <param name="Heal">Self-heal or defensive action for low health; 0 when the job has none.</param>
     /// <param name="Melee">Fights at melee range; otherwise from about 20 yalms.</param>
-    public sealed record Kit(uint[] Combo, uint Heal, bool Melee);
+    public sealed record Kit(uint[] Combo, uint Heal, bool Melee)
+    {
+        /// <summary>How close to the target's edge the kit fights from, in yalms (its hitbox comes on top).</summary>
+        public float Reach => Melee ? 2.6f : 20f;
+    }
 
     private const uint SecondWind = 7541;
     private const uint Rampart = 7531;
