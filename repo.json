@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Custom Deliveries and order runs: an NPC inside a building was flown at from outside, so the character ended\n  up against the wall and stayed stuck there (R'dhyanki in Labyrinthos). The rules the Tribes run already uses\n  for buildings now apply to every trip to a vendor, an appraiser or a delivery client: the run lands in the\n  open near the building, gets off and walks in through the door, and it walks out of a building before it\n  mounts up. Trips to gathering nodes and fishing holes go as before.\r\n",
+    "Changelog": "- Trips to an NPC inside a building (all runs): the run found an open spot near the building but then hovered\n  just above the ground there for 20 seconds without landing, gave up and flew at the wall (R'dhyanki in\n  Labyrinthos). Hovering low over the spot, it now presses Dismount, which lands, and gets off.\n- It also lands in a better place: it asks vnavmesh for the walking path from the open spot to the NPC (that\n  path goes through the door) and lands where the path comes out of the building, just outside the door, then\n  walks in. When vnavmesh can't say within a few seconds, it lands at the open spot as before. The idea is\n  GatherBuddyReborn's (Apache-2.0).\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.22.6.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.6/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.6/latest.zip",
+    "AssemblyVersion": "0.22.7.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.7/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.7/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795558063
+    "LastUpdate": 1795558635
   }
 ]
