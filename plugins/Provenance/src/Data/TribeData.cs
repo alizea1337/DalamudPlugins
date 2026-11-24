@@ -312,9 +312,15 @@ internal sealed class TribeData
         }
         if (fish != 0) steps |= StepKinds.Fish;
 
-        // The journal text (client language) for /say phrases and emotes.
+        // The journal text (client language) for /say phrases and emotes. It's read here, with the catalog, for every
+        // daily of all 20 societies (566 text sheets in 7.58), because the verdict on a daily rests on it
+        // (QuestPolicy: "leave out quests that /say", and an emote the line names nobody for), and the planner asks
+        // for the verdict on every daily offered today from the game's own thread: read on demand there, the first
+        // plan of the day would wait for some hundred sheets. Here it's on the catalog's worker thread. Rank, unlock
+        // and side quests (123) are judged by their kind alone and never described on the page: theirs isn't read
+        // (the step engine reads a quest's text itself when it steps or watches one).
         var emoteIds = new List<uint>();
-        if (facts != null)
+        if (daily && facts != null)
         {
             if (facts.TextWith("_SAYTODO_").Any() || SayWithoutText.Contains((ushort)(q.RowId - 0x10000))) steps |= StepKinds.Say;
             foreach (var line in facts.TodoText)
