@@ -41,12 +41,14 @@ public readonly record struct EnemyJudgement(EnemyVerdict Verdict, string Why)
 /// only fill in where a quest has no listener for one.
 /// </para>
 /// <para>
-/// The filter, in order of trust (Tribes battle plan): what attacks the character or the chocobo is always fought;
-/// then a hostile mob of one of the quest's kinds that the quest marks (its handler's own icon, a quest icon drawn
-/// over it, or held by the handler where the quest puts its mobs); then, for a field-mob line, kind and name both
-/// matching, inside the marked area, with nobody else fighting it. A mob of the same kind that fits none of these is
-/// never attacked. None of the marks is confirmed in game yet: the hand watch logs each of them per mob, with this
-/// filter's verdict, so a bug report shows whether they hold.
+/// The filter, in order of trust (Tribes battle plan): what attacks the character or the chocobo is always fought
+/// (and what the run is already fighting stays in the fight while it fights nobody else); then a hostile mob of one
+/// of the quest's kinds that the quest marks (its handler's own icon, a quest icon drawn over it, or held by the
+/// handler where the quest puts its mobs); then, for a field-mob line, kind and name both matching, inside the marked
+/// area, with nobody else fighting it. One that was subdued gets the quest's item when the quest marks it or the run
+/// is the one that fought it. A mob of the same kind that fits none of these is never attacked. None of the marks is
+/// confirmed in game yet: the hand watch logs each of them per mob, with this filter's verdict, so a bug report shows
+/// whether they hold.
 /// </para>
 /// </remarks>
 public static class EnemyRules
@@ -68,6 +70,11 @@ public static class EnemyRules
     public const float DefaultArea = 150f;
     /// <summary>Times the quest's item is used on one mob before it's given up on.</summary>
     public const int ItemTries = 3;
+    /// <summary>
+    /// Defeats in a row of a field mob's kind that didn't move the quest on before the kind is left alone (its line is
+    /// done, the quest's other kinds aren't): two, since the game can take a moment to count one.
+    /// </summary>
+    public const int IdleDefeats = 2;
     /// <summary>An item whose action reaches this far is thrown at the enemy before the fight, not used on it once it's subdued.</summary>
     public const float ThrownFrom = 10f;
     /// <summary>How close to get to a place the quest's enemies appear at (the area that calls them is about 5 yalms wide).</summary>
@@ -162,11 +169,15 @@ public static class EnemyRules
     // ------------------------------------------------------------------ the filter
 
     /// <summary>What to make of a mob: fought (and why), or left alone (and why).</summary>
-    public static EnemyJudgement Judge(QuestScript q, StepSnapshot s, StepEnemy e)
+    /// <param name="m">What the run remembers (which enemies it fought); null for a look that fights nothing (the watch).</param>
+    public static EnemyJudgement Judge(QuestScript q, StepSnapshot s, StepEnemy e, StepMemory? m = null)
     {
         if (!e.Targetable) return No("can't be targeted");
-        // 1. It attacks the character or the chocobo: always.
+        // 1. It attacks the character or the chocobo: always. One the run is fighting stays in the fight while it's in
+        // combat with nobody else (between two attacks a mob can be without a target).
         if (e.Hostile && e.AttacksMe) return new EnemyJudgement(EnemyVerdict.Attacker, "it attacks you or your chocobo");
+        if (e.Hostile && e.InCombat && !e.FightsOther && !e.Weakened && m?.Fought.Contains(e.Id) == true)
+            return new EnemyJudgement(EnemyVerdict.Attacker, "the run is fighting it");
 
         var lines = q.Enemies.Where(x => x.Base == e.BaseId && ActiveIn(x, s.Sequence)).ToList();
         if (lines.Count == 0) return No(q.Enemies.Any(x => x.Base == e.BaseId) ? "the quest's kind, but not at this step" : "not one of the quest's kinds");
@@ -190,10 +201,16 @@ public static class EnemyRules
             : e.Held && atSpawn ? "the quest holds it, where the quest's enemies appear"
             : null;
 
-        if (!e.Hostile)
-            return item && held && e.Weakened && (mark != null || atSpawn || named == true)
+        // Subdued (it attacks no more, takes no damage and waits for the quest's item): the item goes on it when the
+        // quest marks it or the run is the one that subdued it. Someone else's, at the same spawn point, is left alone.
+        if (e.Weakened && item)
+        {
+            if (!held) return No("subdued, but the quest's item isn't in the bags");
+            return mark != null || m?.Fought.Contains(e.Id) == true
                 ? new EnemyJudgement(EnemyVerdict.Subdued, "subdued, waiting for the quest's item")
-                : No("not hostile");
+                : No("subdued, but not by the run, and the quest doesn't mark it");
+        }
+        if (!e.Hostile) return No("not hostile");
         if (e.FightsOther) return No("someone else is fighting it");
         if (mark != null) return new EnemyJudgement(EnemyVerdict.Marked, mark);
 
@@ -203,6 +220,11 @@ public static class EnemyRules
         {
             if (!InArea(q, s, e)) return No("outside the marked area");
             if (Flat(e.Position, s.Player) <= IconRange && OthersMarked(q, s, e)) return No("the quest marks others of its kinds nearby, not this one");
+            // Its last defeats didn't count (where defeats were seen to count) while the quest still wants another
+            // kind: this kind's line is done.
+            if (m is { DefeatsCount: true } && m.IdleDefeats.GetValueOrDefault(e.BaseId) >= IdleDefeats && lines.All(l => l.Task == EnemyTask.Defeat)
+                && q.Enemies.Any(x => x.Base != e.BaseId && ActiveIn(x, s.Sequence)))
+                return No($"its last {m.IdleDefeats[e.BaseId]} defeats didn't count: the quest wants its other kinds now");
             return new EnemyJudgement(EnemyVerdict.FieldMob, "a field mob the quest counts, in the marked area");
         }
         return No(named == false ? "the quest's kind, but not the name it counts" : "the quest's kind, but the quest doesn't mark it");
@@ -246,7 +268,7 @@ public static class EnemyRules
         foreach (var e in s.Hostiles)
         {
             if (m.GivenUp.Contains(e.Id)) continue;
-            var verdict = Judge(q, s, e).Verdict;
+            var verdict = Judge(q, s, e, m).Verdict;
             if (verdict == EnemyVerdict.No) continue;
             var rank = verdict switch { EnemyVerdict.Attacker => 0, EnemyVerdict.Subdued => 1, EnemyVerdict.Marked => 2, _ => 3 };
             var away = Vector3.DistanceSquared(e.Position, s.Player);

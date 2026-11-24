@@ -165,6 +165,15 @@ internal sealed unsafe class QuestStepper
     /// <summary>The mobs around and what the filter made of each, as last written to the log (written again when it changes).</summary>
     private string enemiesKey = "";
     private string enemiesSeen = "";
+    /// <summary>
+    /// Enemies defeated, until it's known whether each counted: its kind, the quest's state when the fight with it
+    /// began, and when it fell (the game takes a moment to count a defeat).
+    /// </summary>
+    private readonly List<(uint Kind, string Before, DateTime At)> defeated = new();
+    /// <summary>The quest's state when the fight with the current enemy began.</summary>
+    private string engagedAt = "";
+    private uint engagedKind;
+    private byte lastSequence;
     /// <summary>The wait for the quest's enemies to appear was given for this step.</summary>
     private bool spawnWaited;
     /// <summary>The trip under way started while the character was attacked (on foot: the game mounts nobody in combat).</summary>
@@ -363,6 +372,10 @@ internal sealed unsafe class QuestStepper
         spawnWaited = false;
         tripInCombat = false;
         knockedOut = false;
+        defeated.Clear();
+        engagedAt = "";
+        engagedKind = 0;
+        lastSequence = 0;
     }
 
     // ------------------------------------------------------------------ the tick
@@ -425,6 +438,14 @@ internal sealed unsafe class QuestStepper
             Note($"progress: {memory.Signature}");
             if (phase == Phase.Settle) phase = Phase.Decide;
         }
+        // A new sequence has its own enemies: what was learnt about the last one's kinds goes.
+        if (snap.Sequence != lastSequence)
+        {
+            lastSequence = snap.Sequence;
+            memory.IdleDefeats.Clear();
+            defeated.Clear();
+        }
+        SettleDefeats(now);
         if (phase == Phase.Settle && InEvent) sawEvent = true;
         NoteHolds(snap);
 
@@ -966,8 +987,11 @@ internal sealed unsafe class QuestStepper
     private void Engage(StepEnemy enemy, StepSnapshot snap)
     {
         fighter.Engage(enemy);
+        memory.Fought.Add(enemy.Id);
+        engagedAt = QuestSteps.Progress(script!.Quest);
+        engagedKind = enemy.BaseId;
         Status = $"Fighting {enemy.Name}";
-        Note($"fight {QuestSteps.EnemyLine(script!, snap, enemy)}");
+        Note($"fight {QuestSteps.EnemyLine(script!, snap, enemy, memory)}");
         Log($"Fighting {enemy.Name}.", false);
     }
 
@@ -996,6 +1020,7 @@ internal sealed unsafe class QuestStepper
             {
                 case QuestFighter.End.Defeated:
                     memory.Kills++;
+                    defeated.Add((engagedKind, engagedAt, now));
                     Note($"defeated {fighter.Name} ({fighter.Defeated} this quest, {memory.Kills} since the quest last moved on)");
                     break;
                 case QuestFighter.End.Gone:
@@ -1020,7 +1045,7 @@ internal sealed unsafe class QuestStepper
             if (fighter.Active)
             {
                 var was = snap.Hostiles.FirstOrDefault(e => e.Id == fighter.Target);
-                Note($"{fighter.Name} isn't the run's to fight any more ({(was != null ? EnemyRules.Judge(script, snap, was).Why : "not in view")})");
+                Note($"{fighter.Name} isn't the run's to fight any more ({(was != null ? EnemyRules.Judge(script, snap, was, memory).Why : "not in view")})");
                 fighter.Stop();
             }
             EndFight("none of the quest's enemies is left in view, and nothing attacks");
@@ -1052,6 +1077,37 @@ internal sealed unsafe class QuestStepper
         }
     }
 
+    /// <summary>The game is given this long to count a defeat before it's taken as one that didn't count.</summary>
+    private static readonly TimeSpan CountsWithin = TimeSpan.FromSeconds(2.5);
+
+    /// <summary>
+    /// Whether each defeat counted, once the game has had a moment to count it: the quest's state moved since that
+    /// fight began, or it didn't. Defeats of a kind that don't count, twice in a row, tell the filter that kind's line
+    /// is done (<see cref="StepMemory.IdleDefeats"/>). The state is the quest's sequence and variables: no script is asked.
+    /// </summary>
+    private void SettleDefeats(DateTime now)
+    {
+        if (defeated.Count == 0) return;
+        var progress = QuestSteps.Progress(script!.Quest);
+        for (var i = defeated.Count - 1; i >= 0; i--)
+        {
+            var d = defeated[i];
+            var counted = progress != d.Before;
+            if (!counted && now - d.At < CountsWithin) continue;
+            defeated.RemoveAt(i);
+            if (counted)
+            {
+                memory.DefeatsCount = true;
+                if (memory.IdleDefeats.Remove(d.Kind)) Note($"a defeat of kind {d.Kind} counted again");
+                continue;
+            }
+            var idle = memory.IdleDefeats.GetValueOrDefault(d.Kind) + 1;
+            memory.IdleDefeats[d.Kind] = idle;
+            Note($"a defeat of kind {d.Kind} didn't move the quest on (still {d.Before}); {idle} in a row"
+                 + (idle >= EnemyRules.IdleDefeats && memory.DefeatsCount ? ": that kind is left alone while the quest wants its other kinds" : ""));
+        }
+    }
+
     private void EndFight(string why)
     {
         Note($"fight over: {why}; {fighter.Defeated} defeated this quest, given up on {memory.GivenUp.Count}");
@@ -1075,7 +1131,7 @@ internal sealed unsafe class QuestStepper
     {
         if (snap.Hostiles.Count == 0 && enemiesKey.Length == 0) return;
         if (script!.Enemies.Count == 0 && !snap.Hostiles.Any(e => e.AttacksMe)) return;
-        var text = QuestSteps.EnemiesSeen(script, snap, 60f, 8, out var key);
+        var text = QuestSteps.EnemiesSeen(script, snap, 60f, 8, out var key, memory);
         enemiesSeen = text;
         if (key == enemiesKey) return;
         enemiesKey = key;
@@ -1088,7 +1144,8 @@ internal sealed unsafe class QuestStepper
         if (script == null) yield break;
         if (script.Enemies.Count == 0 && fighter.Target == 0) yield break;
         yield return $"quest enemies [{QuestSteps.EnemyData(script)}]; phase {phase}, given up on [{string.Join(",", memory.GivenUp)}] ({memory.GiveUps} since the player last took over), "
-                     + $"defeats since the quest last moved on {memory.Kills}, item uses [{string.Join(",", memory.ItemUses.Select(kv => $"{kv.Key}x{kv.Value}"))}], hold after this fight {HoldAfterFight}";
+                     + $"defeats since the quest last moved on {memory.Kills}, defeats seen to count {memory.DefeatsCount}, kinds whose defeats didn't count [{string.Join(",", memory.IdleDefeats.Select(kv => $"{kv.Key}x{kv.Value}"))}], "
+                     + $"item uses [{string.Join(",", memory.ItemUses.Select(kv => $"{kv.Key}x{kv.Value}"))}], hold after this fight {HoldAfterFight}";
         foreach (var l in fighter.Describe()) yield return "fighter: " + l;
         if (enemiesSeen.Length > 0) yield return "mobs at the last look: " + enemiesSeen;
     }

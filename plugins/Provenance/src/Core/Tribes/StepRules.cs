@@ -150,6 +150,22 @@ public sealed class StepMemory
     public int Kills { get; set; }
     /// <summary>Times the quest's item was used on an enemy, by game object id.</summary>
     public Dictionary<ulong, int> ItemUses { get; } = new();
+    /// <summary>
+    /// Enemies the run fought (by game object id). One of them that was subdued is the run's to use the quest's item on,
+    /// whatever else marks it: it stops attacking then, and may stop counting as hostile.
+    /// </summary>
+    public HashSet<ulong> Fought { get; } = new();
+    /// <summary>
+    /// Defeats in a row of a kind (BNpcBase) that didn't move the quest on. A quest with two kinds of field mob to slay
+    /// goes on counting one after the other is done: after <see cref="EnemyRules.IdleDefeats"/> of these the kind is
+    /// left alone and the other is looked for. Kept by the stepper; a defeat that counts takes the kind out again.
+    /// </summary>
+    public Dictionary<uint, int> IdleDefeats { get; } = new();
+    /// <summary>
+    /// A defeat was seen to move this quest on (its sequence or variables): only then does a defeat that doesn't say
+    /// anything about its kind. Until then no kind is left alone for it.
+    /// </summary>
+    public bool DefeatsCount { get; set; }
 
     private string decoyLines = "";
     private readonly HashSet<ulong> decoys = new();
@@ -367,7 +383,7 @@ public static class StepRules
             return Ask($"{m.Kills} enemies were defeated without the quest moving on; do this step yourself, then resume.");
         if (s.Fighter && EnemyRules.Next(q, s, m) is { } enemy)
         {
-            var why = EnemyRules.Judge(q, s, enemy);
+            var why = EnemyRules.Judge(q, s, enemy, m);
             if (riding)
             {
                 // On the quest mount its action is the weapon (the Ananta's marid tramples the ants); with none, ride on.

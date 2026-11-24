@@ -292,6 +292,24 @@ public class EnemyRulesTests
     }
 
     [Fact]
+    public void AnEnemyTheRunIsFightingStaysInTheFightWhileItFightsNobodyElse()
+    {
+        // A quest spawn nothing marks, fought because it attacked: between two attacks it has no target.
+        var q = Shaft();
+        var melia = Mob(5, 5550, 4100, 296, 174, combat: true);
+        var s = Snap(q, 1, Forelands, new Vector3(300, -70, 170), new[] { melia });
+        var m = new StepMemory();
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, s, melia, m).Verdict);
+        m.Fought.Add(5);
+        Assert.Equal(EnemyVerdict.Attacker, EnemyRules.Judge(q, s, melia, m).Verdict);
+        // It turned on someone else, or went back to where it stood (out of combat): no longer the run's.
+        var turned = melia with { Target = EnemyTarget.OtherPlayer };
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, Snap(q, 1, Forelands, new Vector3(300, -70, 170), new[] { turned }), turned, m).Verdict);
+        var reset = melia with { InCombat = false };
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, Snap(q, 1, Forelands, new Vector3(300, -70, 170), new[] { reset }), reset, m).Verdict);
+    }
+
+    [Fact]
     public void AStrangerThatDoesntAttackIsLeftAlone()
     {
         var q = Elite();
@@ -391,6 +409,38 @@ public class EnemyRulesTests
         Assert.Equal(EnemyVerdict.No, Verdict(q, s, lancer));
         // Further off than icons are drawn, the kind and name are all there is to go by.
         Assert.Equal(EnemyVerdict.FieldMob, Verdict(q, s, farLancer));
+    }
+
+    [Fact]
+    public void AKindWhoseDefeatsStoppedCountingIsLeftForTheQuestsOtherKinds()
+    {
+        // The lancers' line is done and nothing marks field mobs: two lancers fell without the quest moving on.
+        var q = Elite();
+        var lancer = Mob(1, 739, 1837, 180, 0);
+        var archer = Mob(2, 741, 1838, 190, 0);
+        var s = Snap(q, 1, Thanalan, InZaharak, new[] { lancer, archer }, new[] { EliteMarker });
+        var m = new StepMemory { DefeatsCount = true };
+        m.IdleDefeats[739] = EnemyRules.IdleDefeats - 1;
+        Assert.Equal(1ul, EnemyRules.Next(q, s, m)!.Id);
+        m.IdleDefeats[739] = EnemyRules.IdleDefeats;
+        // Not before a defeat was seen to count at all (the quest's state may not show defeats).
+        Assert.Equal(EnemyVerdict.FieldMob, EnemyRules.Judge(q, s, lancer, new StepMemory { IdleDefeats = { [739] = 5 } }).Verdict);
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, s, lancer, m).Verdict);
+        Assert.Equal(2ul, EnemyRules.Next(q, s, m)!.Id);
+        // One that attacks is fought all the same.
+        var biting = lancer with { Target = EnemyTarget.You, InCombat = true };
+        Assert.Equal(EnemyVerdict.Attacker, EnemyRules.Judge(q, s, biting, m).Verdict);
+    }
+
+    [Fact]
+    public void AQuestsOnlyKindIsNeverLeftAloneForDefeatsThatDidntCount()
+    {
+        // 1276 "Fungal Foulness": greater banestools are all there is; the idle count is the stepper's to ask about.
+        var q = new QuestScript { Quest = 65536 + 1276, Enemies = EnemyRules.Read(new[] { ("ENEMY0", 2464u) }, new[] { Row(2464, 0, 0, 5, 1) }, _ => null) };
+        var banestool = Mob(1, 2464, 3000, 10, 60);
+        var m = new StepMemory { DefeatsCount = true };
+        m.IdleDefeats[2464] = 5;
+        Assert.Equal(EnemyVerdict.FieldMob, EnemyRules.Judge(q, Snap(q, 1, 152, Vector3.Zero, new[] { banestool }), banestool, m).Verdict);
     }
 
     [Fact]
@@ -533,14 +583,35 @@ public class EnemyRulesTests
     [Fact]
     public void ASubduedEnemyThatFightsNoMoreStillGetsTheItem()
     {
+        // Subdued, it stops attacking (and may stop counting as hostile): the one the run fought stays the run's.
         var q = Tempered();
         var subdued = Mob(1, 79, 2000, -77, -105, hostile: false, weakened: true);
+        var stillHostile = Mob(3, 79, 2000, -78, -105, weakened: true);
         var passive = Mob(2, 79, 2000, -77, -106, hostile: false);
-        var s = Snap(q, 1, Thanalan, AtGround, new[] { subdued, passive }, items: Ash);
-        Assert.Equal(EnemyVerdict.Subdued, Verdict(q, s, subdued));
+        var s = Snap(q, 1, Thanalan, AtGround, new[] { subdued, stillHostile, passive }, items: Ash);
+        var fought = new StepMemory();
+        fought.Fought.Add(1);
+        fought.Fought.Add(3);
+        Assert.Equal(EnemyVerdict.Subdued, EnemyRules.Judge(q, s, subdued, fought).Verdict);
+        Assert.Equal(EnemyVerdict.Subdued, EnemyRules.Judge(q, s, stillHostile, fought).Verdict);
+        Assert.Equal(1ul, EnemyRules.Next(q, s, fought, keep: 1)!.Id);
         Assert.Equal(EnemyVerdict.No, Verdict(q, s, passive));
         // With no ash left there's nothing to do with it.
-        Assert.Equal(EnemyVerdict.No, Verdict(q, Snap(q, 1, Thanalan, AtGround, new[] { subdued }), subdued));
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, Snap(q, 1, Thanalan, AtGround, new[] { subdued }), subdued, fought).Verdict);
+    }
+
+    [Fact]
+    public void SomeoneElsesSubduedEnemyIsLeftAlone()
+    {
+        // Another player's tempered, subdued at the same spawn point: the run didn't fight it and the quest doesn't mark it.
+        var q = Tempered();
+        var theirs = Mob(1, 79, 2000, -77, -105, weakened: true);
+        var s = Snap(q, 1, Thanalan, AtGround, new[] { theirs }, items: Ash);
+        Assert.Equal(EnemyVerdict.No, EnemyRules.Judge(q, s, theirs, new StepMemory()).Verdict);
+        Assert.Contains("not by the run", EnemyRules.Judge(q, s, theirs, new StepMemory()).Why);
+        // One the quest marks is the run's even when it was found subdued (after a knock-out, say).
+        var marked = theirs with { Drawn = 71224 };
+        Assert.Equal(EnemyVerdict.Subdued, EnemyRules.Judge(q, Snap(q, 1, Thanalan, AtGround, new[] { marked }, items: Ash), marked, new StepMemory()).Verdict);
     }
 
     // ------------------------------------------------------------------ which one next

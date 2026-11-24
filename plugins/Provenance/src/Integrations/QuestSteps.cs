@@ -538,13 +538,14 @@ internal static unsafe class QuestSteps
     /// hostile, the quest's own icon and whether its handler holds it (as of the last calm look), the icon drawn now,
     /// its FATE, subdued, in combat, whom it targets and who first hit it (never a name). For the run's log.
     /// </summary>
-    public static string EnemyLine(QuestScript q, StepSnapshot s, StepEnemy e)
-        => $"\"{e.Name}\" {e.BaseId}/{e.NameId} {Vector3.Distance(e.Position, s.Player):0} y, health {e.Hp}%, {EnemyFacts(q, s, e)}";
+    /// <param name="m">What the run remembers (the enemies it fought), when it's the run that asks.</param>
+    public static string EnemyLine(QuestScript q, StepSnapshot s, StepEnemy e, StepMemory? m = null)
+        => $"\"{e.Name}\" {e.BaseId}/{e.NameId} {Vector3.Distance(e.Position, s.Player):0} y, health {e.Hp}%, {EnemyFacts(q, s, e, m)}";
 
     /// <summary>What the filter goes by for a mob, and its verdict; without its distance and health (those change all the time).</summary>
-    private static string EnemyFacts(QuestScript q, StepSnapshot s, StepEnemy e)
+    private static string EnemyFacts(QuestScript q, StepSnapshot s, StepEnemy e, StepMemory? m)
     {
-        var verdict = EnemyRules.Judge(q, s, e);
+        var verdict = EnemyRules.Judge(q, s, e, m);
         var me = Services.Objects.LocalPlayer?.GameObjectId ?? 0;
         var tag = e.Tagger is 0 or 0xE000_0000 ? "nobody" : e.Tagger == me ? "you" : "another";
         var target = e.Target switch
@@ -565,10 +566,10 @@ internal static unsafe class QuestSteps
     /// changes when an entry comes, goes or changes in what the filter goes by, not with distance, health or how many
     /// of an entry there are: a line is written only then, so a herd wandering by doesn't fill the log.
     /// </summary>
-    public static string EnemiesSeen(QuestScript q, StepSnapshot s, float within, int most, out string key)
+    public static string EnemiesSeen(QuestScript q, StepSnapshot s, float within, int most, out string key, StepMemory? m = null)
     {
         var groups = s.Hostiles.Where(e => Vector3.Distance(e.Position, s.Player) <= within).OrderBy(e => Vector3.DistanceSquared(e.Position, s.Player))
-            .GroupBy(e => (e.Name, e.BaseId, e.NameId, Facts: EnemyFacts(q, s, e))).ToList();
+            .GroupBy(e => (e.Name, e.BaseId, e.NameId, Facts: EnemyFacts(q, s, e, m))).ToList();
         key = string.Join("|", groups.Select(g => $"{g.Key.BaseId}/{g.Key.NameId}:{g.Key.Facts}").OrderBy(x => x, StringComparer.Ordinal));
         if (groups.Count == 0) return $"(none within {within:0} yalms)";
         return string.Join("; ", groups.Take(most).Select(g =>
