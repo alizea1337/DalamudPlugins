@@ -208,6 +208,31 @@ public class TribeBattleClassesTests
     }
 
     [Fact]
+    public void LevellingBetweenJobsOfOneLevelTakesTheMonsterDropsJobFirst()
+    {
+        // Paladin, Warrior and White Mage all at 70; the lowest row (Paladin) used to win.
+        var who = Who(Crp, Whm, Job(Pld, 70, itemLevel: 700), Job(War, 70, itemLevel: 720), Job(Whm, 70, itemLevel: 600), Job(Blm, 90), Other(Crp, 100));
+        Assert.Equal(Whm, TribeClasses.Choose(Battle(60), who, levelling: true));
+        Assert.Equal(new[] { Whm, War, Pld, Blm }, TribeClasses.Options(Battle(60), who, levelling: true).Select(c => c.ClassJob).ToArray());
+        // A lower job still comes before it: the level decides first.
+        var lower = Who(Crp, Whm, Job(Pld, 70), Job(Whm, 70), Job(Blm, 66), Other(Crp, 100));
+        Assert.Equal(Blm, TribeClasses.Choose(Battle(60), lower, levelling: true));
+    }
+
+    [Fact]
+    public void LevellingBetweenJobsOfOneLevelThenTakesTheBetterGeared()
+    {
+        // The Monster drops job (Black Mage) is higher: among the two at 70 the better-geared one, then the lower row.
+        var who = Who(Crp, Blm, Job(Pld, 70, itemLevel: 500), Job(War, 70, itemLevel: 520), Job(Blm, 90), Other(Crp, 100));
+        Assert.Equal(War, TribeClasses.Choose(Battle(60), who, levelling: true));
+        var even = Who(Crp, Blm, Job(War, 70, itemLevel: 500), Job(Pld, 70, itemLevel: 500), Job(Blm, 90), Other(Crp, 100));
+        Assert.Equal(Pld, TribeClasses.Choose(Battle(60), even, levelling: true));
+        // Crafters of one level: the better geared as well.
+        var crafters = Who(Pld, Pld, Job(Pld, 100), new ClassInfo(Crp, 20, true, 100), new ClassInfo(Bsm, 20, true, 130));
+        Assert.Equal(Bsm, TribeClasses.Choose(Ixal(false), crafters, levelling: true));
+    }
+
+    [Fact]
     public void LevellingStillTakesACraftersDailyOnTheLowestCrafter()
     {
         var who = Who(Crp, Pld, Job(Pld, 100), new ClassInfo(Crp, 60, true, 500), new ClassInfo(Bsm, 20, true, 300));
@@ -336,6 +361,39 @@ public class TribeBattleClassesTests
         var idle = new PlayerClasses(classes, Crp, Pld);
         Assert.Equal(0, idle.OnRank(Crp));
         Assert.False(idle.WasOn(Bsm));
+    }
+
+    [Fact]
+    public void OnlyTheRunsPlanningNotesAClass()
+    {
+        var history = new ClassHistory();
+        // No run: nothing seen, whatever is asked.
+        Assert.Empty(history.Seen(running: false));
+        Assert.Empty(history.Seen(running: true));
+        // The run plans on Warrior, then (after a crafter's visit) on Carpenter.
+        Assert.Equal(new[] { War }, history.Note(War));
+        Assert.Equal(new[] { War, Crp }, history.Note(Crp));
+        Assert.Equal(new[] { War, Crp }, history.Note(War));
+        // Looking (the page, twice a second) notes nothing, whatever class is on by then.
+        Assert.Equal(new[] { War, Crp }, history.Seen(running: true));
+        Assert.Equal(new[] { War, Crp }, history.Seen(running: true));
+        // An unknown class isn't noted.
+        Assert.Equal(new[] { War, Crp }, history.Note(0));
+    }
+
+    [Fact]
+    public void TheNextRunStartsItsClassesAnew()
+    {
+        var history = new ClassHistory();
+        history.Note(War);
+        history.Note(Crp);
+        // The run ended: nothing counts as having been on, and a look doesn't bring it back.
+        Assert.Empty(history.Seen(running: false));
+        history.RunOver();
+        Assert.Empty(history.Seen(running: true));
+        // The next run's first planning starts with the class that's on then.
+        Assert.Equal(new[] { Bsm }, history.Note(Bsm));
+        Assert.Equal(new[] { Bsm }, history.Seen(running: true));
     }
 
     [Fact]

@@ -358,14 +358,14 @@ internal sealed class TribesPage : Page
         var s = Ui.S;
         Ui.BeginCard(width: w);
         using (Ui.F.Strong.Push()) Ui.Text("Goal");
-        var taking = snap.Days.Where(d => d.Unlocked && !S.LeftOut.Contains(d.Tribe.Id)).ToList();
-        var effective = TribeGoals.Effective(S.Goal, taking);
+        var taking = TribeGoals.Taking(snap.Days, S.LeftOut);
+        var effective = TribeGoals.Effective(S.Goal, snap.Days, S.LeftOut, snap.Who, S.LeaveOutSay);
         var shown = Goals.First(g => g.Goal == effective).Label;
         if (Ui.DropdownField("##tribegoal", shown, "Pick a goal", 320 * s, FontAwesomeIcon.Flag, detail: S.Goal == null ? "picked for you" : null))
         {
             goalItems = new List<DropdownItem>
             {
-                new("Pick for me", Sub: "Rank up while a society is below its top rank, then Currency"),
+                new("Pick for me", Sub: "Rank up while a society whose dailies the run can do is below its top rank, then Currency"),
             };
             goalItems.AddRange(Goals.Select(g => new DropdownItem(g.Label, Sub: g.Text)));
         }

@@ -44,15 +44,21 @@ internal sealed class TribePlanning
         }
     }
 
-    /// <summary>The plan now; <paramref name="excluded"/> and <paramref name="excludedGivers"/> are what the run gave up on today.</summary>
+    /// <summary>
+    /// The plan now. The Tribes run's planning passes what it gave up on today (<paramref name="excluded"/>,
+    /// <paramref name="excludedGivers"/>), and only that planning notes the class that's on (<see cref="Record"/>); the
+    /// pages' plan, a bug report's and the one a run starts from pass nothing and note nothing.
+    /// </summary>
     public TribePlan Build(IReadOnlyDictionary<uint, string>? excluded = null, IReadOnlyDictionary<uint, string>? excludedGivers = null)
     {
+        // A plan made while no run goes (the pages', and the one a run starts from) ends the last run's history.
+        if (!Running) history.RunOver();
         if (plugin.Plans.Catalog is not { } catalog || catalog.Tribes is not { Tribes.Count: > 0 } data || !Game.Ready) return TribePlan.Empty;
         try
         {
             var accepted = Game.Accepted(data);
             var slots = Game.DailySlots();
-            var who = Who();
+            var who = excluded != null && Running ? Record() : Who();
             return TribePlanner.Plan(new TribePlanInput
             {
                 Days = data.Tribes.Select(t => Game.Today(data, t, accepted, slots)).ToList(),
@@ -82,23 +88,33 @@ internal sealed class TribePlanning
         }
     }
 
-    /// <summary>The classes that have been on since the run started, the first first; only the class on now while no run is going.</summary>
-    private readonly List<uint> history = new();
+    /// <summary>
+    /// The classes that were on when the run planned, since it started. A plan made while no run goes ends it, and a
+    /// run's start always makes one (<c>TribeRun.Start</c>), so the next run's first planning starts the list anew.
+    /// </summary>
+    private readonly ClassHistory history = new();
+
+    private bool Running => plugin.TribeLoop is { Active: true };
 
     /// <summary>
-    /// The player's classes as the choice of one for a quest sees them (<see cref="Game.Who"/>), with the classes that
-    /// have been on since the run started. The run changes class from visit to visit and plans again after each, so
-    /// without them a crafter's dailies would move to the best-geared crafter once a battle society's visit put the
-    /// combat job on (and the crystals fetched before the tour would be another recipe's).
+    /// The player's classes as the choice of one for a quest sees them (<see cref="Game.Who"/>), with the classes the
+    /// run that's going has planned on (none outside a run). Only a look: nothing is noted here, so the page, which
+    /// asks twice a second, doesn't put whatever class is on into the run's history.
     /// </summary>
-    public PlayerClasses Who()
+    public PlayerClasses Who() => Game.Who(plugin.Config) with { History = history.Seen(Running) };
+
+    /// <summary>
+    /// <see cref="Who"/> for the run's planning, which also notes the class that's on. The run changes class from visit
+    /// to visit and plans again after each; without the classes it planned on before, a crafter's dailies would move
+    /// to the best-geared crafter once a battle society's visit put the combat job on (and the crystals fetched before
+    /// the tour would be another recipe's), and a combat job that was on at the start would no longer take the battle
+    /// dailies after a crafter's visit.
+    /// </summary>
+    private PlayerClasses Record()
     {
         var who = Game.Who(plugin.Config);
-        var running = plugin.TribeLoop is { Active: true };
-        if (!running) history.Clear();
-        if (who.Current != 0 && !history.Contains(who.Current)) history.Add(who.Current);
-        who = who with { History = history.ToArray() };
-        if (running) Note(who);
+        who = who with { History = history.Note(who.Current) };
+        Note(who);
         return who;
     }
 

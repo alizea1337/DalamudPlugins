@@ -147,6 +147,51 @@ public class TribeBattlePlannerTests
     }
 
     [Fact]
+    public void ABattleSocietyNobodyCanFightForDoesntTurnTheAutomaticGoalToRankUp()
+    {
+        // Every crafter society at its top rank, a battle society below its own, no goal picked, no combat job and
+        // on a crafter: all battle dailies are left out, so the day is for currency, as it was before the battle
+        // societies were the run's.
+        var days = new[] { CrafterDay(YokHuy, 8, needed: 0), BattleDay(Kojin, 5, 60) };
+        var plan = Plan(days, Classes(Job(Pld, 90)), combatJob: 0);
+        Assert.Equal(TribeGoal.Currency, plan.Goal);
+        Assert.Equal(new[] { YokHuy }, plan.Visits.Select(v => v.Tribe.Id).ToArray());
+        // The same when the job picked is too low for all of its dailies, or has no gearset to change to.
+        Assert.Equal(TribeGoal.Currency, Plan(days, Classes(Job(Pld, 55))).Goal);
+        Assert.Equal(TribeGoal.Currency, Plan(days, Classes(Job(Pld, 90, gearset: false))).Goal);
+        // With a job that can fight for it, it counts: picked, or the one that's on.
+        Assert.Equal(TribeGoal.RankUp, Plan(days, Classes(Job(Pld, 90))).Goal);
+        Assert.Equal(TribeGoal.RankUp, Plan(days, Classes(Job(War, 90)), current: War, combatJob: 0).Goal);
+        // In a run that started on that job it still counts after a crafter's visit put the crafter on.
+        Assert.Equal(TribeGoal.RankUp, Plan(days, Classes(Job(War, 90)), current: Crp, combatJob: 0, history: new[] { War, Crp }).Goal);
+        // A goal that was picked stays.
+        Assert.Equal(TribeGoal.RankUp, Plan(days, Classes(Job(Pld, 90)), combatJob: 0, goal: TribeGoal.RankUp).Goal);
+    }
+
+    [Fact]
+    public void ThenTheCurrencyOrderStillPutsTheGiversThatPayNoneLast()
+    {
+        // An ARR battle society below its top rank that nobody can fight for, and the Ixal at their top rank with a
+        // giver whose dailies pay no Oaknots: under the automatic goal (Currency) that giver comes last.
+        var paying = Giver(501, 5);
+        var unpaid = Giver(500, 1, pays: false);
+        var ixal = new TribeToday(Society(Ixal, TribeKind.Crafter, 7, unpaid, paying), 7, false, 0, 0, false, new[]
+        {
+            new GiverToday(unpaid, Enumerable.Range(1, 3).Select(i => Open(Crafted(Ixal, (ushort)(1480 + i), unpaid.NpcId, 1))).ToArray(), 0),
+            new GiverToday(paying, Enumerable.Range(1, 3).Select(i => Open(Crafted(Ixal, (ushort)(1490 + i), paying.NpcId, 1))).ToArray(), 0),
+        });
+        var days = new[] { ArrDay(Amaljaa, 3), ixal, CrafterDay(YokHuy, 8, needed: 0) };
+        var plan = Plan(days, Classes(Job(Pld, 90)), combatJob: 0, allowances: 6);
+        Assert.Equal(TribeGoal.Currency, plan.Goal);
+        Assert.Equal(new uint[] { 501, YokHuy * 100 }, plan.Visits.Select(v => v.Giver.NpcId).ToArray());
+        Assert.Equal(3, plan.LeftOut.Count(l => l.Tribe.Id == Ixal && l.Reason.EndsWith("so they come last under Currency")));
+        // With a combat job the ARR society can be ranked up: Rank up, which has no such order.
+        var ranked = Plan(days, Classes(Job(Pld, 90)), allowances: 6);
+        Assert.Equal(TribeGoal.RankUp, ranked.Goal);
+        Assert.DoesNotContain(ranked.LeftOut, l => l.Reason.EndsWith("so they come last under Currency"));
+    }
+
+    [Fact]
     public void TheAllowancesAreSharedByBattleAndCrafterSocieties()
     {
         // Five societies with three dailies each, twelve allowances: the first four in the tour's order.
@@ -297,8 +342,19 @@ public class TribeBattlePlannerTests
         var classes = Classes(Job(Pld, 100), Job(War, 64), Job(Whm, 70));
         var plan = Plan(new[] { BattleDay(Kojin, 3, 60), CrafterDay(YokHuy, 3) }, classes, goal: TribeGoal.Levelling);
         Assert.Equal(Whm, plan.Visits.Single(v => v.Tribe.Id == Kojin).ClassJob);
-        // The crafter's dailies still go to the lowest crafter (all are 100 here: the first).
-        Assert.Equal(Crp, plan.Visits.Single(v => v.Tribe.Id == YokHuy).ClassJob);
+        // The crafter's dailies still go to the lowest crafter (all are 100 here: the best geared of them, Weaver).
+        Assert.Equal(Wvr, plan.Visits.Single(v => v.Tribe.Id == YokHuy).ClassJob);
+    }
+
+    [Fact]
+    public void LevellingBetweenJobsOfOneLevelTakesTheMonsterDropsJobThenTheBetterGeared()
+    {
+        // Three jobs at 70 for a level 60 quest: the one picked under Monster drops, whatever its row or gear.
+        var day = new[] { BattleDay(Kojin, 3, 60) };
+        var jobs = Classes(new ClassInfo(Pld, 70, true, 400, Fights: true), new ClassInfo(War, 70, true, 420, Fights: true), new ClassInfo(Whm, 70, true, 380, Fights: true));
+        Assert.Equal(Whm, Plan(day, jobs, combatJob: Whm, goal: TribeGoal.Levelling).Visits.Single().ClassJob);
+        // None of them picked: the better geared (Warrior), not the lowest row (Paladin).
+        Assert.Equal(War, Plan(day, jobs, combatJob: 0, goal: TribeGoal.Levelling).Visits.Single().ClassJob);
     }
 
     [Fact]

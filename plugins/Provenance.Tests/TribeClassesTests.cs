@@ -165,16 +165,55 @@ public class TribeDayTests
         Assert.False(new AcceptedTribeQuest(Daily(1, 1, 3), 1, 8, true).Leftover);
     }
 
+    private static readonly IReadOnlySet<uint> Ticked = new HashSet<uint>();
+    private static readonly PlayerClasses Crafter = new(new[] { new ClassInfo(8, 100, true, 700) }, 8);
+
+    /// <summary>A society at a rank whose one giver offers a crafter's daily (level 90) in a state.</summary>
+    private static TribeToday At(int rank, OfferState state = OfferState.Open, uint id = 20, StepKinds steps = StepKinds.Craft)
+    {
+        var g = Giver(1, 3);
+        var daily = Daily(1, 1, 3) with { Steps = steps };
+        return new TribeToday(Society(new[] { g }, new[] { daily }) with { Id = id }, rank, false, 0, 0, false,
+            new[] { new GiverToday(g, new[] { new TribeOffer(daily, state) }, state == OfferState.Open ? 0 : 1) });
+    }
+
     [Fact]
     public void TheAutomaticGoalRanksUpUntilEverySocietyIsAtTheTop()
     {
+        Assert.Equal(TribeGoal.RankUp, TribeGoals.Effective(null, new[] { At(8), At(5) }, Ticked, Crafter));
+        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(8), At(8) }, Ticked, Crafter));
+        Assert.Equal(TribeGoal.Levelling, TribeGoals.Effective(TribeGoal.Levelling, new[] { At(5) }, Ticked, Crafter));
+        // A locked society doesn't count, nor one the player unticked.
+        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(0) }, Ticked, Crafter));
+        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(8), At(5, id: 19) }, new HashSet<uint> { 19 }, Crafter));
+        Assert.Equal(new uint[] { 20 }, TribeGoals.Taking(new[] { At(8), At(5, id: 19), At(0, id: 18) }, new HashSet<uint> { 19 }).Select(d => d.Tribe.Id).ToArray());
+    }
+
+    [Fact]
+    public void ASocietyTheRunCantTakeADailyOfDoesntCountTowardsTheAutomaticGoal()
+    {
+        // Below its top rank, but nobody is at the daily's level: the run gains it no rank.
+        var low = new PlayerClasses(new[] { new ClassInfo(8, 80, true, 600) }, 8);
+        Assert.False(TribeGoals.CanTake(At(5), low));
+        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(8), At(5) }, Ticked, low));
+        Assert.True(TribeGoals.CanTake(At(5), Crafter));
+        // Nothing offered today (ranked up, and the rank has no dailies of its own): nothing to take.
         var g = Giver(1, 3);
-        TribeToday At(int rank) => new(Society(new[] { g }, Array.Empty<TribeQuest>()), rank, false, 0, 0, false, Array.Empty<GiverToday>());
-        Assert.Equal(TribeGoal.RankUp, TribeGoals.Effective(null, new[] { At(8), At(5) }));
-        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(8), At(8) }));
-        Assert.Equal(TribeGoal.Levelling, TribeGoals.Effective(TribeGoal.Levelling, new[] { At(5) }));
-        // A locked society doesn't count.
-        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(0) }));
+        var none = new TribeToday(Society(new[] { g }, Array.Empty<TribeQuest>()), 5, true, 0, 0, false, new[] { new GiverToday(g, Array.Empty<TribeOffer>(), 3) });
+        Assert.False(TribeGoals.CanTake(none, Crafter));
+        // Its only daily is the player's to do (a stealth quest; a /say one when those are left out).
+        Assert.False(TribeGoals.CanTake(At(5, steps: StepKinds.Stealth), Crafter));
+        Assert.True(TribeGoals.CanTake(At(5, steps: StepKinds.Say), Crafter));
+        Assert.False(TribeGoals.CanTake(At(5, steps: StepKinds.Say), Crafter, leaveOutSay: true));
+        Assert.Equal(TribeGoal.Currency, TribeGoals.Effective(null, new[] { At(5, steps: StepKinds.Say) }, Ticked, Crafter, leaveOutSay: true));
+    }
+
+    [Fact]
+    public void TheAutomaticGoalDoesntChangeAsTheDaysDailiesGetDone()
+    {
+        // The society's dailies are in the journal, then done: it's still the one the day ranks up.
+        Assert.Equal(TribeGoal.RankUp, TribeGoals.Effective(null, new[] { At(8), At(5, OfferState.Accepted) }, Ticked, Crafter));
+        Assert.Equal(TribeGoal.RankUp, TribeGoals.Effective(null, new[] { At(8), At(5, OfferState.Done) }, Ticked, Crafter));
     }
 
     [Fact]
