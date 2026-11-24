@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Tribes: some crafting dailies only count their item made high quality: 59 of them, most of the Ixal's and\n  some of the Moogles', Namazu's, Dwarves', Loporrits' and Yok Huy's. The run crafted every daily the fastest\n  way, so the item came out normal quality unless the recipe was easy enough to fill the quality bar by\n  accident, and the run then talked to the giver over and over (The Heart of Tankiness). It now reads from\n  the quest's own script which dailies want that, crafts those for full quality, and counts and hands in only\n  the high-quality ones. When one comes out normal quality all the same, it fetches new materials and tries\n  again; after two tries it asks you.\n- The Tribes page says \"high quality only\" on those dailies.\r\n",
+    "Changelog": "- Other automation plugins: Provenance now deals with the three that get in a run's way most.\n  - YesAlready and TextAdvance stand aside while a run is working (orders, Cosmic Exploration, Custom\n    Deliveries, Tribes) and carry on as soon as it pauses, finishes or stops. Provenance uses their own\n    \"stand aside\" lists for this, so their settings stay as they are. *Pause YesAlready and TextAdvance while a\n    run is going* (Settings, Security) turns it off.\n  - Questionable can't be paused from outside, so a run won't start while it's running its quests, and a run\n    that is going stops when Questionable starts.\n  - The Security page has an \"Other plugins\" card that says what each of the three is doing right now, and the\n    run pages show a warning only when one of them is actually in the way.\n  - The bug report says which of the three are loaded, running and paused.\n- The README and the FAQ list the other plugins whose automatic features are best switched off during a run.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.22.4.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.4/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.4/latest.zip",
+    "AssemblyVersion": "0.22.5.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.5/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.22.5/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795469074
+    "LastUpdate": 1795547616
   }
 ]
