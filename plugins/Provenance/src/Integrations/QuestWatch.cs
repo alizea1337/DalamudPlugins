@@ -35,18 +35,32 @@ namespace Provenance.Integrations;
 /// V8 what GetTodoArgs returns for each line ("todo");
 /// V9 that IsActive and the icon are read on every look ("objects", and the session ending there if not);
 /// V10 the menus a quest shows and whether one comes back ("menu").
+///
+/// For a quest with enemies (the battle societies' dailies, the Ixal's fights) it also writes what the enemy filter
+/// (<see cref="EnemyRules"/>) goes by, so the filter can be checked from a bug report before the run fights by it:
+/// "enemies" is the quest's data (kinds, names, the sequence each is active in, what's done with it, its spawn points);
+/// "mobs" lists the hostile mobs within 60 yalms (ten at most, nearest first) whenever one comes, goes or changes:
+/// kind and name ids, the quest's own icon, whether its handler holds it, the icon drawn, its FATE, whether it's
+/// subdued (waiting for the quest's item), whom it targets and who hit it first, and the filter's verdict with the
+/// reason. In combat the quest's script isn't asked, so the icon and "held" are then those of the last calm look
+/// (the line says so). "would Fight ..." is what the run would do about them.
 /// </remarks>
 internal static class QuestWatch
 {
     /// <summary>How often the watch looks.</summary>
     private static readonly TimeSpan Every = TimeSpan.FromSeconds(0.5);
+    /// <summary>The mobs around a quest with enemies: within this many yalms, this many at most, a line this often at most.</summary>
+    private const float MobsWithin = 60f;
+    private const int MobsMost = 10;
+    private static readonly TimeSpan MobsEvery = TimeSpan.FromSeconds(1.5);
 
     private sealed class Watched
     {
         public QuestScript Script = null!;
         public readonly StepMemory Memory = new();
         public StepSnapshot? Last;
-        public string Header = "", Todos = "", Objects = "", Markers = "", Plan = "";
+        public string Header = "", Todos = "", Objects = "", Markers = "", Plan = "", Mobs = "";
+        public DateTime NextMobs;
     }
 
     private static readonly Dictionary<uint, Watched> watched = new();
@@ -110,7 +124,7 @@ internal static class QuestWatch
                 Write($"{gone - 65536}: no longer in the journal (completed today: {Completed(gone)})");
                 watched.Remove(gone);
             }
-            foreach (var q in quests) Look(q, now);
+            foreach (var q in quests) Look(q, now, plugin.Config.Combat.ClassJob);
             Said();
             Surroundings();
             Settle(now);
@@ -170,7 +184,8 @@ internal static class QuestWatch
         return qm != null && qm->IsDailyQuestCompleted((ushort)(row - 65536));
     }
 
-    private static void Look(uint row, DateTime now)
+    /// <param name="combatJob">The job under Settings, Monster drops: what a fight of a quest accepted as a crafter would be done on.</param>
+    private static void Look(uint row, DateTime now, uint combatJob)
     {
         if (!watched.TryGetValue(row, out var w))
         {
@@ -180,12 +195,22 @@ internal static class QuestWatch
                   + $"key items [{string.Join(",", script.KeyItems.Select(k => $"{k.Id}{(k.Usable ? $"(act {k.Action} {(k.Ground ? "ground" : k.Self ? "self" : "target")} r{k.Range})" : "")}"))}], "
                   + $"mount {(script.Mount is { } m ? $"{m.Mount}/{m.Action}{(m.Line ? " line" : "")}{(m.CanFly ? " flies" : "")}" : "none")}, say [{string.Join(",", script.Say.Select(kv => $"{kv.Key}:\"{kv.Value}\""))}], "
                   + $"emotes [{string.Join(",", script.Emotes.Select(kv => $"{kv.Key}:{kv.Value.Command}"))}], carry {script.CarryStatus}; reading its objects through its event handler (IsActive, icon) twice a second");
+            if (script.Enemies.Count > 0)
+                Write($"{row - 65536}: enemies [{QuestSteps.EnemyData(script)}], key item on objects [{string.Join(",", script.ItemObjects.Select(o => $"{o.Object}@{o.Sequence}"))}]; "
+                      + $"the hostile mobs within {MobsWithin:0} yalms are listed as they change, with what the enemy filter makes of each");
         }
         if (QuestSteps.Snapshot(w.Script) is not { } s) return;
-        // The script wasn't asked (the game is busy): nothing to compare.
-        if (!s.ScriptRead) return;
-        w.Last = s;
         var id = row - 65536;
+        // The mobs around are read whatever the game is doing (their own fields; the quest's script isn't asked for them).
+        Mobs(w, s, id, now);
+        // The script wasn't asked (the game is busy, or in combat): nothing more to compare. In combat, what the run
+        // would do about what attacks is still worth a line.
+        if (!s.ScriptRead || s.Remembered)
+        {
+            if (s.InCombat && !s.Busy) Would(w, s, id, now, combatJob);
+            return;
+        }
+        w.Last = s;
         w.Memory.Observe(s.Signature(), now);
 
         var header = $"seq {s.Sequence} vars [{Convert.ToHexString(s.Variables)}] accepted as {s.AcceptJob}, now {s.Job}";
@@ -210,11 +235,34 @@ internal static class QuestWatch
         var markers = string.Join("; ", s.Markers.Select(k => $"zone {k.Territory} {V(k.Position)} r {k.Radius:0.#} icon {k.Icon} level {k.Level} data {k.DataId}"));
         if (markers != w.Markers) { w.Markers = markers; Write($"{id}: markers {(markers.Length == 0 ? "(none)" : markers)}"); }
 
-        // What the stepper would do now (never done here). Positions left out of the comparison: a wandering target
-        // doesn't write a line per step it takes.
-        var plan = StepRules.Decide(w.Script, s, w.Memory, now);
-        var key = $"{plan.Kind}|{plan.Target?.BaseId}|{plan.Level}|{plan.Id}|{plan.Text}|{plan.What}";
+        Would(w, s, id, now, combatJob);
+    }
+
+    /// <summary>
+    /// What the stepper would do now (never done here). Positions left out of the comparison: a wandering target
+    /// doesn't write a line per step it takes.
+    /// </summary>
+    private static void Would(Watched w, StepSnapshot s, uint id, DateTime now, uint combatJob)
+    {
+        var plan = StepRules.Decide(w.Script, s, w.Memory, now, combatJob: combatJob);
+        var key = $"{plan.Kind}|{plan.Target?.BaseId}|{plan.Enemy?.Id}|{plan.Level}|{plan.Id}|{plan.Text}|{plan.What}";
         if (key != w.Plan && plan.Kind != StepKind.Wait) { w.Plan = key; Write($"{id}: would {plan}"); }
+    }
+
+    /// <summary>
+    /// For a quest with enemies (or when something attacks): the hostile mobs within <see cref="MobsWithin"/> yalms, with
+    /// everything the enemy filter goes by and its verdict for each (<see cref="QuestSteps.EnemyLine"/>), written when one
+    /// comes, goes or changes, and not more often than <see cref="MobsEvery"/>.
+    /// </summary>
+    private static void Mobs(Watched w, StepSnapshot s, uint id, DateTime now)
+    {
+        if (w.Script.Enemies.Count == 0 && !s.Hostiles.Any(e => e.AttacksMe)) return;
+        var text = QuestSteps.EnemiesSeen(w.Script, s, MobsWithin, MobsMost, out var key);
+        if (key == w.Mobs || now < w.NextMobs) return;
+        w.Mobs = key;
+        w.NextMobs = now + MobsEvery;
+        Write($"{id}: mobs at seq {s.Sequence} vars [{Convert.ToHexString(s.Variables)}], you on job {s.Job} ({(s.Fighter ? "fights" : "doesn't fight")})"
+              + $"{(s.InCombat ? ", in combat (the quest's icon and \"held\" are the last calm look's)" : "")}: {text}");
     }
 
     /// <summary>The character and the windows, for all watched quests: riding, carrying, menus, questions, the reward window, the map's slots.</summary>
@@ -335,6 +383,28 @@ internal static class QuestWatch
         pending = null;
         var moved = watched.Where(kv => p.Before.TryGetValue(kv.Key, out var before) && before != kv.Value.Memory.Signature).Select(kv => kv.Key - 65536).ToList();
         Write($"progress after that ({p.What}): {(moved.Count > 0 ? "yes, " + string.Join(",", moved) : "none")}");
+    }
+
+    /// <summary>
+    /// For a bug report made next to a quest's enemies (with or without the watch on, in a run or by hand): each allied
+    /// society quest in the journal that has enemies, with its enemy data and the mobs around now as the enemy filter
+    /// sees them. Nothing when not logged in, between areas or in a duty; the quest's script is asked only when the game
+    /// is idle (<see cref="QuestSteps.Snapshot"/>).
+    /// </summary>
+    public static List<string> DescribeEnemies()
+    {
+        var list = new List<string>();
+        if (!Services.ClientState.IsLoggedIn || Services.Objects.LocalPlayer == null || QuestSteps.Loading || InDuty) return list;
+        foreach (var row in SocietyQuests())
+        {
+            if (QuestSteps.Script(row) is not { Enemies.Count: > 0 } script) continue;
+            list.Add($"{row - 65536} \"{script.Name}\": enemies [{QuestSteps.EnemyData(script)}], key item on objects [{string.Join(",", script.ItemObjects.Select(o => $"{o.Object}@{o.Sequence}"))}]");
+            if (QuestSteps.Snapshot(script) is not { } s) continue;
+            list.Add($"  seq {s.Sequence} vars [{Convert.ToHexString(s.Variables)}], on job {s.Job} ({(s.Fighter ? "fights" : "doesn't fight")}), "
+                     + $"{(s.InCombat ? "in combat (the quest's icon and \"held\" are the last calm look's)" : s.ScriptRead ? "script read" : "script not read (the game is busy)")}; "
+                     + $"mobs within {MobsWithin:0} yalms: {QuestSteps.EnemiesSeen(script, s, MobsWithin, MobsMost, out _)}");
+        }
+        return list;
     }
 
     private static string V(Vector3 v) => $"{v.X:0.#},{v.Y:0.#},{v.Z:0.#}";

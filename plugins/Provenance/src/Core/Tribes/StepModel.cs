@@ -38,7 +38,62 @@ public sealed record KeyItemFact(uint Id, string Name, uint Action, bool Ground,
 /// <param name="EffectRange">How far the action reaches around (or ahead of) the rider.</param>
 /// <param name="Line">The action goes out in a line ahead of the rider: face the target first.</param>
 /// <param name="CanFly">The mount may fly (the Mount sheet gives it a flying condition).</param>
-public sealed record MountFact(uint Mount, uint Action, float Range, float EffectRange, bool Line, bool CanFly);
+public sealed record MountFact(uint Mount, uint Action, float Range, float EffectRange, bool Line, bool CanFly)
+{
+    /// <summary>
+    /// Every action the quest names for the mount (<c>ACTION0</c>, <c>ACTION1</c> ...), the first being
+    /// <see cref="Action"/>. The Arkasodara's hippo cart has three (a colour of gulal per target): the next one is
+    /// tried on a target the one before did nothing to. Empty means just <see cref="Action"/>.
+    /// </summary>
+    public IReadOnlyList<uint> Others { get; init; } = Array.Empty<uint>();
+    /// <summary>The action is thrown at a place on the ground (the target's), not used on the target itself.</summary>
+    public bool Ground { get; init; }
+
+    /// <summary>The action for the nth try at a target: the first, then the others in turn.</summary>
+    public uint ActionFor(int tries)
+    {
+        if (Action == 0 || Others.Count == 0 || tries <= 0) return Action;
+        var all = new List<uint> { Action };
+        foreach (var o in Others)
+            if (o != 0 && !all.Contains(o)) all.Add(o);
+        return all[tries % all.Count];
+    }
+}
+
+/// <summary>A row of the quest's listeners (<c>Quest.QuestListenerParams</c>), as the engine reads it.</summary>
+/// <param name="Listener">
+/// What the quest's script listens to: below 1,000,000 a BNpcBase (an enemy), 1,0xx,xxx an ENpc, 2,0xx,xxx an EObj,
+/// 5,000,000 an area to walk into.
+/// </param>
+/// <param name="ConditionType">
+/// For an enemy: 1 when <paramref name="ConditionValue"/> is the BNpcName of a field mob whose defeat counts, 3 when
+/// it's the <c>Level</c> row a mob the quest puts there appears at.
+/// </param>
+/// <param name="Kind"><c>QuestUInt8A</c>: 1 talk, 5 defeat, 8 use a key item on it, 9 defeat for a key item, 10 walk into the area.</param>
+/// <param name="Sequence"><c>ActorSpawnSeq</c>: the sequence it's active in.</param>
+public readonly record struct ListenerRow(uint Listener, byte ConditionType, uint ConditionValue, byte Kind, byte Sequence);
+
+/// <summary>What a quest wants done with an enemy (the listener's <c>QuestUInt8A</c>).</summary>
+public enum EnemyTask
+{
+    /// <summary>Defeat it (5).</summary>
+    Defeat,
+    /// <summary>Defeat it for the key item it leaves behind (9).</summary>
+    DefeatForItem,
+    /// <summary>Use a key item on it (8): once it's subdued, or before the fight for an item thrown from afar.</summary>
+    UseItem,
+}
+
+/// <summary>An enemy of a quest, from its listeners and its <c>ENEMY</c> script arguments.</summary>
+/// <param name="Base">Its BNpcBase (the game object's base id).</param>
+/// <param name="Name">The BNpcName a field mob must have (0: any of that base).</param>
+/// <param name="Sequence">The sequence it's active in (0 when the data doesn't say: any but the report).</param>
+/// <param name="Field">
+/// A mob of the open world whose defeat counts (anyone may get to it first); otherwise the quest puts it there after a
+/// trigger (an object used, an area walked into, a key item).
+/// </param>
+/// <param name="Spawn">Where a mob the quest puts there appears (null for a field mob, or when the data has no place).</param>
+public sealed record QuestEnemy(uint Base, uint Name, byte Sequence, bool Field, EnemyTask Task, ScriptSpot? Spawn = null);
 
 /// <summary>An emote a to-do line asks for ("/psych"), with the command as the client spells it.</summary>
 public sealed record EmoteFact(ushort Emote, string Command);
@@ -92,6 +147,13 @@ public sealed class QuestScript
     /// <summary>The quest's own menu questions and answers (its Q and A text rows), in the client's language.</summary>
     public IReadOnlyCollection<string> MenuPrompts { get; init; } = Array.Empty<string>();
     public IReadOnlyCollection<string> MenuAnswers { get; init; } = Array.Empty<string>();
+    /// <summary>The quest's enemies (empty for most crafter and gatherer dailies): see <see cref="EnemyRules"/>.</summary>
+    public IReadOnlyList<QuestEnemy> Enemies { get; init; } = Array.Empty<QuestEnemy>();
+    /// <summary>
+    /// The NPCs and objects (not enemies) the quest's listeners say a key item is used on, with the sequence. When a
+    /// sequence names some, a key item is used on those only; when it names only enemies, on no object at all.
+    /// </summary>
+    public IReadOnlyList<(byte Sequence, uint Object)> ItemObjects { get; init; } = Array.Empty<(byte, uint)>();
 
     public IEnumerable<ScriptTodo> TodosAt(byte sequence) => Todos.Where(t => t.Sequence == sequence);
 }
@@ -125,6 +187,48 @@ public sealed record StepMarker(uint Territory, Vector3 Position, float Radius, 
     public bool IsArea => Radius > 1.5f;
 }
 
+/// <summary>Who a mob has as its target.</summary>
+public enum EnemyTarget { None, You, YourChocobo, OtherPlayer, Other }
+
+/// <summary>
+/// A mob around the character, from the game's object table: every hostile one in view, and the quest's own kinds
+/// even when they've stopped being hostile (subdued, waiting for the quest's item). Its own fields are read whatever
+/// the game is doing; what the quest's handler says of it (<see cref="Icon"/>, <see cref="Held"/>) comes from the
+/// last calm look, since the handler is asked nothing in combat.
+/// </summary>
+/// <param name="Id">The game object id (to target it).</param>
+/// <param name="BaseId">Its BNpcBase.</param>
+/// <param name="NameId">Its BNpcName.</param>
+public sealed record StepEnemy(ulong Id, uint BaseId, uint NameId, string Name, Vector3 Position)
+{
+    /// <summary>Its hitbox radius: attacks and items reach that much further.</summary>
+    public float Radius { get; init; }
+    public bool Hostile { get; init; }
+    public bool Targetable { get; init; } = true;
+    /// <summary>The mob itself is in combat (with anyone).</summary>
+    public bool InCombat { get; init; }
+    public EnemyTarget Target { get; init; }
+    /// <summary>Subdued: it takes no more damage and waits for the quest's item (<c>Character.ActorControlFlags &amp; 0x40</c>).</summary>
+    public bool Weakened { get; init; }
+    /// <summary>The FATE it belongs to (0: none).</summary>
+    public uint Fate { get; init; }
+    /// <summary>The icon this quest's handler gives it (0: none, or the handler doesn't hold it), as of the last calm look.</summary>
+    public uint Icon { get; init; }
+    /// <summary>The quest's handler holds it among its objects, as of the last calm look.</summary>
+    public bool Held { get; init; }
+    /// <summary>The icon the game draws over its nameplate now, from whichever handler (0: none).</summary>
+    public uint Drawn { get; init; }
+    /// <summary>Its health in percent.</summary>
+    public int Hp { get; init; } = 100;
+    /// <summary>The player who first hit it, as the game keeps it (0: nobody): for the log only, its meaning isn't confirmed.</summary>
+    public ulong Tagger { get; init; }
+
+    /// <summary>It fights the character or the character's chocobo.</summary>
+    public bool AttacksMe => InCombat && Target is EnemyTarget.You or EnemyTarget.YourChocobo;
+    /// <summary>It fights someone else: theirs, not the run's.</summary>
+    public bool FightsOther => InCombat && Target is EnemyTarget.OtherPlayer or EnemyTarget.Other;
+}
+
 /// <summary>A to-do line of the current sequence, as the game reports it.</summary>
 /// <param name="Have">What the game counts so far (items in the bags or targets done).</param>
 /// <param name="Needed">How many it wants.</param>
@@ -155,17 +259,32 @@ public sealed class StepSnapshot
     /// <summary>The mount ridden (0 when not mounted or unknown).</summary>
     public uint Mount { get; init; }
     public bool Flying { get; init; }
-    /// <summary>Casting, in an event or cutscene, crafting, gathering, in combat, between areas: nothing is started now.</summary>
-    public bool Busy { get; init; }
     /// <summary>
-    /// The quest's script was asked (its to-do lines and objects are read). False while the game is busy, just after a
-    /// zone change or while the script isn't loaded: the lines and objects are then empty and nothing is decided.
+    /// Casting, in an event or cutscene, crafting, gathering, between areas: nothing is started now. Being in combat
+    /// isn't in it (<see cref="InCombat"/>): attacked, the run fights back or carries on.
+    /// </summary>
+    public bool Busy { get; init; }
+    /// <summary>In combat, as the game counts it. The quest's script is asked nothing then.</summary>
+    public bool InCombat { get; init; }
+    /// <summary>The class on now fights: a combat job the basic combat has actions for.</summary>
+    public bool Fighter { get; init; }
+    /// <summary>
+    /// The quest's script was asked (its to-do lines and objects are read), or they're the last calm look's
+    /// (<see cref="Remembered"/>). False while the game is busy, in combat, just after a zone change or while the
+    /// script isn't loaded: the lines and objects are then empty.
     /// </summary>
     public bool ScriptRead { get; init; } = true;
+    /// <summary>
+    /// The to-do lines and objects are those of the last calm look: the character is in combat (the script isn't
+    /// asked) and the quest hasn't moved since. A class that doesn't fight carries on by them.
+    /// </summary>
+    public bool Remembered { get; init; }
 
     public IReadOnlyList<TodoProgress> Todos { get; init; } = Array.Empty<TodoProgress>();
     public IReadOnlyList<StepObject> Objects { get; init; } = Array.Empty<StepObject>();
     public IReadOnlyList<StepMarker> Markers { get; init; } = Array.Empty<StepMarker>();
+    /// <summary>The mobs around (hostile ones, and the quest's own kinds), read whatever the game is doing.</summary>
+    public IReadOnlyList<StepEnemy> Hostiles { get; init; } = Array.Empty<StepEnemy>();
     /// <summary>Counts of the quest's items in the bags (normal and high quality together; key items too).</summary>
     public IReadOnlyDictionary<uint, int> Items { get; init; } = new Dictionary<uint, int>();
     public IReadOnlySet<uint> Statuses { get; init; } = new HashSet<uint>();

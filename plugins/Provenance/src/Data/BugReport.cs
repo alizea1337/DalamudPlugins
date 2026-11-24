@@ -253,6 +253,16 @@ internal static class BugReport
                 foreach (var n in tribePlan.Notices) Line($"  notice {n.Tribe.Name}: {n.Text}");
                 foreach (var e in loop.Lines.Reverse().Take(25)) Line($"{e.At:HH:mm:ss} {(e.Problem ? "[!] " : "")}{e.Text}");
             });
+
+            Part("The society quests' enemies", () =>
+            {
+                // The society quests in the journal that fight: their enemy data, and the mobs around right now with
+                // what the run's enemy filter makes of each. A report made next to them shows whether the filter holds.
+                var lines = QuestWatch.DescribeEnemies();
+                if (lines.Count == 0) return;
+                Section("Quest enemies (allied society quests in the journal)");
+                foreach (var l in lines) Line(l);
+            });
         }
 
         // ---------------------------------------------------------------- Cosmic Exploration

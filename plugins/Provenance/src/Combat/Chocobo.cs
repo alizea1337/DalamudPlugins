@@ -34,4 +34,24 @@ internal static unsafe class Chocobo
         var am = ActionManager.Instance();
         return am != null && Out && am->UseAction(ActionType.BuddyAction, buddyAction);
     }
+
+    /// <summary>
+    /// One step of getting the chocobo ready before a fight, when it's wanted: summoned when it isn't out (and can be),
+    /// then put in its stance. Returns how many seconds to give the step, or 0 when there's nothing (more) to do.
+    /// </summary>
+    /// <param name="stanceSet">Kept by the caller: the stance was set since the chocobo came out.</param>
+    public static double Ready(bool wanted, uint stance, ref bool stanceSet)
+    {
+        if (!wanted) return 0;
+        if (!Out)
+        {
+            stanceSet = false;
+            if (!CanSummon) return 0;
+            Summon();
+            return 2.5;
+        }
+        if (stanceSet) return 0;
+        stanceSet = SetStance(stance);
+        return 1;
+    }
 }

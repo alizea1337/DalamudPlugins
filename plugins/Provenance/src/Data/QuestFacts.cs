@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using Lumina.Excel.Sheets;
+using Provenance.Core.Tribes;
 
 namespace Provenance.Data;
 
@@ -38,6 +39,11 @@ internal sealed class QuestFacts
     /// <summary>The script's named arguments in sheet order (empty names left out).</summary>
     public IReadOnlyList<(string Name, uint Value)> Args { get; private init; } = Array.Empty<(string, uint)>();
     public IReadOnlyList<QuestTodo> Todos { get; private init; } = Array.Empty<QuestTodo>();
+    /// <summary>
+    /// What the quest's script listens to (<c>Quest.QuestListenerParams</c>, empty rows left out): its enemies with
+    /// what's done with each, and the NPCs and objects its steps are about. See <see cref="EnemyRules"/>.
+    /// </summary>
+    public IReadOnlyList<ListenerRow> Listeners { get; private init; } = Array.Empty<ListenerRow>();
 
     private readonly Lazy<IReadOnlyDictionary<string, string>> text;
     private readonly Lazy<bool> wantsHq;
@@ -86,6 +92,9 @@ internal sealed class QuestFacts
             if (t.ToDoCompleteSeq != 0 || spots.Count > 0) todos.Add(new QuestTodo(i, t.ToDoCompleteSeq, t.ToDoQty, spots));
             i++;
         }
+        var listeners = new List<ListenerRow>();
+        foreach (var l in q.QuestListenerParams)
+            if (l.Listener != 0) listeners.Add(new ListenerRow(l.Listener, l.ConditionType, l.ConditionValue, l.QuestUInt8A, l.ActorSpawnSeq));
         return new QuestFacts
         {
             RowId = rowId,
@@ -93,8 +102,15 @@ internal sealed class QuestFacts
             Name = q.Name.ExtractText(),
             Args = args,
             Todos = todos,
+            Listeners = listeners,
         };
     }
+
+    /// <summary>A <c>Level</c> row as a spot: where, in which zone, and what it places there (an enemy's BNpcBase for a spawn point). Null when there's no such row.</summary>
+    public static ScriptSpot? LevelSpot(uint levelRow)
+        => levelRow != 0 && Services.Data.GetExcelSheet<Level>().GetRowOrDefault(levelRow) is { } l
+            ? new ScriptSpot(l.RowId, l.Territory.RowId, new Vector3(l.X, l.Y, l.Z), l.Object.RowId, l.Object.RowId == 0)
+            : null;
 
     /// <summary>The value of a named argument (<c>"RITEM1"</c>), or null.</summary>
     public uint? Arg(string name)
