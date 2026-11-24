@@ -256,8 +256,10 @@ internal static class BugReport
 
             Part("The society quests' enemies", () =>
             {
-                // The society quests in the journal that fight: their enemy data, and the mobs around right now with
-                // what the run's enemy filter makes of each. A report made next to them shows whether the filter holds.
+                // The society quests in the journal that fight: their enemy data, and the mobs around with what the
+                // run's enemy filter makes of each, as the hand watch saw them at its last look (half a second old at
+                // most while it's on; "nothing seen yet" otherwise). Nothing is asked of a quest's script from here:
+                // the report is written from the window's draw. A report made next to them shows whether the filter holds.
                 var lines = QuestWatch.DescribeEnemies();
                 if (lines.Count == 0) return;
                 Section("Quest enemies (allied society quests in the journal)");
