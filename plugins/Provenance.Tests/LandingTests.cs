@@ -16,6 +16,37 @@ public class LandingTests
     private static bool UnderTheRoof(Vector3 p) => MathF.Abs(p.X - Target.X) < 12 && MathF.Abs(p.Z - Target.Z) < 12;
 
     [Fact]
+    public void TheWalkInComesOutOfTheDoorNotTheWallNearestTheOpenSpot()
+    {
+        // The open spot is behind the building (south, -Z); the door is on its north side (+Z). The walking path goes
+        // round the building and in through the door, so the landing is just outside the door, 2 yalms out.
+        var path = new List<Vector3>
+        {
+            Target + new Vector3(0, 0, -16),   // the open spot behind it
+            Target + new Vector3(16, 0, -16),
+            Target + new Vector3(16, 0, 16),
+            Target + new Vector3(0, 0, 16),    // in front of the door
+            Target + new Vector3(0, 0, 0),     // the target, inside
+        };
+        var landing = Landing.DoorOut(path, UnderTheRoof);
+        Assert.NotNull(landing);
+        Assert.False(UnderTheRoof(landing!.Value));
+        Assert.Equal(Target.X, landing.Value.X, 3);
+        Assert.InRange(landing.Value.Z - Target.Z, 12 + Landing.PastDoor - 0.01f, 12 + Landing.PastDoor + Landing.DoorStep + 0.01f);
+    }
+
+    [Fact]
+    public void AShortWalkOutLandsOnItsStartAndACoveredOneHasNoLanding()
+    {
+        // Out of the door with less than 2 yalms of path left: the first open point.
+        var shortPath = new List<Vector3> { Target + new Vector3(0, 0, 12.5f), Target };
+        Assert.Equal(Target + new Vector3(0, 0, 12), Landing.DoorOut(shortPath, UnderTheRoof));
+        var covered = new List<Vector3> { Target + new Vector3(0, 0, 5), Target };
+        Assert.Null(Landing.DoorOut(covered, UnderTheRoof));
+        Assert.Null(Landing.DoorOut(new List<Vector3> { Target }, UnderTheRoof));
+    }
+
+    [Fact]
     public void ARingIsTwelvePointsAtItsRadiusAndTheTargetsHeight()
     {
         var ring = Landing.Ring(Target, 10).ToList();

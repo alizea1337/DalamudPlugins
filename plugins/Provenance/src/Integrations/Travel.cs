@@ -53,6 +53,8 @@ internal sealed unsafe partial class Travel
     private Vector2 firmamentFrom;
     private uint firmamentTo;
     private const float ShardRange = 3.5f;
+    /// <summary>The Firmament's aethernet shards (arriving at 4 yalms, using one failed: "You can't do that from there").</summary>
+    private const float FirmamentShardRange = 3f;
     /// <summary>The aethernet window open this long without the destination in it: give up.</summary>
     private static readonly TimeSpan ListPatience = TimeSpan.FromSeconds(6);
 
@@ -69,6 +71,10 @@ internal sealed unsafe partial class Travel
     private const float MaxRise = 3f;
     private DateTime landingSince;
     private bool dismountTried;
+    /// <summary>Arrived beside the target still in the air: landing first (talking from up there fails).</summary>
+    private DateTime airArrivalSince;
+    private DateTime airArrivalPress;
+    private static readonly TimeSpan AirArrivalPatience = TimeSpan.FromSeconds(5);
 
     private uint territory;
     private Vector2 approx;
@@ -139,9 +145,9 @@ internal sealed unsafe partial class Travel
 
     /// <summary>
     /// The rules for buildings and raised floors (Travel.Indoors.cs): out of a building on foot first, a target under a
-    /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to quest
-    /// NPCs (the Tribes run turns it on); off, a trip goes exactly as it always did (gathering under tree canopies, cliff
-    /// nodes, vendors, clients).
+    /// roof reached by an open spot near it, and never getting off in the air beside the target. For trips to NPCs
+    /// (quest NPCs, vendors, appraisers, delivery clients turn it on); off, a trip goes exactly as it always did
+    /// (gathering under tree canopies, cliff nodes).
     /// </summary>
     public bool RoofAware { get; set; }
 
@@ -167,6 +173,8 @@ internal sealed unsafe partial class Travel
         firmamentHop = false;
         landingSince = default;
         dismountTried = false;
+        airArrivalSince = default;
+        airArrivalPress = default;
         lastPath = null;
         pathFailNoted = false;
         ResetIndoors(trip: true);
@@ -428,10 +436,14 @@ internal sealed unsafe partial class Travel
         var flat = Vector2.Distance(new Vector2(me.X, me.Z), new Vector2(target.X, target.Z));
         // Height matters once the real target (an NPC, a crystal) is in sight: above it on a roof or a mount is too far to talk.
         var rise = seen is { } at && !KeepMount ? Math.Abs(me.Y - at.Y) : 0f;
-        if (flat <= range && rise <= MaxRise)
+        // On the ground, a big target (an aetheryte on its plinth, range 6) is reached from lower down than an NPC.
+        var maxRise = Services.Condition[ConditionFlag.InFlight] ? MaxRise : Math.Max(MaxRise, range - 1f);
+        if (flat <= range && rise <= maxRise)
         {
             // In the air beside it with no floor right below at its height: getting off here would drop the character beside it.
             if (LandFirst(me, target, seen)) return;
+            // Still in the air beside an NPC: the game won't talk from up there ("Target is too far below you"); land first.
+            if (seen != null && !KeepMount && LandOnArrival(flat)) return;
             Vnav.Stop();
             Note($"{what}: arrived, {flat:0.0} yalms from the target");
             Current = State.Arrived;
@@ -439,7 +451,7 @@ internal sealed unsafe partial class Travel
             return;
         }
         // (Heading for the open spot near a target under a roof: the way in is on foot from there, not down through the roof.)
-        if (flat <= range + 2f && rise > MaxRise && !HeadingForLanding)
+        if (flat <= range + 2f && rise > maxRise && !HeadingForLanding)
         {
             if (landingSince == default)
             {
@@ -580,6 +592,8 @@ internal sealed unsafe partial class Travel
             Fail($"Got stuck on the way to {what}.");
             return;
         }
+        // Stuck in the air near a target under a roof (rubbing along its wall): come down right here and walk in.
+        if (LandWhereStuck(me, target)) return;
         if (AdvancedUnstuck && Unstuck(me, target)) return;
         if (stuckCount == 2 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
         {
@@ -588,6 +602,36 @@ internal sealed unsafe partial class Travel
             return;
         }
         if (stuckCount >= 3) Fail($"Got stuck on the way to {what}. vnavmesh can't find a way there from here; move a bit and start again.");
+    }
+
+    /// <summary>
+    /// Arrived in the air beside the target: Dismount lands (the first press brings the mount down, it doesn't get off),
+    /// pressed again every 1.5 seconds, for at most <see cref="AirArrivalPatience"/>. True while it takes the tick.
+    /// </summary>
+    private bool LandOnArrival(float flat)
+    {
+        if (!Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return false;
+        var now = DateTime.UtcNow;
+        if (airArrivalSince == default)
+        {
+            airArrivalSince = now;
+            Vnav.Stop();
+            Note($"{what}: {flat:0.0} yalms from the target but still in the air; landing first");
+        }
+        if (now - airArrivalSince > AirArrivalPatience)
+        {
+            if (airArrivalPress != DateTime.MaxValue) Note($"{what}: still in the air after {AirArrivalPatience.TotalSeconds:0} seconds; going on");
+            airArrivalPress = DateTime.MaxValue;
+            return false;
+        }
+        if (airArrivalPress == default || now - airArrivalPress > TimeSpan.FromSeconds(1.5))
+        {
+            airArrivalPress = now;
+            var am = ActionManager.Instance();
+            if (am != null && am->GetActionStatus(ActionType.GeneralAction, Dismount) == 0) am->UseAction(ActionType.GeneralAction, Dismount);
+        }
+        Status = "Landing near " + what;
+        return true;
     }
 
     /// <summary>
@@ -720,7 +764,8 @@ internal sealed unsafe partial class Travel
         hopTo = to;
         Note($"{what}: taking the Firmament's aethernet to {PlaceText(to)}");
         crystalTrip = new Travel { hopped = true };
-        crystalTrip.GoTo("the aethernet shard", Firmament, from, 4f, () => FirmamentShardObject(from)?.Position);
+        // From 4 yalms the game answered "You can't do that from there"; 3 is safely within reach.
+        crystalTrip.GoTo("the aethernet shard", Firmament, from, FirmamentShardRange, () => FirmamentShardObject(from)?.Position);
         crystalTrip.hopped = true;
         Enter(State.ToCrystal, 120);
     }

@@ -28,7 +28,8 @@ internal sealed unsafe class BookBuyer
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
-    private readonly Travel travel = new();
+    /// <summary>Vendors stand in shops and under roofs: the buildings rules are on.</summary>
+    private readonly Travel travel = new() { RoofAware = true };
     private readonly Queue<BookOrder> orders = new();
     private Step step = Step.Idle;
     private DateTime waitUntil;

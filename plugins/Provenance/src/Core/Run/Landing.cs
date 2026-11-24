@@ -39,6 +39,48 @@ public static class Landing
 
     /// <summary>The distance on the ground (height left out).</summary>
     public static float Flat(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.X, a.Z), new Vector2(b.X, b.Z));
+
+    /// <summary>Hovering this close above the floor point (or below it), a flight doesn't touch down by itself: Dismount lands.</summary>
+    public const float LowHover = 3f;
+    /// <summary>Along the walk out of a building, the points looked at are this far apart.</summary>
+    public const float DoorStep = 1f;
+    /// <summary>The landing spot is this far past the first open point, so it isn't under the eaves.</summary>
+    public const float PastDoor = 2f;
+
+    /// <summary>
+    /// Where the walk to a target under a roof comes out into the open: following the walking path from the target back
+    /// towards its start, the first point with no roof over it, then <see cref="PastDoor"/> further out (or the first
+    /// open point, when the path ends sooner). The path is the walking path (no flying) from an open spot to the target,
+    /// so it goes through the door. Null when the whole path is covered. The idea of landing on the walking path, and
+    /// walking the rest, is GatherBuddyReborn's (Apache-2.0).
+    /// </summary>
+    /// <param name="path">The walking path, from its start to the target.</param>
+    /// <param name="roofOver">Something solid is over the point.</param>
+    public static Vector3? DoorOut(IReadOnlyList<Vector3> path, Func<Vector3, bool> roofOver)
+    {
+        if (path.Count < 2) return null;
+        Vector3? outside = null;
+        var outsideAt = 0f;
+        var walked = 0f;
+        for (var i = path.Count - 1; i > 0; i--)
+        {
+            var a = path[i];
+            var b = path[i - 1];
+            var length = Vector3.Distance(a, b);
+            for (var t = 0f; t < length; t += DoorStep)
+            {
+                var p = Vector3.Lerp(a, b, t / length);
+                if (outside == null)
+                {
+                    if (!roofOver(p)) { outside = p; outsideAt = walked + t; }
+                }
+                else if (walked + t - outsideAt >= PastDoor) return p;
+            }
+            walked += length;
+        }
+        if (outside != null) return walked - outsideAt >= PastDoor ? path[0] : outside;
+        return roofOver(path[0]) ? null : path[0];
+    }
 }
 
 /// <summary>

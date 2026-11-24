@@ -21,7 +21,8 @@ internal sealed unsafe class Shopper
 
     private readonly Plugin plugin;
     private readonly Action<string, bool> log;
-    private readonly Travel travel = new();
+    /// <summary>Vendors stand in shops and under roofs: the buildings rules are on.</summary>
+    private readonly Travel travel = new() { RoofAware = true };
     private readonly List<IGrouping<uint, Purchase>> stops = new();
     private int stopIndex;
     private Dictionary<uint, int> startCounts = new();

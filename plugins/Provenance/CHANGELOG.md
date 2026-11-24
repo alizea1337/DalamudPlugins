@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.22.9
+
+- The Firmament: the run stopped 4 yalms from an aethernet shard, which is too far to use it; the game said
+  "You can't do that from there" and only the next try worked. It now walks to within 3 yalms.
+
+## 0.22.8
+
+- Arriving at an NPC still in the air, the run talked to it from up there; the game answered "Target is too far
+  below you" and the delivery was skipped (Nitowikwe). It now lands first, for up to 5 seconds.
+- Aetherytes stand on a plinth, so a run on foot at the bottom step tried for 30 seconds to "get down (or up)"
+  to it and gave up (Foundation, on the way to the Firmament). On the ground, a target that is used from
+  farther away, like an aetheryte, now also counts as reached from lower down.
+- Stuck on the mount close to an NPC inside a building (rubbing along the wall on the way to the spot outside
+  its door), the run now comes down right there and walks in, instead of trying other ways to fly there.
+
+## 0.22.7
+
+- Trips to an NPC inside a building (all runs): the run found an open spot near the building but then hovered
+  just above the ground there for 20 seconds without landing, gave up and flew at the wall (R'dhyanki in
+  Labyrinthos). Hovering low over the spot, it now presses Dismount, which lands, and gets off.
+- It also lands in a better place: it asks vnavmesh for the walking path from the open spot to the NPC (that
+  path goes through the door) and lands where the path comes out of the building, just outside the door, then
+  walks in. When vnavmesh can't say within a few seconds, it lands at the open spot as before. The idea is
+  GatherBuddyReborn's (Apache-2.0).
+
+## 0.22.6
+
+- Custom Deliveries and order runs: an NPC inside a building was flown at from outside, so the character ended
+  up against the wall and stayed stuck there (R'dhyanki in Labyrinthos). The rules the Tribes run already uses
+  for buildings now apply to every trip to a vendor, an appraiser or a delivery client: the run lands in the
+  open near the building, gets off and walks in through the door, and it walks out of a building before it
+  mounts up. Trips to gathering nodes and fishing holes go as before.
+
 ## 0.22.5
 
 - Other automation plugins: Provenance now deals with the three that get in a run's way most.
