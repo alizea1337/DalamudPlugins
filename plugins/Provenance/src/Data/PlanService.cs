@@ -185,7 +185,7 @@ internal sealed class PlanService : IDisposable
             var cfg = config();
             var hqItems = cfg.Order.Lines.Where(o => o.Hq).Select(o => o.ItemId).ToHashSet();
             Estimate = Estimator.Estimate(Plan, cfg.Timings, Steps, hqItems.Contains, CollectableInputsFor(cfg), FishInputsFor());
-            Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem, Outlook);
+            Readiness = Data.Readiness.Check(Plan, catalog, Profile, cfg, RotationProblem, Outlook, QualityNote);
         }
         if (!dirty) return;
         Rebuild();
@@ -714,6 +714,33 @@ internal sealed class PlanService : IDisposable
         if (Request(recipe, hq) is not { } r) return null;
         var task = raphael.Solve(r);
         return task.IsFaulted && task.Exception?.GetBaseException() is InvalidOperationException e ? e.Message.TrimEnd('.') + "." : null;
+    }
+
+    /// <summary>
+    /// For an HQ craft whose best rotation falls short of the recipe's most quality: how often it comes out HQ, counting the
+    /// Good and Excellent steps that come along (and the reactions to them when that setting is on). Planned as the run
+    /// will: the gearset's stats with the food and medicine picked, HQ ingredients where the plan makes them HQ or has them.
+    /// Null when the rotation reaches the most quality or isn't worked out yet; until the HQ chance is, the plain note.
+    /// </summary>
+    private string? QualityNote(RecipeInfo recipe)
+    {
+        var catalog = Catalog;
+        var job = Profile?.Job(recipe.Job.ClassJobId());
+        if (catalog == null || recipe.Expert || job == null || job.Source == StatSource.None || job.Stats.Length < 3 || job.Level <= 0) return null;
+        var cfg = config();
+        var stats = Data.Readiness.WithConsumables(job.Stats, Discipline.Hand, catalog, cfg);
+        var hqIn = recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId))
+            .Select(i => Plan.CraftSteps.Any(l => l.ItemId == i.ItemId && l.Hq) ? i.Amount : Math.Min(i.Amount, ownedHq.GetValueOrDefault(i.ItemId)))
+            .ToArray();
+        var request = new RaphaelRequest(recipe.RecipeId, job.Level, stats[0], stats[1], stats[2], job.Manipulation,
+            cfg.Crafting.UseSpecialistActions && job.Specialist, null, hqIn);
+        var task = raphael.Solve(request);
+        if (!task.IsCompletedSuccessfully || task.Result is not { ReachesMax: false, FinalQuality: >= 0, MaxQuality: > 0 } solution) return null;
+        var head = $"The best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality";
+        var estimate = CraftActions.NormalConditions(recipe.RecipeId) ? raphael.HqEstimateFor(request, solution, cfg.Crafting.ReactToConditions) : null;
+        return estimate is { } e
+            ? $"{head}; counting the Good and Excellent steps that come along, {HqChance.Describe(e.HqPercent)}."
+            : $"{head}, so it comes out HQ only sometimes.";
     }
 
     private RaphaelRequest? Request(RecipeInfo recipe, bool hq)

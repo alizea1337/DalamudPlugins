@@ -25,8 +25,9 @@ internal static class Readiness
 {
     /// <param name="rotationProblem">Raphael's answer for a recipe: null when it found a rotation (or hasn't answered yet).</param>
     /// <param name="fishOutlook">Where and when a fish can be fished (<see cref="PlanService.Outlook"/>); null skips the fish checks.</param>
+    /// <param name="qualityNote">For a craft made in high quality: how often it comes out HQ when its best rotation falls short; null when it doesn't (or isn't known yet).</param>
     public static List<ReadinessIssue> Check(Plan plan, GameCatalog catalog, CharacterProfile? profile, Configuration cfg,
-        Func<RecipeInfo, bool, string?> rotationProblem, Func<uint, FishOutlook?>? fishOutlook = null)
+        Func<RecipeInfo, bool, string?> rotationProblem, Func<uint, FishOutlook?>? fishOutlook = null, Func<RecipeInfo, string?>? qualityNote = null)
     {
         var issues = new List<ReadinessIssue>();
         if (plan.Lines.Count == 0) return issues;
@@ -56,8 +57,11 @@ internal static class Readiness
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"Needs {needs.Control:N0} Control to start; your {abbr} gearset has {stats[1]:N0}{unsure}.", sure));
             if (needs.Specialist && !job.Specialist)
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"Only a {abbr} specialist can craft this; equip a Soul of the {recipe.Job} in the gearset.", true));
-            if (rotationProblem(recipe, line.IsTarget ? recipe.CanHq && hqItems.Contains(line.ItemId) : line.Hq) is { } why)
+            var hq = line.IsTarget ? recipe.CanHq && hqItems.Contains(line.ItemId) : line.Hq;
+            if (rotationProblem(recipe, hq) is { } why)
                 issues.Add(new ReadinessIssue(line.ItemId, classJob, $"{why} With your {abbr} stats no rotation finishes this craft{unsure}.", sure));
+            else if (hq && qualityNote?.Invoke(recipe) is { } note)
+                issues.Add(new ReadinessIssue(line.ItemId, classJob, note, false));
         }
 
         // Gathering and fishing: job level and the Perception the item asks for; fish get their own checks.
@@ -259,7 +263,7 @@ internal static class Readiness
     private static string Short(TimeSpan span) => Estimator.Describe(span).Replace("about ", "");
 
     /// <summary>Gearset stats plus the food and medicine picked for that discipline.</summary>
-    private static int[] WithConsumables(int[] stats, Discipline discipline, GameCatalog catalog, Configuration cfg)
+    public static int[] WithConsumables(int[] stats, Discipline discipline, GameCatalog catalog, Configuration cfg)
     {
         var result = (int[])stats.Clone();
         var (food, medicine) = cfg.Consumables.For(discipline);
