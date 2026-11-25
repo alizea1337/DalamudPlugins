@@ -37,18 +37,19 @@ public static class CraftConditions
 }
 
 /// <summary>An edit to the rest of a rotation on a Good or Excellent step.</summary>
-/// <param name="Rest">The rotation from this step on, with the edit.</param>
+/// <param name="Rest">The rotation from this step on, with the edit (the craft ends where it finishes, which can be before its end).</param>
 /// <param name="Edit">What changed, for the debug log.</param>
-/// <param name="KeptQuality">The quality the rotation as planned reaches from here (this step's condition, then Normal steps); -1 when it wouldn't finish.</param>
+/// <param name="KeptQuality">The quality the rotation as planned reaches from here (this step's condition, then Normal steps, Poor after Excellent); -1 when it wouldn't finish.</param>
 /// <param name="ChosenQuality">The same for the edited rotation.</param>
-public sealed record ReactionChoice(IReadOnlyList<SimAction> Rest, string Edit, int KeptQuality, int ChosenQuality);
+/// <param name="Added">The edit's first action isn't from the plan (Precise Touch, Tricks of the Trade or Intensive Synthesis put in).</param>
+public sealed record ReactionChoice(IReadOnlyList<SimAction> Rest, string Edit, int KeptQuality, int ChosenQuality, bool Added);
 
 /// <summary>
 /// The cheap reaction to Good and Excellent steps: the planned rotation stays, and on such a step one small edit is tried
 /// (Precise Touch, Tricks of the Trade or Intensive Synthesis in place of or before the planned action, or one of the next
-/// eight planned actions pulled forward). Each is simulated under the step's condition with Normal steps after it; the
-/// best final quality that still finishes wins, ties keep the plan. Quality above what the rotation aims for (the
-/// target of a collectable, the recipe's most) counts for nothing.
+/// eight planned actions pulled forward). Each is simulated under the step's condition with Normal steps after it (the step
+/// after an Excellent one is always Poor); the best final quality that still finishes wins, ties keep the plan. Quality
+/// above what the rotation aims for (the target of a collectable, the recipe's most) counts for nothing.
 /// </summary>
 public static class ConditionReaction
 {
@@ -61,42 +62,61 @@ public static class ConditionReaction
     public static bool IsSpecial(CraftCondition c) => c is CraftCondition.Good or CraftCondition.Excellent;
 
     /// <summary>
-    /// The quality a rotation reaches from <paramref name="st"/> with Normal steps (capped at what it aims for), or -1 when
-    /// an action can't be used or it doesn't finish (also when it finishes before its last action).
+    /// The quality a rotation reaches from <paramref name="st"/> (capped at what it aims for), or -1 when an action can't be
+    /// used or it doesn't finish. The next step has condition <paramref name="next"/>, every one after it Normal. When the
+    /// item is finished before the last action, the rest is cut (the craft ends there in the game too).
     /// </summary>
-    public static int FinalQuality(SimSettings s, SimState st, IReadOnlyList<SimAction> plan, int from = 0)
+    public static int FinalQuality(SimSettings s, SimState st, IReadOnlyList<SimAction> plan, int from = 0, CraftCondition next = CraftCondition.Normal)
     {
-        for (var i = from; i < plan.Count; i++)
-            if (!RaphaelSim.TryUse(st, plan[i], CraftCondition.Normal, s, out st)) return -1;
+        var c = next;
+        for (var i = from; i < plan.Count && !st.IsFinal(s); i++)
+        {
+            if (!RaphaelSim.TryUse(st, plan[i], c, s, out st)) return -1;
+            if (RaphaelSim.UsesStep(plan[i])) c = CraftCondition.Normal;
+        }
         return st.Progress >= s.MaxProgress ? Math.Min(st.Quality, s.MaxQuality) : -1;
     }
 
-    /// <summary>The quality a candidate reaches: its first action under <paramref name="c"/>, the rest under Normal; -2 when its first action can't be used here.</summary>
+    /// <summary>The quality a candidate reaches: its first action under <paramref name="c"/>, the rest after it; -2 when its first action can't be used here.</summary>
     private static int Evaluate(SimSettings s, in SimState st, IReadOnlyList<SimAction> candidate, CraftCondition c)
     {
         if (candidate.Count == 0 || !RaphaelSim.UsesStep(candidate[0]) || !RaphaelSim.TryUse(st, candidate[0], c, s, out var n)) return -2;
-        if (n.IsFinal(s)) return n.Progress >= s.MaxProgress ? Math.Min(n.Quality, s.MaxQuality) : -1;
-        return FinalQuality(s, n, candidate, 1);
+        return FinalQuality(s, n, candidate, 1, c == CraftCondition.Excellent ? CraftCondition.Poor : CraftCondition.Normal);
     }
 
-    private static IEnumerable<(List<SimAction> Actions, string Edit)> Candidates(IReadOnlyList<SimAction> rest)
+    /// <summary>One edit: an addition in place of the planned action or before it, or a planned action pulled forward.</summary>
+    private readonly record struct Candidate(SimAction Addition, bool Replace, int Pulled)
+    {
+        public List<SimAction> Apply(IReadOnlyList<SimAction> rest)
+        {
+            var list = new List<SimAction>(rest.Count + 1);
+            if (Pulled > 0)
+            {
+                list.Add(rest[Pulled]);
+                for (var i = 0; i < rest.Count; i++)
+                    if (i != Pulled) list.Add(rest[i]);
+                return list;
+            }
+            list.Add(Addition);
+            for (var i = Replace ? 1 : 0; i < rest.Count; i++) list.Add(rest[i]);
+            return list;
+        }
+
+        public string Describe(IReadOnlyList<SimAction> rest)
+            => Pulled > 0 ? $"{Name(rest[Pulled])} pulled forward from {Pulled + 1} actions ahead, before {Name(rest[0])}"
+                : Replace ? $"{Name(Addition)} in place of {Name(rest[0])}"
+                : $"{Name(Addition)} before {Name(rest[0])}";
+    }
+
+    private static IEnumerable<Candidate> Candidates(IReadOnlyList<SimAction> rest)
     {
         foreach (var x in Additions)
         {
-            var replace = new List<SimAction>(rest.Count) { x };
-            replace.AddRange(rest.Skip(1));
-            yield return (replace, $"{Name(x)} in place of {Name(rest[0])}");
-            var insert = new List<SimAction>(rest.Count + 1) { x };
-            insert.AddRange(rest);
-            yield return (insert, $"{Name(x)} before {Name(rest[0])}");
+            yield return new Candidate(x, true, 0);
+            yield return new Candidate(x, false, 0);
         }
         for (var j = 1; j <= Math.Min(PullAhead, rest.Count - 1); j++)
-        {
-            var pulled = new List<SimAction>(rest.Count) { rest[j] };
-            for (var i = 0; i < rest.Count; i++)
-                if (i != j) pulled.Add(rest[i]);
-            yield return (pulled, $"{Name(rest[j])} pulled forward from {j + 1} actions ahead, before {Name(rest[0])}");
-        }
+            yield return new Candidate(default, false, j);
     }
 
     /// <summary>
@@ -108,18 +128,19 @@ public static class ConditionReaction
         if (!IsSpecial(c) || rest.Count == 0 || !RaphaelSim.UsesStep(rest[0])) return null;
         var kept = Evaluate(s, st, rest, c);
         var bestQuality = kept;
-        (List<SimAction> Actions, string Edit)? best = null;
+        (Candidate Edit, List<SimAction> Actions)? best = null;
         foreach (var cand in Candidates(rest))
         {
-            var q = Evaluate(s, st, cand.Actions, c);
+            var actions = cand.Apply(rest);
+            var q = Evaluate(s, st, actions, c);
             // Only an edit that still finishes the item.
             if (q > bestQuality && q >= 0)
             {
-                best = cand;
+                best = (cand, actions);
                 bestQuality = q;
             }
         }
-        return best is { } b ? new ReactionChoice(b.Actions, b.Edit, kept, bestQuality) : null;
+        return best is { } b ? new ReactionChoice(b.Actions, b.Edit.Describe(rest), kept, bestQuality, b.Edit.Pulled == 0) : null;
     }
 
     /// <summary>"Precise Touch" for <see cref="SimAction.PreciseTouch"/>.</summary>

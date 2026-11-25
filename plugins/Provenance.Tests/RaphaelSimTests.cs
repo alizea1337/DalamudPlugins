@@ -53,6 +53,10 @@ public class RaphaelSimTests
         Assert.Contains("Raphael said", why);
     }
 
+    // From mc.py's cheap reaction (scratchpad gen_react_cases2.py) with the changes made after review: the step after an
+    // Excellent one is evaluated as Poor (mc.py assumed Normal), an edit that finishes the item before its last planned
+    // action counts (the rest is cut, as the craft ends there), and only an edit that finishes is chosen. Rows 1/5, 3/5
+    // and 4/2 differ from mc.py because of that.
     [Theory]
     [InlineData(0, "NNNGNNNNNGNNNNGNNGNNGNNNNNNNGNNNNNNGNNGNGNGNNGNNNNNGNNNNGNNN", 15593, 15593, 0)]
     [InlineData(0, "NNNNNNNNNGNNNNNGNNNNNNNGNNNNNNNNGNNGNNNGNGNEPNGNNNNGNNNNGNNN", 15493, 15493, 0)]
@@ -65,7 +69,7 @@ public class RaphaelSimTests
     [InlineData(1, "NGNNNNGNGNEPNNNNNNEPNNNNNNGNNNNGNGNNNNNNNNGNGNNEPNNNNGNGNNNN", 19803, 21441, 1)]
     [InlineData(1, "NNGNNGNNNNNNGNNNNNGNGNGNNNNNGNNNGNGNNNNGNNNNNNNNNEPNGNGNNNGN", 16684, 16684, 0)]
     [InlineData(1, "NGNNNNNGNNNNNNNGNEPNNNEPNGNNNNNNEPNNNGNNNNGNNGNNNNNNNNNNNNNN", 15749, 23449, 2)]
-    [InlineData(1, "NEPNGNNGNNGNEPNNNNNNNNNNGNGNNGNNGNGNNNNGNEPNGNNGNGNNNGNNNNNG", 17540, 17540, 0)]
+    [InlineData(1, "NEPNGNNGNNGNEPNNNNNNNNNNGNGNNGNNGNGNNNNGNEPNGNNGNGNNNGNNNNNG", 17540, 19886, 3)]
     [InlineData(2, "NNNGNGNNNNNNGNGNNNNNNGNNNNEPNNNNNNNEPNNGNNNNNNGNNNGNNNNNGNNN", 20727, 20727, 0)]
     [InlineData(2, "NNNNGNNGNEPNNNGNNNNNGNNNNNGNNNNNGNNNNNNNNNNNNNNNNGNNNNNNNNNN", 18606, 18606, 0)]
     [InlineData(2, "NNNNGNNGNNGNNNNEPNGNNNGNNNNNNNNGNNNNNGNNGNNGNNNGNNGNGNGNNNGN", 16820, 16820, 0)]
@@ -77,10 +81,10 @@ public class RaphaelSimTests
     [InlineData(3, "NGNNNNGNNGNGNGNNNGNNNNNNGNGNNNNNNNNNNGNGNNNNNGNNNGNGNGNGNGNG", 19918, 20233, 1)]
     [InlineData(3, "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNEPNNNNNNEPNNGNNGNNNGNNNNNNN", 16590, 16590, 0)]
     [InlineData(3, "NNNNNEPNNGNGNGNNNGNNGNNNNNNNNGNNNNNNNNNGNGNGNNGNNNNNNNNNGNGN", 17923, 17923, 0)]
-    [InlineData(3, "NNNNNGNEPNGNNNGNNEPNNGNNNGNNNNNGNGNNNNGNNNGNGNNNNGNNGNNNNNGN", 16726, 16946, 1)]
+    [InlineData(3, "NNNNNGNEPNGNNNGNNEPNNGNNNGNNNNNGNGNNNNGNNNGNGNNNNGNNGNNNNNGN", 16726, 22039, 1)]
     [InlineData(4, "NNNNNNGNNNGNNNNNNNNNGNGNGNNNNGNGNNGNNNGNGNNNNGNNNNNNNGNGNNNG", 14224, 14224, 0)]
     [InlineData(4, "NNNGNNNGNGNGNGNGNNNNNNNNNNGNNNEPNNGNNNNNGNGNNNNNNNNNGNGNNNGN", 16086, 16086, 0)]
-    [InlineData(4, "NNNNNGNNNNGNGNEPNNGNNNNNNGNNNNNNGNNNNNNGNNNNNGNNGNGNNNNGNNNN", 15344, 15344, 0)]
+    [InlineData(4, "NNNNNGNNNNGNGNEPNNGNNNNNNGNNNNNNGNNNNNNGNNNNNGNNGNGNNNNGNNNN", 15344, 19866, 1)]
     [InlineData(4, "NNNNNGNGNNNNGNNNGNNNNNNNNNNNNGNGNGNNNNNNNGNGNGNEPNNNNGNNGNNN", 15540, 15540, 0)]
     [InlineData(4, "NNGNNNNGNNGNNNGNNGNGNNNGNGNGNGNNGNNGNNGNNNNNNNNNGNNNNNNGNNNN", 14980, 14980, 0)]
     [InlineData(4, "NGNGNGNNGNNNNGNGNNGNNNGNNNNGNNNGNNGNNNNGNNNNEPNNNGNNNNNNNNGN", 17080, 17080, 0)]
@@ -110,13 +114,14 @@ public class RaphaelSimTests
     [Fact]
     public void Hq_chance_is_close_to_the_measurement()
     {
-        // mc.py, 20,000 crafts: 53.03 % as planned, 59.03 % reacting (G4 Gemdraught of Dexterity, no specialist actions).
+        // mc.py, 20,000 crafts: 53.03 % as planned, 59.03 % reacting (G4 Gemdraught of Dexterity, no specialist actions);
+        // with the changes after review (gen_react_cases2.py, 6,000 crafts) 53.21 % and 59.70 %.
         var (s, rotation, quality) = Rotations[0];
         Assert.Equal(23, RaphaelSim.HqPercent(quality, s.MaxQuality));
         var plain = HqChance.Estimate(s, 0, s.MaxQuality, rotation, false);
         var reacting = HqChance.Estimate(s, 0, s.MaxQuality, rotation, true);
         Assert.InRange(plain.HqPercent, 50.5, 55.5);
-        Assert.InRange(reacting.HqPercent, 56.5, 61.5);
+        Assert.InRange(reacting.HqPercent, 57.0, 62.5);
         Assert.True(reacting.HqPercent > plain.HqPercent);
         // The same seed gives the same answer (the Plan page doesn't flicker).
         Assert.Equal(plain, HqChance.Estimate(s, 0, s.MaxQuality, rotation, false));
@@ -131,6 +136,115 @@ public class RaphaelSimTests
         var without = HqChance.Estimate(s, 0, s.MaxQuality, rotation, false, 300);
         Assert.True(withHq.HqPercent > without.HqPercent + 20);
         Assert.True(withHq.MeanQuality <= s.MaxQuality);
+    }
+
+    /// <summary>
+    /// Rotations raphael-cli 0.2.2 worked out below level 100 (custom recipes), with its final state: progress, quality,
+    /// durability and CP. Groundwork (300 below level 86) and Delicate Synthesis (100 below 94) at levels 76 to 90, and Basic
+    /// Synthesis (100 below 31) at level 28.
+    /// </summary>
+    public static readonly (SimSettings Settings, string Rotation, int Progress, int Quality, int Durability, int Cp)[] LowerLevels =
+    {
+        (new SimSettings(560, 70, 3500, 7200, 197, 226, 80),
+            "MuscleMemory, Veneration, Manipulation, WasteNot2, Groundwork, Groundwork, PreparatoryTouch, PreparatoryTouch, PreparatoryTouch, Innovation, PreparatoryTouch, PreparatoryTouch, GreatStrides, ByregotsBlessing, Groundwork",
+            3545, 7320, 0, 14),
+        (new SimSettings(600, 70, 4300, 8800, 251, 271, 90),
+            "Reflect, DelicateSynthesis, PreparatoryTouch, Manipulation, GreatStrides, WasteNot2, Innovation, PreparatoryTouch, PreparatoryTouch, GreatStrides, ByregotsBlessing, Veneration, Groundwork, Groundwork, Groundwork",
+            4316, 8860, 5, 70),
+        (new SimSettings(500, 80, 3000, 0, 183, 211, 80, false),
+            "MuscleMemory, Veneration, Groundwork, Groundwork, DelicateSynthesis",
+            3018, 211, 20, 408),
+        (new SimSettings(600, 35, 4300, 8800, 257, 271, 90),
+            "Reflect, Manipulation, WasteNot2, Innovation, PreparatoryTouch, PreparatoryTouch, PreparatoryTouch, PreparatoryTouch, Veneration, Groundwork, Groundwork, MasterMend, Groundwork, GreatStrides, ByregotsBlessing, BasicSynthesis",
+            4469, 8941, 0, 6),
+        (new SimSettings(250, 40, 300, 900, 34, 85, 28, false),
+            "WasteNot, Veneration, BasicSynthesis, BasicSynthesis, BasicSynthesis, BasicSynthesis, BasicSynthesis, MasterMend, BasicSynthesis, GreatStrides, Innovation, BasicTouch, StandardTouch, BasicSynthesis",
+            306, 387, 0, 2),
+        (new SimSettings(450, 40, 2600, 4000, 186, 263, 76, false),
+            "MuscleMemory, WasteNot2, Groundwork, Groundwork, DelicateSynthesis, MasterMend, Innovation, PreparatoryTouch, PreparatoryTouch, PreparatoryTouch, DelicateSynthesis",
+            2604, 4008, 0, 20),
+        (new SimSettings(480, 80, 3400, 5000, 211, 290, 81),
+            "MuscleMemory, Veneration, Groundwork, WasteNot2, DelicateSynthesis, Innovation, PreparatoryTouch, PreparatoryTouch, PreparatoryTouch, ByregotsBlessing, Veneration, Groundwork",
+            3480, 5457, 0, 110),
+    };
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void Lower_levels_end_where_raphael_says(int i)
+    {
+        var (s, text, progress, quality, durability, cp) = LowerLevels[i];
+        var rotation = text.Split(", ").Select(Enum.Parse<SimAction>).ToList();
+        var end = RaphaelSim.Play(s, SimState.Start(s), rotation);
+        Assert.NotNull(end);
+        Assert.Equal((progress, quality, durability, cp), (end!.Value.Progress, end.Value.Quality, end.Value.Durability, end.Value.Cp));
+    }
+
+    [Theory]
+    // By hand from raphael-sim's actions.rs: base progress 200, no buffs.
+    [InlineData(SimAction.BasicSynthesis, 30, 200)]
+    [InlineData(SimAction.BasicSynthesis, 31, 240)]
+    [InlineData(SimAction.CarefulSynthesis, 81, 300)]
+    [InlineData(SimAction.CarefulSynthesis, 82, 360)]
+    [InlineData(SimAction.Groundwork, 85, 600)]
+    [InlineData(SimAction.Groundwork, 86, 720)]
+    [InlineData(SimAction.DelicateSynthesis, 93, 200)]
+    [InlineData(SimAction.DelicateSynthesis, 94, 300)]
+    public void Progress_grows_with_the_crafter_s_level(SimAction action, int level, int progress)
+    {
+        var s = new SimSettings(500, 80, 10000, 10000, 200, 200, level);
+        Assert.True(RaphaelSim.TryUse(SimState.Start(s), action, CraftCondition.Normal, s, out var n));
+        Assert.Equal(progress, n.Progress);
+        // Groundwork with too little durability left does half.
+        if (action == SimAction.Groundwork)
+        {
+            var worn = SimState.Start(s) with { Durability = 10 };
+            Assert.True(RaphaelSim.TryUse(worn, action, CraftCondition.Normal, s, out var half));
+            Assert.Equal(progress / 2, half.Progress);
+        }
+    }
+
+    [Fact]
+    public void After_an_excellent_step_comes_a_poor_one()
+    {
+        // The plan's next touch after an Excellent step is worth half: the evaluation counts it so.
+        var (s, rotation, _) = Rotations[0];
+        var at = Array.IndexOf(rotation, SimAction.BasicTouch);
+        var st = RaphaelSim.Play(s, SimState.Start(s), rotation.Take(at))!.Value;
+        Assert.True(ConditionReaction.FinalQuality(s, st, rotation, at, CraftCondition.Poor) < ConditionReaction.FinalQuality(s, st, rotation, at));
+    }
+
+    [Fact]
+    public void An_edit_that_finishes_early_counts()
+    {
+        // The rest of the rotation after the item is finished doesn't matter: the craft ends there.
+        var (s, rotation, quality) = Rotations[0];
+        var longer = rotation.Append(SimAction.BasicSynthesis).ToList();
+        Assert.Equal(Math.Min(quality, s.MaxQuality), ConditionReaction.FinalQuality(s, SimState.Start(s), longer));
+    }
+
+    [Fact]
+    public void The_watch_accepts_a_new_condition_after_quick_innovation()
+    {
+        var (s, rotation, quality) = Rotations[1];
+        Assert.Equal(SimAction.QuickInnovation, rotation[0]);
+        var ids = rotation.Select(RaphaelSim.Id).ToList();
+        var watch = CraftWatch.For(s, 0, s.MaxQuality, ids, quality, out _)!;
+        CraftReading Read(int condition)
+        {
+            var p = watch.Predicted;
+            return new(p.Progress, p.Quality, p.Durability, p.Cp, condition, p.InnerQuiet, p.Innovation, p.Veneration, p.GreatStrides, p.WasteNot,
+                p.Manipulation, p.MuscleMemory, p.HeartAndSoulActive, p.TrainedPerfectionActive);
+        }
+        watch.Used(ids[0], CraftCondition.Normal);
+        Assert.Null(watch.Compare(Read(0), out _));
+        Assert.Null(watch.Compare(Read(1), out _)); // rolled again: Good
+        Assert.NotNull(watch.Compare(Read(3), out _)); // Poor can't follow Normal
     }
 
     [Fact]
@@ -209,6 +323,7 @@ public class RaphaelSimTests
         Assert.True(choice!.ChosenQuality > choice.KeptQuality);
         Assert.True(RaphaelSim.TryUse(st, choice.Rest[0], CraftCondition.Good, s, out var n));
         Assert.Equal(choice.ChosenQuality, ConditionReaction.FinalQuality(s, n, choice.Rest, 1));
+        if (choice.Added) Assert.Contains(choice.Rest[0], ConditionReaction.Additions);
     }
 
     /// <summary>The first step of a rotation (all Normal before it) where an edit beats the plan on a step with this condition.</summary>
@@ -224,20 +339,27 @@ public class RaphaelSimTests
     [Fact]
     public void A_quality_target_is_worth_nothing_above_it()
     {
-        // A collectable whose target the plan reaches with room to spare: nothing beats it, the plan stays.
+        // A collectable whose target the plan reaches with room to spare: on a Good step nothing beats it, the plan stays.
+        // On an Excellent one the Poor step after it can pull the plan below the target; an edit then aims for the target, no more.
         var (s, rotation, quality) = Rotations[0];
         var target = s with { MaxQuality = quality - 2000 };
         for (var i = 0; i < rotation.Length - 1; i++)
         {
             var st = RaphaelSim.Play(target, SimState.Start(target), rotation.Take(i))!.Value;
-            Assert.Null(ConditionReaction.Choose(target, st, rotation.Skip(i).ToList(), CraftCondition.Excellent));
+            Assert.Null(ConditionReaction.Choose(target, st, rotation.Skip(i).ToList(), CraftCondition.Good));
+            if (ConditionReaction.Choose(target, st, rotation.Skip(i).ToList(), CraftCondition.Excellent) is { } edit)
+            {
+                Assert.True(edit.KeptQuality < target.MaxQuality);
+                Assert.True(edit.ChosenQuality <= target.MaxQuality);
+            }
         }
     }
 
     [Fact]
     public void Edits_never_break_the_item()
     {
-        // On any step of any rotation, Good or Excellent, the chosen edit still finishes the item under Normal steps after it.
+        // On any step of any rotation, Good or Excellent, the chosen edit still finishes the item (Normal steps after it,
+        // Poor right after an Excellent one); the craft ends where the item is finished.
         foreach (var (s, rotation, _) in Rotations)
             for (var i = 0; i < rotation.Length; i++)
             {
@@ -247,10 +369,8 @@ public class RaphaelSimTests
                     {
                         Assert.True(choice.ChosenQuality >= 0);
                         Assert.True(RaphaelSim.TryUse(st, choice.Rest[0], c, s, out var n));
-                        var end = n.IsFinal(s) ? n : RaphaelSim.Play(s, n, choice.Rest.Skip(1));
-                        Assert.NotNull(end);
-                        Assert.True(end!.Value.Progress >= s.MaxProgress);
-                        Assert.True(end.Value.Durability > 0 || end.Value.Progress >= s.MaxProgress);
+                        var next = c == CraftCondition.Excellent ? CraftCondition.Poor : CraftCondition.Normal;
+                        Assert.Equal(choice.ChosenQuality, ConditionReaction.FinalQuality(s, n, choice.Rest, 1, next));
                     }
             }
     }

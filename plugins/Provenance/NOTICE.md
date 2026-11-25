@@ -167,8 +167,9 @@ Adapted files:
   conditions, the quality and progress formulas, the HQ chance table), ported from raphael-rs at
   commit 9311b0d: `raphael-sim/src/state.rs`, `actions.rs`, `effects.rs`, `conditions.rs` and
   `settings.rs`, and `HQ_LOOKUP` in `raphael-data/src/lib.rs`. Changed to C#, and reduced to the
-  non-adversarial simulator on the conditions of a normal recipe, without Trained Eye, Stellar
-  Steady Hand or backloaded progress.
+  non-adversarial simulator on the conditions of a normal recipe, without Trained Eye, Rapid
+  Synthesis, Hasty Touch, Daring Touch, Stellar Steady Hand or backloaded progress. The values that
+  depend on the crafter's level are kept.
 
 Copyright KonaeAkira and the raphael-rs contributors. Licensed under the Apache License, Version 2.0
 (<https://www.apache.org/licenses/LICENSE-2.0>); distributed on an "AS IS" basis, without warranties

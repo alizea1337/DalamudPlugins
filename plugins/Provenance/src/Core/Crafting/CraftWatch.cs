@@ -32,7 +32,8 @@ public sealed class CraftWatch
     private SimState predicted;
     /// <summary>The condition of the step the last action was used on; null before the first action.</summary>
     private CraftCondition? lastCondition;
-    private bool lastUsedStep;
+    /// <summary>The last action used (null before the first).</summary>
+    private SimAction? lastAction;
 
     /// <param name="initialQuality">The quality the HQ ingredients start the craft with (raphael-cli's <c>initial_quality</c>).</param>
     /// <param name="recipeMaxQuality">The recipe's most quality (the game caps quality there).</param>
@@ -102,9 +103,16 @@ public sealed class CraftWatch
         condition = CraftCondition.Normal;
         if (r.ConditionCode is < 0 or > 3) return $"condition code {r.ConditionCode} isn't Normal, Good, Excellent or Poor";
         condition = (CraftCondition)r.ConditionCode;
-        var expected = lastCondition is not { } last ? (CraftCondition?)CraftCondition.Normal : lastUsedStep ? null : last;
-        if (expected is { } e && condition != e) return $"condition {condition}, expected {e}";
-        if (expected == null && !CraftConditions.CanFollow(lastCondition!.Value, condition)) return $"condition {condition} after {lastCondition}";
+        if (lastCondition is not { } last)
+        {
+            if (condition != CraftCondition.Normal) return $"condition {condition} on the first step";
+        }
+        // Heart and Soul keeps the step's condition. Raphael counts Quick Innovation as no step too, but the game may roll a
+        // new condition after it (Artisan's simulator does): either is fine there.
+        else if (lastAction == SimAction.HeartAndSoul ? condition != last
+                 : lastAction == SimAction.QuickInnovation ? condition != last && !CraftConditions.CanFollow(last, condition)
+                 : !CraftConditions.CanFollow(last, condition))
+            return $"condition {condition} after {last} ({(lastAction is { } la ? ConditionReaction.Name(la) : "")})";
         var p = predicted;
         var diffs = new List<string>();
         void Check(string what, int game, int sim)
@@ -162,6 +170,6 @@ public sealed class CraftWatch
         }
         predicted = next;
         lastCondition = condition;
-        lastUsedStep = RaphaelSim.UsesStep(a);
+        lastAction = a;
     }
 }

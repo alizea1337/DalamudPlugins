@@ -9,7 +9,9 @@ namespace Provenance.Core.Crafting;
 // Adapted from raphael-sim (raphael-rs by KonaeAkira, commit 9311b0d, Apache License 2.0):
 // raphael-sim/src/state.rs, actions.rs, effects.rs, settings.rs and the HQ table in raphael-data/src/lib.rs.
 // Only the non-adversarial simulator, without backloaded progress, Stellar Steady Hand or Trained Eye, and only the
-// conditions of a normal recipe (Normal, Good, Excellent, Poor).
+// conditions of a normal recipe (Normal, Good, Excellent, Poor). Level-dependent values (the progress of Basic Synthesis,
+// Careful Synthesis, Groundwork and Delicate Synthesis, Inner Quiet from level 11, the actions' level requirements) are
+// kept; Rapid Synthesis and Hasty Touch, the other level-dependent ones, aren't simulated.
 
 /// <summary>The condition of a crafting step on a normal (non-expert) recipe.</summary>
 public enum CraftCondition { Normal, Good, Excellent, Poor }
@@ -223,14 +225,15 @@ public static class RaphaelSim
         _ => 0,
     };
 
-    /// <summary>Progress efficiency of the action in percent (0: no progress).</summary>
-    private static int ProgressModifier(in SimState st, SimAction a) => a switch
+    /// <summary>Progress efficiency of the action in percent (0: no progress); some grow with the crafter's level (traits).</summary>
+    private static int ProgressModifier(in SimState st, SimAction a, SimSettings s) => a switch
     {
-        SimAction.BasicSynthesis => 120,
+        SimAction.BasicSynthesis => s.JobLevel < 31 ? 100 : 120,
         SimAction.MuscleMemory => 300,
-        SimAction.CarefulSynthesis or SimAction.PrudentSynthesis => 180,
-        SimAction.Groundwork => DurabilityCost(st, 20) > st.Durability ? 180 : 360,
-        SimAction.DelicateSynthesis => 150,
+        SimAction.CarefulSynthesis => s.JobLevel < 82 ? 150 : 180,
+        SimAction.PrudentSynthesis => 180,
+        SimAction.Groundwork => (s.JobLevel < 86 ? 300 : 360) / (DurabilityCost(st, 20) > st.Durability ? 2 : 1),
+        SimAction.DelicateSynthesis => s.JobLevel < 94 ? 100 : 150,
         SimAction.IntensiveSynthesis => 400,
         _ => 0,
     };
@@ -261,7 +264,7 @@ public static class RaphaelSim
         if (qualityIncrease != 0 && s.JobLevel >= 11) n.InnerQuiet = Math.Min(10, n.InnerQuiet + 1);
 
         var progressIncrease = 0;
-        if (ProgressModifier(st, a) is var pm and > 0)
+        if (ProgressModifier(st, a, s) is var pm and > 0)
         {
             long efficiency = 10 + (st.MuscleMemory > 0 ? 10 : 0) + (st.Veneration > 0 ? 5 : 0);
             progressIncrease = (int)((long)s.BaseProgress * pm * efficiency / 1000);
