@@ -33,6 +33,10 @@ internal sealed class Raphael
         public uint[] Actions { get; set; } = Array.Empty<uint>();
         public int Final { get; set; }
         public int Max { get; set; }
+        /// <summary>The quality HQ ingredients start the craft with (-1: kept before it was asked for).</summary>
+        public int Initial { get; set; } = -1;
+        /// <summary>The numbers the rotation was worked out for (null: kept before they were asked for).</summary>
+        public SimSettings? Sim { get; set; }
         public DateTime Used { get; set; }
     }
 
@@ -78,7 +82,11 @@ internal sealed class Raphael
     {
         lock (keptLock)
         {
-            KeptRotations()[key] = new Kept { Actions = solution.Actions.ToArray(), Final = solution.FinalQuality, Max = solution.MaxQuality, Used = DateTime.UtcNow };
+            KeptRotations()[key] = new Kept
+            {
+                Actions = solution.Actions.ToArray(), Final = solution.FinalQuality, Max = solution.MaxQuality, Initial = solution.InitialQuality,
+                Sim = solution.Sim, Used = DateTime.UtcNow,
+            };
             if (saveScheduled) return;
             saveScheduled = true;
         }
@@ -117,7 +125,7 @@ internal sealed class Raphael
         {
             if (!KeptRotations().TryGetValue(key, out var k)) return null;
             k.Used = DateTime.UtcNow;
-            return new RaphaelSolution(k.Actions, k.Final, k.Max);
+            return new RaphaelSolution(k.Actions, k.Final, k.Max, k.Initial, k.Sim);
         }
     }
 
@@ -156,13 +164,35 @@ internal sealed class Raphael
     /// </summary>
     public Task<RaphaelSolution> Solve(RaphaelRequest request)
         => cache.GetOrAdd(request.CacheKey, key => FromKept(key) is { } known
-            ? Task.FromResult(known)
+            ? Task.FromResult(known.Simulable || request.TargetQuality == 0 ? known : Refresh(key, request, known))
             : Task.Run(async () =>
             {
                 var solution = await Run(request).ConfigureAwait(false);
                 Keep(key, solution);
                 return solution;
             }));
+
+    /// <summary>
+    /// A rotation kept from before raphael-cli was asked what it worked the rotation out for: used as it is, and solved again
+    /// in the background so the simulator (reacting to conditions, the HQ chance) gets those numbers.
+    /// </summary>
+    private RaphaelSolution Refresh(string key, RaphaelRequest request, RaphaelSolution known)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var solution = await Run(request).ConfigureAwait(false);
+                Keep(key, solution);
+                cache[key] = Task.FromResult(solution);
+            }
+            catch (Exception e)
+            {
+                Services.Log.Debug("Solving a kept rotation again for recipe {Recipe} failed: {Message}", request.RecipeId, e.Message);
+            }
+        });
+        return known;
+    }
 
     /// <summary>The finished answer for a request, without starting one.</summary>
     public RaphaelSolution? Known(RaphaelRequest request)

@@ -54,8 +54,13 @@ public readonly record struct LiveRecipe(int RecipeLevel, int Progress, int Qual
 /// <summary>A rotation, and the quality it ends at (counting what HQ ingredients start it with) out of the recipe's most.</summary>
 /// <param name="FinalQuality">-1 when raphael-cli didn't say.</param>
 /// <param name="MaxQuality">-1 when raphael-cli didn't say.</param>
-public sealed record RaphaelSolution(IReadOnlyList<uint> Actions, int FinalQuality, int MaxQuality)
+/// <param name="InitialQuality">The quality the HQ ingredients start the craft with; -1 when raphael-cli didn't say.</param>
+/// <param name="Sim">The numbers raphael-cli worked the rotation out for (for the simulator); null when it didn't say.</param>
+public sealed record RaphaelSolution(IReadOnlyList<uint> Actions, int FinalQuality, int MaxQuality, int InitialQuality = -1, SimSettings? Sim = null)
 {
+    /// <summary>The simulator can follow this rotation: raphael-cli said what it was worked out for.</summary>
+    public bool Simulable => Sim != null && InitialQuality >= 0 && MaxQuality > 0;
+
     /// <summary>Ends at the recipe's most quality, so the item comes out HQ for certain.</summary>
     public bool ReachesMax => MaxQuality > 0 && FinalQuality >= MaxQuality;
 }
@@ -82,13 +87,14 @@ public static class RaphaelCli
         if (r.SteadyHand > 0) a.Append(CultureInfo.InvariantCulture, $" --stellar-steady-hand {Math.Min(r.SteadyHand, 3)}");
         if (r.Food != 0) a.Append(CultureInfo.InvariantCulture, $" --food {r.Food}{(r.FoodHq ? ",HQ" : "")}");
         if (r.Potion != 0) a.Append(CultureInfo.InvariantCulture, $" --potion {r.Potion}{(r.PotionHq ? ",HQ" : "")}");
-        a.Append(" --output-variables action_ids final_quality recipe_max_quality");
+        a.Append(" --output-variables action_ids final_quality recipe_max_quality initial_quality settings");
         return a.ToString();
     }
 
     /// <summary>
-    /// Reads <c>"[100379, 4639]",14087,21200</c>: the actions, then the quality the rotation ends at and the
-    /// recipe's most. Null when the output isn't a solution.
+    /// Reads <c>"[100379, 4639]",14087,21200,0,"Settings { max_cp: 741, … }"</c>: the actions, the quality the rotation
+    /// ends at, the recipe's most, the quality the HQ ingredients start it with, and the numbers it was worked out for. Null
+    /// when the output isn't a solution.
     /// </summary>
     public static RaphaelSolution? ParseSolution(string output)
     {
@@ -98,7 +104,7 @@ public static class RaphaelCli
         var rest = text[(text.IndexOf(']') + 1)..].Trim('"', ' ', '\r', '\n')
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         int Number(int i) => i < rest.Length && int.TryParse(rest[i], NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : -1;
-        return new RaphaelSolution(ids, Number(0), Number(1));
+        return new RaphaelSolution(ids, Number(0), Number(1), Number(2), SimSettings.Parse(text));
     }
 
     /// <summary>Reads <c>"[100379, 4639, 19297]"</c> into action ids. Empty when the output isn't a solution.</summary>

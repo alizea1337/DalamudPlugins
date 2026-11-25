@@ -143,7 +143,11 @@ The crafting step follows the approach of GatherBuddy Reborn's Vulcan, whose cra
 from Artisan by Puni.sh: open the recipe, assign ingredients through the recipe log, start the
 synthesis, and play a rotation action by action while reading the Synthesis window. The layout
 facts used (recipe ingredient counts, Synthesis window values) and the per-job mapping of crafting
-actions come from that work.
+actions come from that work. Reacting to Good and Excellent steps reads the step's progress, quality,
+durability and condition from the Synthesis window and the crafting buffs by their status ids as
+Artisan does (`GameInterop/Crafting.cs`, `RawInformation/Character/Buffs.cs`), and the condition
+model in `src/Core/Crafting/ConditionReaction.cs` (`CraftConditions`) follows Artisan's
+`Simulator.GetNextCondition` and `NormalCraftConditionProbabilities`.
 
 BSD 3-Clause License, Copyright (c) 2023, Puni.sh. Redistribution and use in source and binary
 forms, with or without modification, are permitted provided that the copyright notice, this list of
@@ -156,6 +160,19 @@ IMPLIED WARRANTIES ARE DISCLAIMED.
 `raphael-cli.exe` is built from raphael-rs by KonaeAkira (<https://github.com/KonaeAkira/raphael-rs>),
 Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds). Provenance runs it as a
 separate program to work out crafting rotations.
+
+Adapted files:
+
+- `src/Core/Crafting/RaphaelSim.cs`: the crafting simulator (actions, their costs, effects and
+  conditions, the quality and progress formulas, the HQ chance table), ported from raphael-rs at
+  commit 9311b0d: `raphael-sim/src/state.rs`, `actions.rs`, `effects.rs`, `conditions.rs` and
+  `settings.rs`, and `HQ_LOOKUP` in `raphael-data/src/lib.rs`. Changed to C#, and reduced to the
+  non-adversarial simulator on the conditions of a normal recipe, without Trained Eye, Stellar
+  Steady Hand or backloaded progress.
+
+Copyright KonaeAkira and the raphael-rs contributors. Licensed under the Apache License, Version 2.0
+(<https://www.apache.org/licenses/LICENSE-2.0>); distributed on an "AS IS" basis, without warranties
+or conditions of any kind. The files above were modified as described.
 
 ## FFXIV Teamcraft (vendor positions, monster drops, aetherial reduction)
 

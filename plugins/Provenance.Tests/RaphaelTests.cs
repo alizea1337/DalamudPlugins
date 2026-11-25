@@ -9,14 +9,14 @@ public class RaphaelTests
     public void Builds_the_solve_command_line()
     {
         var full = RaphaelCli.Arguments(new RaphaelRequest(38104, 100, 5844, 5182, 572, true, false, null));
-        Assert.Equal("solve --recipe-id 38104 --level 100 --stats 5844 5182 572 --manipulation --output-variables action_ids final_quality recipe_max_quality", full);
+        Assert.Equal("solve --recipe-id 38104 --level 100 --stats 5844 5182 572 --manipulation --output-variables action_ids final_quality recipe_max_quality initial_quality settings", full);
 
         // No quality wanted: the specialist actions are left out (raphael-cli fails with them, and they only add quality).
         var fast = RaphaelCli.Arguments(new RaphaelRequest(153, 100, 5844, 5182, 572, false, true, 0));
-        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --target-quality 0 --output-variables action_ids final_quality recipe_max_quality", fast);
+        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --target-quality 0 --output-variables action_ids final_quality recipe_max_quality initial_quality settings", fast);
 
         var hq = RaphaelCli.Arguments(new RaphaelRequest(153, 100, 5844, 5182, 572, false, true, null));
-        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --heart-and-soul --quick-innovation --output-variables action_ids final_quality recipe_max_quality", hq);
+        Assert.Equal("solve --recipe-id 153 --level 100 --stats 5844 5182 572 --heart-and-soul --quick-innovation --output-variables action_ids final_quality recipe_max_quality initial_quality settings", hq);
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public class RaphaelTests
     {
         var sheet = new RaphaelRequest(36771, 100, 5844, 5182, 572, true, false, 0);
         var live = sheet with { Live = new LiveRecipe(690, 6600, 12000, 80) };
-        Assert.Equal("solve --custom-recipe 690 6600 12000 80 --level 100 --stats 5844 5182 572 --manipulation --target-quality 0 --output-variables action_ids final_quality recipe_max_quality",
+        Assert.Equal("solve --custom-recipe 690 6600 12000 80 --level 100 --stats 5844 5182 572 --manipulation --target-quality 0 --output-variables action_ids final_quality recipe_max_quality initial_quality settings",
             RaphaelCli.Arguments(live));
         Assert.StartsWith("solve --recipe-id 36771 ", RaphaelCli.Arguments(sheet));
         Assert.NotEqual(sheet.CacheKey, live.CacheKey);
@@ -34,7 +34,7 @@ public class RaphaelTests
     public void Hq_ingredients_start_the_craft_with_quality()
     {
         var withHq = new RaphaelRequest(37825, 100, 5700, 5300, 645, true, false, null, new[] { 2, 1, 0 });
-        Assert.Equal("solve --recipe-id 37825 --level 100 --stats 5700 5300 645 --manipulation --hq-ingredients 2 1 0 --output-variables action_ids final_quality recipe_max_quality",
+        Assert.Equal("solve --recipe-id 37825 --level 100 --stats 5700 5300 645 --manipulation --hq-ingredients 2 1 0 --output-variables action_ids final_quality recipe_max_quality initial_quality settings",
             RaphaelCli.Arguments(withHq));
         // None HQ, or no quality wanted: not passed.
         Assert.DoesNotContain("--hq-ingredients", RaphaelCli.Arguments(withHq with { HqIngredients = new[] { 0, 0, 0 } }));
