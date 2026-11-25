@@ -263,7 +263,7 @@ internal static class Readiness
     private static string Short(TimeSpan span) => Estimator.Describe(span).Replace("about ", "");
 
     /// <summary>Gearset stats plus the food and medicine picked for that discipline.</summary>
-    public static int[] WithConsumables(int[] stats, Discipline discipline, GameCatalog catalog, Configuration cfg)
+    private static int[] WithConsumables(int[] stats, Discipline discipline, GameCatalog catalog, Configuration cfg)
     {
         var result = (int[])stats.Clone();
         var (food, medicine) = cfg.Consumables.For(discipline);

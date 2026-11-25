@@ -24,6 +24,16 @@ internal sealed class Raphael
     private readonly ConcurrentDictionary<string, Task<RaphaelSolution>> cache = new();
     /// <summary>Estimates and the Cosmic plan ask for many recipes at once; three solver processes at a time.</summary>
     private static readonly SemaphoreSlim Gate = new(3);
+    /// <summary>
+    /// Work nobody waits for (solving kept rotations again, HQ chances): one at a time, and only while no crafter's solve
+    /// waits for <see cref="Gate"/>.
+    /// </summary>
+    private static readonly SemaphoreSlim BackgroundGate = new(1);
+    private static readonly SemaphoreSlim EstimateGate = new(1);
+    /// <summary>Crafter solves waiting for <see cref="Gate"/>.</summary>
+    private static int craftWaiting;
+
+    private enum Lane { Normal, Craft, Background }
 
     /// <summary>Kept rotations at most (the least recently used go first).</summary>
     private const int KeptMost = 6000;
@@ -37,6 +47,8 @@ internal sealed class Raphael
         public int Initial { get; set; } = -1;
         /// <summary>The numbers the rotation was worked out for (null: kept before they were asked for).</summary>
         public SimSettings? Sim { get; set; }
+        /// <summary>raphael-cli was asked for <see cref="Initial"/> and <see cref="Sim"/> (false: kept before that; solved again once).</summary>
+        public bool Asked { get; set; }
         public DateTime Used { get; set; }
     }
 
@@ -85,7 +97,7 @@ internal sealed class Raphael
             KeptRotations()[key] = new Kept
             {
                 Actions = solution.Actions.ToArray(), Final = solution.FinalQuality, Max = solution.MaxQuality, Initial = solution.InitialQuality,
-                Sim = solution.Sim, Used = DateTime.UtcNow,
+                Sim = solution.Sim, Asked = true, Used = DateTime.UtcNow,
             };
             if (saveScheduled) return;
             saveScheduled = true;
@@ -119,12 +131,17 @@ internal sealed class Raphael
     }
 
     /// <summary>A kept rotation for the request, or null.</summary>
-    private RaphaelSolution? FromKept(string key)
+    private RaphaelSolution? FromKept(string key) => FromKept(key, out _);
+
+    /// <param name="asked">raphael-cli was asked what the rotation was worked out for (even when it didn't say).</param>
+    private RaphaelSolution? FromKept(string key, out bool asked)
     {
         lock (keptLock)
         {
+            asked = false;
             if (!KeptRotations().TryGetValue(key, out var k)) return null;
             k.Used = DateTime.UtcNow;
+            asked = k.Asked;
             return new RaphaelSolution(k.Actions, k.Final, k.Max, k.Initial, k.Sim);
         }
     }
@@ -162,19 +179,29 @@ internal sealed class Raphael
     /// Cached per request for the session (failures too, so a broken recipe isn't retried every second); rotations
     /// found are kept on disk for later sessions.
     /// </summary>
-    public Task<RaphaelSolution> Solve(RaphaelRequest request)
-        => cache.GetOrAdd(request.CacheKey, key => FromKept(key) is { } known
-            ? Task.FromResult(known.Simulable || request.TargetQuality == 0 ? known : Refresh(key, request, known))
+    /// <param name="forCraft">The crafter waits for it: background work makes way.</param>
+    public Task<RaphaelSolution> Solve(RaphaelRequest request, bool forCraft = false)
+        => cache.GetOrAdd(request.CacheKey, key => FromKept(key, out var asked) is { } known
+            ? Task.FromResult(asked || !Refreshable(request) || !refreshing.TryAdd(key, 0) ? known : Refresh(key, request, known))
             : Task.Run(async () =>
             {
-                var solution = await Run(request).ConfigureAwait(false);
+                var solution = await Run(request, forCraft ? Lane.Craft : Lane.Normal).ConfigureAwait(false);
                 Keep(key, solution);
                 return solution;
             }));
 
+    /// <summary>Kept rotations solved again this session (GetOrAdd can call its factory twice).</summary>
+    private readonly ConcurrentDictionary<string, byte> refreshing = new();
+
+    /// <summary>
+    /// Worth solving again for the simulator's numbers: a rotation that wants quality, on a normal recipe as the sheet has it
+    /// (not a fastest one, a Cosmic Exploration mission's with Stellar Steady Hand, or the game's adjusted numbers).
+    /// </summary>
+    private static bool Refreshable(RaphaelRequest r) => r.TargetQuality != 0 && r.SteadyHand == 0 && r.Live == null;
+
     /// <summary>
     /// A rotation kept from before raphael-cli was asked what it worked the rotation out for: used as it is, and solved again
-    /// in the background so the simulator (reacting to conditions, the HQ chance) gets those numbers.
+    /// once in the background so the simulator (reacting to conditions, the HQ chance) gets those numbers.
     /// </summary>
     private RaphaelSolution Refresh(string key, RaphaelRequest request, RaphaelSolution known)
     {
@@ -182,7 +209,7 @@ internal sealed class Raphael
         {
             try
             {
-                var solution = await Run(request).ConfigureAwait(false);
+                var solution = await Run(request, Lane.Background).ConfigureAwait(false);
                 Keep(key, solution);
                 cache[key] = Task.FromResult(solution);
             }
@@ -205,8 +232,23 @@ internal sealed class Raphael
     {
         if (!solution.Simulable) return null;
         var key = $"{request.CacheKey}|{(react ? "react" : "plain")}|{solution.FinalQuality}|{string.Join(",", solution.Actions)}";
-        var task = hqEstimates.GetOrAdd(key, _ => Task.Run(() => Estimate(solution, react)));
+        var task = hqEstimates.GetOrAdd(key, _ => Task.Run(async () =>
+        {
+            await EstimateGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await MakeWayForCraft().ConfigureAwait(false);
+                return Estimate(solution, react);
+            }
+            finally { EstimateGate.Release(); }
+        }));
         return task.IsCompletedSuccessfully ? task.Result : null;
+    }
+
+    /// <summary>Waits while a crafter's solve waits for a solver slot.</summary>
+    private static async Task MakeWayForCraft()
+    {
+        while (Volatile.Read(ref craftWaiting) > 0) await Task.Delay(250).ConfigureAwait(false);
     }
 
     private static HqEstimate? Estimate(RaphaelSolution solution, bool react)
@@ -230,25 +272,39 @@ internal sealed class Raphael
         if (cache.TryGetValue(request.CacheKey, out var t) && (t.IsFaulted || t.IsCanceled)) cache.TryRemove(request.CacheKey, out _);
     }
 
-    private static async Task<RaphaelSolution> Run(RaphaelRequest request)
+    private static async Task<RaphaelSolution> Run(RaphaelRequest request, Lane lane)
     {
-        await Gate.WaitAsync().ConfigureAwait(false);
+        if (lane == Lane.Background) await BackgroundGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            // raphael-cli sometimes fails with an internal error for some option sets: try again with
-            // fewer options (no specialist actions, then no Manipulation) before giving up.
-            try { return await RunOne(request).ConfigureAwait(false); }
-            catch (RaphaelInternalError) when (request.Specialist)
+            if (lane == Lane.Background) await MakeWayForCraft().ConfigureAwait(false);
+            if (lane == Lane.Craft) Interlocked.Increment(ref craftWaiting);
+            try { await Gate.WaitAsync().ConfigureAwait(false); }
+            finally
             {
-                request = request with { Specialist = false };
+                if (lane == Lane.Craft) Interlocked.Decrement(ref craftWaiting);
             }
-            try { return await RunOne(request).ConfigureAwait(false); }
-            catch (RaphaelInternalError) when (request.Manipulation)
+            try
             {
-                return await RunOne(request with { Manipulation = false }).ConfigureAwait(false);
+                // raphael-cli sometimes fails with an internal error for some option sets: try again with
+                // fewer options (no specialist actions, then no Manipulation) before giving up.
+                try { return await RunOne(request).ConfigureAwait(false); }
+                catch (RaphaelInternalError) when (request.Specialist)
+                {
+                    request = request with { Specialist = false };
+                }
+                try { return await RunOne(request).ConfigureAwait(false); }
+                catch (RaphaelInternalError) when (request.Manipulation)
+                {
+                    return await RunOne(request with { Manipulation = false }).ConfigureAwait(false);
+                }
             }
+            finally { Gate.Release(); }
         }
-        finally { Gate.Release(); }
+        finally
+        {
+            if (lane == Lane.Background) BackgroundGate.Release();
+        }
     }
 
     /// <summary>raphael-cli failed for a reason other than "no solution" (it crashed or rejected the options).</summary>

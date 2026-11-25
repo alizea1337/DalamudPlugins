@@ -66,6 +66,8 @@ public sealed class Plugin : IDalamudPlugin
         ECommons.Automation.AutoCutsceneSkipper.Init(_ => DeliveryLoop.SkipCutscenesNow || TribeLoop.SkipCutscenesNow);
         // While a run earns scrips its collectables stay put: a plan rebuild mustn't switch them mid-round.
         Plans.KeepScripTasks = () => Runs.EarningScrips;
+        Plans.RunActive = () => Runs.Active;
+        Plans.RunCrafting = () => Runs.Active && Runs.Crafting;
         guard = new Run.Guard(this);
         Main = new MainWindow(this, new NavGroup[]
         {

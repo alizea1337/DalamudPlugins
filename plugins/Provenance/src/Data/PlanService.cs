@@ -120,6 +120,14 @@ internal sealed class PlanService : IDisposable
     /// pick halfway through a round would send the run to the appraiser with collectables it never made. Null: always choose.
     /// </summary>
     public Func<bool>? KeepScripTasks { get; set; }
+    /// <summary>A run is under way: the HQ crafts' rotations stay as they were planned (the bags, the plan and the food change as it goes).</summary>
+    public Func<bool>? RunActive { get; set; }
+    /// <summary>A run is crafting: the HQ notes stay as they were, nothing new is worked out for them.</summary>
+    public Func<bool>? RunCrafting { get; set; }
+    /// <summary>The rotation request per HQ recipe, kept while a run is under way.</summary>
+    private readonly Dictionary<uint, RaphaelRequest> hqRequests = new();
+    /// <summary>The last HQ note per recipe, kept while a run is crafting.</summary>
+    private readonly Dictionary<uint, string?> qualityNotes = new();
     /// <summary>Scrips the scrip plan is expected to bring in, by scrip item.</summary>
     private readonly Dictionary<uint, Core.Scrips.ScripTask> earning = new();
     /// <summary>
@@ -717,38 +725,68 @@ internal sealed class PlanService : IDisposable
     }
 
     /// <summary>
-    /// For an HQ craft whose best rotation falls short of the recipe's most quality: how often it comes out HQ, counting the
-    /// Good and Excellent steps that come along (and the reactions to them when that setting is on). Planned as the run
-    /// will: the gearset's stats with the food and medicine picked, HQ ingredients where the plan makes them HQ or has them.
-    /// Null when the rotation reaches the most quality or isn't worked out yet; until the HQ chance is, the plain note.
+    /// For an HQ craft whose best rotation falls short of the recipe's most quality: how often it comes out HQ, estimated with
+    /// the Good and Excellent steps that come along (and the reactions to them when that setting is on). Uses the line's own
+    /// rotation (<see cref="Request"/>), once it's worked out. Null when it reaches the most quality or isn't worked out yet;
+    /// until the HQ chance is, the plain note. While a run is crafting, the note it had.
     /// </summary>
     private string? QualityNote(RecipeInfo recipe)
     {
-        var catalog = Catalog;
-        var job = Profile?.Job(recipe.Job.ClassJobId());
-        if (catalog == null || recipe.Expert || job == null || job.Source == StatSource.None || job.Stats.Length < 3 || job.Level <= 0) return null;
-        var cfg = config();
-        var stats = Data.Readiness.WithConsumables(job.Stats, Discipline.Hand, catalog, cfg);
-        var hqIn = recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId))
-            .Select(i => Plan.CraftSteps.Any(l => l.ItemId == i.ItemId && l.Hq) ? i.Amount : Math.Min(i.Amount, ownedHq.GetValueOrDefault(i.ItemId)))
-            .ToArray();
-        var request = new RaphaelRequest(recipe.RecipeId, job.Level, stats[0], stats[1], stats[2], job.Manipulation,
-            cfg.Crafting.UseSpecialistActions && job.Specialist, null, hqIn);
+        if (RunCrafting?.Invoke() == true) return qualityNotes.GetValueOrDefault(recipe.RecipeId);
+        var note = NewQualityNote(recipe);
+        qualityNotes[recipe.RecipeId] = note;
+        return note;
+    }
+
+    private string? NewQualityNote(RecipeInfo recipe)
+    {
+        if (recipe.Expert || Request(recipe, true) is not { } request) return null;
         var task = raphael.Solve(request);
         if (!task.IsCompletedSuccessfully || task.Result is not { ReachesMax: false, FinalQuality: >= 0, MaxQuality: > 0 } solution) return null;
         var head = $"The best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality";
-        var estimate = CraftActions.NormalConditions(recipe.RecipeId) ? raphael.HqEstimateFor(request, solution, cfg.Crafting.ReactToConditions) : null;
+        var estimate = CraftActions.NormalConditions(recipe.RecipeId) ? raphael.HqEstimateFor(request, solution, config().Crafting.ReactToConditions) : null;
         return estimate is { } e
-            ? $"{head}; counting the Good and Excellent steps that come along, {HqChance.Describe(e.HqPercent)}."
+            ? $"{head}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent)}."
             : $"{head}, so it comes out HQ only sometimes.";
     }
 
+    /// <summary>
+    /// The rotation request for a recipe at the stats from the last character check. An HQ one is planned as the run will
+    /// craft it: with the food and medicine picked that are in the bags, the HQ ingredients the plan makes or you have, and
+    /// specialist actions only with enough Crafter's Delineations. Kept as it was while a run is under way.
+    /// </summary>
     private RaphaelRequest? Request(RecipeInfo recipe, bool hq)
     {
         var job = Profile?.Job(recipe.Job.ClassJobId());
         if (job == null || job.Source == StatSource.None || job.Stats.Length < 3 || job.Level <= 0) return null;
-        return new RaphaelRequest(recipe.RecipeId, job.Level, job.Stats[0], job.Stats[1], job.Stats[2], job.Manipulation,
-            config().Crafting.UseSpecialistActions && job.Specialist, hq ? null : 0);
+        if (!hq)
+            return new RaphaelRequest(recipe.RecipeId, job.Level, job.Stats[0], job.Stats[1], job.Stats[2], job.Manipulation,
+                config().Crafting.UseSpecialistActions && job.Specialist, 0);
+        if (RunActive?.Invoke() == true && hqRequests.TryGetValue(recipe.RecipeId, out var kept)) return kept;
+        var cfg = config();
+        var stats = Catalog is { } catalog ? CraftStats(job.Stats, catalog, cfg) : job.Stats;
+        var hqIn = recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId))
+            .Select(i => Plan.CraftSteps.Any(l => l.ItemId == i.ItemId && l.Hq) ? i.Amount : Math.Min(i.Amount, ownedHq.GetValueOrDefault(i.ItemId)))
+            .ToArray();
+        // As the crafter: a rotation can use both specialist actions, one delineation each.
+        var specialist = cfg.Crafting.UseSpecialistActions && job.Specialist && (!Services.ClientState.IsLoggedIn || GameState.Delineations >= 2);
+        var request = new RaphaelRequest(recipe.RecipeId, job.Level, stats[0], stats[1], stats[2], job.Manipulation, specialist, null, hqIn);
+        hqRequests[recipe.RecipeId] = request;
+        return request;
+    }
+
+    /// <summary>Gearset stats plus the crafting food and medicine picked, when they're in the bags (the crafter goes without otherwise).</summary>
+    private static int[] CraftStats(int[] stats, GameCatalog catalog, Configuration cfg)
+    {
+        var result = (int[])stats.Clone();
+        var (food, medicine) = cfg.Consumables.For(Discipline.Hand);
+        foreach (var choice in new[] { food, medicine })
+        {
+            if (choice.ItemId == 0 || GameState.BagCount(choice.ItemId) == 0 || catalog.Consumable(choice.ItemId) is not { } info) continue;
+            var bonus = info.Bonus(stats, choice.Hq && GameState.BagCount(choice.ItemId, true) > 0);
+            for (var i = 0; i < 3 && i < result.Length; i++) result[i] += bonus[i];
+        }
+        return result;
     }
 
     /// <summary>For the estimate: items that only come as collectables, the gatherer's GP, the cordials in the bags.</summary>
