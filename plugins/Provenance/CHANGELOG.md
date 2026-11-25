@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.24.0
+
+- Crafting: the run now reacts to Good and Excellent steps. Crafts follow a rotation worked out before the
+  craft (Raphael), and so far a Good or Excellent step only helped when a touch happened to land on it. Now,
+  on such a step, the crafter checks a few changes in a simulator of the game's rules (Precise Touch, Tricks
+  of the Trade or Intensive Synthesis there, or an action from later brought forward) and takes the one that
+  ends with the most quality and still finishes the item. Measured offline on a level 100 potion: about 6
+  more crafts in 100 come out HQ. It applies to HQ crafts and collectables, not to expert recipes or Cosmic
+  Exploration missions.
+  - Before every step it compares the game's numbers with the simulator's; at the first difference it stops
+    reacting for the rest of that craft and plays the rotation as it stands (the debug log says why).
+  - The run log says, per craft, how many steps it reacted to and the quality it reached against the plan.
+  - *React to Good and Excellent steps* (Settings, Crafting) turns it off. It's on by default.
+- The Plan page and the run log give an estimated HQ chance for an HQ craft whose rotation falls short of
+  full quality, counting the Good and Excellent steps that come along (for example "about 59% of crafts come
+  out HQ" instead of "HQ only sometimes").
+- Rotations worked out in the background (saved ones from earlier versions, the Plan page's) no longer hold
+  up the crafter's own: they wait while it needs one.
+- The crafting simulator is ported from raphael-rs (Apache-2.0); see NOTICE.md.
+
 ## 0.23.5
 
 - Crafting: the specialist actions (Heart and Soul, Quick Innovation) each use up a Crafter's Delineation, and
