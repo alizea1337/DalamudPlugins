@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Arriving in the air next to an NPC where the game won't land (over a chair, a table or a step; the Dwarves'\n  Slurping Dwarf), the run pressed Dismount until it gave up and asked you. After two presses it now comes\n  down on the walkable floor next to the NPC and gets off there.\n- Tribes: handing in a daily of a society whose reputation bar is full, the game warns that the reputation\n  can't be received. The run now answers Yes when reputation is all that's lost (it plans those dailies\n  knowingly); when seals or tomestones would be lost as well, it still asks you.\r\n",
+    "Changelog": "- Crafting: when the game refused an action of the rotation (here Quick Innovation, then Reflect, then\n  Prudent Synthesis), the run went on without it and then used the same rotation again for every following\n  craft, so each one went wrong the same way and finished after a few steps with little quality. The next\n  craft now gets a rotation worked out afresh (without specialist actions once one was refused). The debug\n  log notes what the game said, the step and the specialist status, to find out why.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.23.2.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.2/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.2/latest.zip",
+    "AssemblyVersion": "0.23.3.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.3/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.3/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795561329
+    "LastUpdate": 1795631064
   }
 ]
