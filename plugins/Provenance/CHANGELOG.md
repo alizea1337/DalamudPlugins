@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.4
+
+- The debug log (and so the bug report) now says when the crafter eats or takes medicine, or that the buff
+  was still active.
+
 ## 0.23.3
 
 - Crafting: when the game refused an action of the rotation (here Quick Innovation, then Reflect, then

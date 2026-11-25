@@ -426,7 +426,12 @@ internal sealed unsafe class Crafter
         var (food, medicine) = plugin.Config.Consumables.For(Discipline.Hand);
         foreach (var (choice, isMedicine) in new[] { (food, false), (medicine, true) })
         {
-            if (choice.ItemId == 0 || GameState.BuffSecondsLeft(isMedicine) > 60) continue;
+            if (choice.ItemId == 0 || GameState.BuffSecondsLeft(isMedicine) > 60)
+            {
+                if (choice.ItemId != 0 && warnedOnce.Add("active" + choice.ItemId + (isMedicine ? "m" : "f")))
+                    DebugLog.Write("crafter", $"{(isMedicine ? "medicine" : "food")} {choice.ItemId}: already active, {GameState.BuffSecondsLeft(isMedicine):0} s left");
+                continue;
+            }
             var hq = choice.Hq && GameState.BagCount(choice.ItemId, true) > 0;
             if (GameState.BagCount(choice.ItemId, hq) == 0)
             {
@@ -439,6 +444,7 @@ internal sealed unsafe class Crafter
             if (GameState.InCraftingStance) { afterLeave = Step.Consumables; Go(Step.LeaveStance); return; }
             Status = isMedicine ? "Taking medicine" : "Eating";
             GameState.UseItem(choice.ItemId, hq);
+            DebugLog.Write("crafter", $"{(isMedicine ? "medicine" : "food")} {choice.ItemId}{(hq ? " HQ" : "")}: used ({GameState.BagCount(choice.ItemId, hq)} in the bags before)");
             lastUse[choice.ItemId] = DateTime.UtcNow;
             Wait(2.5);
             return;
