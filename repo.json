@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Crafting: the specialist actions (Heart and Soul, Quick Innovation) each use up a Crafter's Delineation, and\n  the game refuses them without one, soul crystal or not (\"Cannot execute at this time\"). The run only checked\n  the crystal, so rotations planned with them went wrong. It now plans specialist actions only with at least 2\n  Crafter's Delineations in the bags, says so in the run log when there are fewer, and works the rotation out\n  again when they run low partway through.\r\n",
+    "Changelog": "- Crafting: the run now reacts to Good and Excellent steps. Crafts follow a rotation worked out before the\n  craft (Raphael), and so far a Good or Excellent step only helped when a touch happened to land on it. Now,\n  on such a step, the crafter checks a few changes in a simulator of the game's rules (Precise Touch, Tricks\n  of the Trade or Intensive Synthesis there, or an action from later brought forward) and takes the one that\n  ends with the most quality and still finishes the item. Measured offline on a level 100 potion: about 6\n  more crafts in 100 come out HQ. It applies to HQ crafts and collectables, not to expert recipes or Cosmic\n  Exploration missions.\n  - Before every step it compares the game's numbers with the simulator's; at the first difference it stops\n    reacting for the rest of that craft and plays the rotation as it stands (the debug log says why).\n  - The run log says, per craft, how many steps it reacted to and the quality it reached against the plan.\n  - *React to Good and Excellent steps* (Settings, Crafting) turns it off. It's on by default.\n- The Plan page and the run log give an estimated HQ chance for an HQ craft whose rotation falls short of\n  full quality, counting the Good and Excellent steps that come along (for example \"about 59% of crafts come\n  out HQ\" instead of \"HQ only sometimes\").\n- Rotations worked out in the background (saved ones from earlier versions, the Plan page's) no longer hold\n  up the crafter's own: they wait while it needs one.\n- The crafting simulator is ported from raphael-rs (Apache-2.0); see NOTICE.md.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.23.5.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.5/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.23.5/latest.zip",
+    "AssemblyVersion": "0.24.0.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.24.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.24.0/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795632522
+    "LastUpdate": 1795638742
   }
 ]
