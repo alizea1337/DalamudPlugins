@@ -132,7 +132,20 @@ stats is ready at once next time.
 
 NQ ingredients pull the quality down: a hard recipe made from NQ materials can't reach full quality. So the
 crafted materials under an HQ item are made HQ, only the HQ ones you own count for them, and HQ ingredients go
-in first. When even the best rotation falls short, the run log says how far it gets and what would help.
+in first. When even the best rotation falls short, the Plan page and the run log say how far it gets and how
+often the item comes out HQ, counting the Good and Excellent steps that come along; the run log also says what
+would help.
+
+### What does "React to Good and Excellent steps" do?
+
+Raphael plans a rotation as if every step were Normal. When a step comes up Good or Excellent, the run tries a
+few small changes to the rest of the rotation: Precise Touch, Tricks of the Trade or Intensive Synthesis in place
+of the next action or before it, or one of the next actions brought forward. It works out each in a simulator and
+takes the one that ends with the most quality and still finishes the item; when nothing beats the plan, the plan
+stays. It only does this for HQ crafts and collectables (more than a collectable's target is worth nothing), not
+for expert recipes or Cosmic Exploration missions. After every step it checks the game's numbers against the
+simulator's; at the first difference, or when the game refuses an action, it plays the rest as planned. The run
+log says when a craft reacted and what quality it reached. Turn it off under Settings, Crafting.
 
 ## Scrips
 
