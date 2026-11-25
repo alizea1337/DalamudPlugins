@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.1
+
+- Plan page: the rotation and HQ chance shown for an HQ craft now count the crafting food and medicine picked on
+  the Character page (in the quality picked) even when none are in your bags, and the note then says so: the
+  crafter itself only uses what's in the bags, so without them it reaches less.
+
 ## 0.24.0
 
 - Crafting: the run now reacts to Good and Excellent steps. Crafts follow a rotation worked out before the

@@ -742,17 +742,25 @@ internal sealed class PlanService : IDisposable
     {
         if (recipe.Expert || Request(recipe, true) is not { } request) return null;
         var task = raphael.Solve(request);
-        if (!task.IsCompletedSuccessfully || task.Result is not { ReachesMax: false, FinalQuality: >= 0, MaxQuality: > 0 } solution) return null;
+        if (!task.IsCompletedSuccessfully || task.Result is not { FinalQuality: >= 0, MaxQuality: > 0 } solution) return null;
+        var missing = Catalog is { } catalog ? MissingConsumables(catalog, config()) : "";
+        var them = missing.Contains(" and ", StringComparison.Ordinal) ? "them" : "it";
+        if (solution.ReachesMax)
+            return missing.Length == 0 ? null
+                : $"The best rotation reaches full quality with {missing} as picked on the Character page, but you have none in your bags: "
+                  + $"the crafter goes without {them} and may fall short.";
         var head = $"The best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality";
         var estimate = CraftActions.NormalConditions(recipe.RecipeId) ? raphael.HqEstimateFor(request, solution, config().Crafting.ReactToConditions) : null;
-        return estimate is { } e
+        var note = estimate is { } e
             ? $"{head}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent)}."
             : $"{head}, so it comes out HQ only sometimes.";
+        return missing.Length == 0 ? note
+            : $"{note} This counts {missing} as picked on the Character page, but you have none in your bags: without {them} the crafter reaches less.";
     }
 
     /// <summary>
     /// The rotation request for a recipe at the stats from the last character check. An HQ one is planned as the run will
-    /// craft it: with the food and medicine picked that are in the bags, the HQ ingredients the plan makes or you have, and
+    /// craft it: with the food and medicine picked on the Character page (in the bags or not), the HQ ingredients the plan makes or you have, and
     /// specialist actions only with enough Crafter's Delineations. Kept as it was while a run is under way.
     /// </summary>
     private RaphaelRequest? Request(RecipeInfo recipe, bool hq)
@@ -775,18 +783,38 @@ internal sealed class PlanService : IDisposable
         return request;
     }
 
-    /// <summary>Gearset stats plus the crafting food and medicine picked, when they're in the bags (the crafter goes without otherwise).</summary>
+    /// <summary>
+    /// Gearset stats plus the crafting food and medicine picked on the Character page, in the quality picked, whether or not
+    /// they're in the bags (the note says so when they aren't: <see cref="MissingConsumables"/>).
+    /// </summary>
     private static int[] CraftStats(int[] stats, GameCatalog catalog, Configuration cfg)
     {
         var result = (int[])stats.Clone();
         var (food, medicine) = cfg.Consumables.For(Discipline.Hand);
         foreach (var choice in new[] { food, medicine })
         {
-            if (choice.ItemId == 0 || GameState.BagCount(choice.ItemId) == 0 || catalog.Consumable(choice.ItemId) is not { } info) continue;
-            var bonus = info.Bonus(stats, choice.Hq && GameState.BagCount(choice.ItemId, true) > 0);
+            if (choice.ItemId == 0 || catalog.Consumable(choice.ItemId) is not { } info) continue;
+            var bonus = info.Bonus(stats, choice.Hq);
             for (var i = 0; i < 3 && i < result.Length; i++) result[i] += bonus[i];
         }
         return result;
+    }
+
+    /// <summary>
+    /// The crafting food and medicine picked that the bags don't hold in the quality picked ("Mate Cookie (HQ) and
+    /// Grade 2 Gemdraught of Craftsmanship"), empty when all are there. The crafter uses only what's in the bags.
+    /// </summary>
+    private static string MissingConsumables(GameCatalog catalog, Configuration cfg)
+    {
+        var (food, medicine) = cfg.Consumables.For(Discipline.Hand);
+        var missing = new List<string>();
+        foreach (var choice in new[] { food, medicine })
+        {
+            if (choice.ItemId == 0 || catalog.Consumable(choice.ItemId) == null) continue;
+            if (GameState.BagCount(choice.ItemId, choice.Hq) > 0) continue;
+            missing.Add(catalog.ItemName(choice.ItemId) + (choice.Hq ? " (HQ)" : ""));
+        }
+        return string.Join(" and ", missing);
     }
 
     /// <summary>For the estimate: items that only come as collectables, the gatherer's GP, the cordials in the bags.</summary>
