@@ -22,6 +22,14 @@ internal static class CraftActions
         return result;
     }
 
+    /// <summary>
+    /// A recipe whose steps can only be Normal, Good, Excellent or Poor (its recipe level's conditions, 1 + 2 + 4 + 8) and
+    /// that isn't an expert recipe: the condition model and the reactions to Good and Excellent steps hold for it.
+    /// </summary>
+    public static bool NormalConditions(uint recipeId)
+        => Services.Data.GetExcelSheet<Recipe>().GetRowOrDefault(recipeId) is { } r && !r.IsExpert
+           && r.RecipeLevelTable.ValueNullable is { } level && level.ConditionsFlag == 15;
+
     public static string Name(uint raphaelId)
         => raphaelId >= 100000
             ? Services.Data.GetExcelSheet<CraftAction>().GetRowOrDefault(raphaelId)?.Name.ExtractText() ?? "#" + raphaelId

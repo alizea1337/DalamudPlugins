@@ -194,6 +194,32 @@ internal sealed class Raphael
         return known;
     }
 
+    private readonly ConcurrentDictionary<string, Task<HqEstimate?>> hqEstimates = new();
+
+    /// <summary>
+    /// A realistic HQ chance for a solved rotation (<see cref="HqChance"/>: about 2,000 crafts with random conditions, with
+    /// the reactions to Good and Excellent steps or without), worked out in the background once per rotation. Null until
+    /// it's ready, or when the simulator can't follow the rotation.
+    /// </summary>
+    public HqEstimate? HqEstimateFor(RaphaelRequest request, RaphaelSolution solution, bool react)
+    {
+        if (!solution.Simulable) return null;
+        var key = $"{request.CacheKey}|{(react ? "react" : "plain")}|{solution.FinalQuality}|{string.Join(",", solution.Actions)}";
+        var task = hqEstimates.GetOrAdd(key, _ => Task.Run(() => Estimate(solution, react)));
+        return task.IsCompletedSuccessfully ? task.Result : null;
+    }
+
+    private static HqEstimate? Estimate(RaphaelSolution solution, bool react)
+    {
+        if (solution.Sim is not { } s || RaphaelSim.FromIds(solution.Actions) is not { } plan) return null;
+        if (CraftWatch.For(s, solution.InitialQuality, solution.MaxQuality, solution.Actions, solution.FinalQuality, out var why) == null)
+        {
+            Services.Log.Debug("No HQ chance for this rotation: {Why}", why);
+            return null;
+        }
+        return HqChance.Estimate(s, solution.InitialQuality, solution.MaxQuality, plan, react);
+    }
+
     /// <summary>The finished answer for a request, without starting one.</summary>
     public RaphaelSolution? Known(RaphaelRequest request)
         => cache.TryGetValue(request.CacheKey, out var t) ? t.IsCompletedSuccessfully ? t.Result : null : FromKept(request.CacheKey);

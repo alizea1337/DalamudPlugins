@@ -134,6 +134,16 @@ public class RaphaelSimTests
     }
 
     [Fact]
+    public void Says_how_often_a_craft_comes_out_hq()
+    {
+        Assert.Equal("about 59% of crafts come out HQ", HqChance.Describe(59.03));
+        Assert.Equal("about 1% of crafts come out HQ", HqChance.Describe(0.5));
+        Assert.Equal("hardly any craft comes out HQ", HqChance.Describe(0.4));
+        Assert.Equal("nearly every craft comes out HQ", HqChance.Describe(99.5));
+        Assert.Equal("about 99% of crafts come out HQ", HqChance.Describe(99.32));
+    }
+
+    [Fact]
     public void Hq_table_matches_raphael()
     {
         Assert.Equal(1, RaphaelSim.HqPercent(0, 100));

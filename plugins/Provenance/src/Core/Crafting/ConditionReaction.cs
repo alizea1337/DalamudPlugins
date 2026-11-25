@@ -164,6 +164,15 @@ public static class HqChance
 {
     public const int DefaultCrafts = 2000;
 
+    /// <summary>"about 59% of crafts come out HQ", for an average HQ chance in percent.</summary>
+    public static string Describe(double hqPercent)
+    {
+        var n = (int)Math.Round(hqPercent, MidpointRounding.AwayFromZero);
+        return n >= 100 ? "nearly every craft comes out HQ"
+            : n < 1 ? "hardly any craft comes out HQ"
+            : $"about {n}% of crafts come out HQ";
+    }
+
     /// <param name="initialQuality">The quality the HQ ingredients start the craft with.</param>
     /// <param name="recipeMaxQuality">The recipe's most quality (the HQ table's 100 %).</param>
     public static HqEstimate Estimate(SimSettings s, int initialQuality, int recipeMaxQuality, IReadOnlyList<SimAction> plan, bool react,
