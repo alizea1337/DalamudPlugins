@@ -798,6 +798,11 @@ internal sealed unsafe class Crafter
                 specialistRefused = true;
                 log("Specialist actions are left out of the rotations from now on (one was refused).", true);
             }
+            // The rest of this rotation was planned with that action in it (and a first-step action like Reflect only
+            // works first): the next craft gets a rotation worked out afresh, instead of the same one going wrong again.
+            solveAgainAfterCraft = true;
+            DebugLog.Write("crafter", $"[!] step {actionIndex + 1}/{macro.Count} {CurrentAction} ({id}) refused: {GameState.ActionStatus(type, id)}; "
+                                      + $"step in the window {stepIndex}, animation lock {ActionManager.Instance()->AnimationLock:0.00}, specialist {GameState.SpecialistEquipped()}; the next craft gets a new rotation");
             // Not one the rotation hangs on: go on without it, and Basic Synthesis finishes what progress is left at the end.
             if (!fallback && !Essential.Contains(raphaelId))
             {
@@ -850,7 +855,8 @@ internal sealed unsafe class Crafter
         Crafted?.Invoke(Current.Recipe);
         if (solveAgainAfterCraft)
         {
-            // The synthesis window showed numbers the rotation wasn't worked out for: a new one for the next craft.
+            // The synthesis window showed numbers the rotation wasn't worked out for, or the game refused one of its
+            // actions: a new one for the next craft.
             solveAgainAfterCraft = false;
             macro.Clear();
         }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.3
+
+- Crafting: when the game refused an action of the rotation (here Quick Innovation, then Reflect, then
+  Prudent Synthesis), the run went on without it and then used the same rotation again for every following
+  craft, so each one went wrong the same way and finished after a few steps with little quality. The next
+  craft now gets a rotation worked out afresh (without specialist actions once one was refused). The debug
+  log notes what the game said, the step and the specialist status, to find out why.
+
 ## 0.23.2
 
 - Arriving in the air next to an NPC where the game won't land (over a chair, a table or a step; the Dwarves'
