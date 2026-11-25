@@ -101,6 +101,9 @@ internal sealed unsafe class Crafter
     /// <summary>Raphael's ids of the specialist actions (Heart and Soul, Quick Innovation).</summary>
     private static readonly HashSet<uint> SpecialistActions = new() { 100419, 100459 };
 
+    /// <summary>A rotation can use both specialist actions, one Crafter's Delineation each: specialist rotations only with this many in the bags.</summary>
+    private const int DelineationsPerCraft = 2;
+
     /// <summary>
     /// While timed nodes are still to be gathered: craft only recipes whose materials are in the bags and
     /// keep the rest for later instead of skipping them.
@@ -479,8 +482,16 @@ internal sealed unsafe class Crafter
             var c = plugin.Config.Crafting;
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
             var hqIn = Current.Cosmic ? null : HqIngredients(Current);
+            var specialist = c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused;
+            if (specialist && GameState.Delineations < DelineationsPerCraft)
+            {
+                specialist = false;
+                if (warnedOnce.Add("delineations"))
+                    log($"Fewer than {DelineationsPerCraft} {plugin.Plans.Catalog!.ItemName(GameState.Delineation)} in the bags ({GameState.Delineations}): "
+                        + "specialist actions use one each, so the rotations leave them out.", true);
+            }
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
-                manipulation, c.UseSpecialistActions && GameState.SpecialistEquipped() && !Current.Cosmic && !specialistRefused,
+                manipulation, specialist,
                 Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed),
                 Live: Current.LiveRecipe ? live : null);
             Status = "Working out the rotation";
@@ -808,7 +819,8 @@ internal sealed unsafe class Crafter
             // works first): the next craft gets a rotation worked out afresh, instead of the same one going wrong again.
             solveAgainAfterCraft = true;
             DebugLog.Write("crafter", $"[!] step {actionIndex + 1}/{macro.Count} {CurrentAction} ({id}) refused: {GameState.ActionStatus(type, id)}; "
-                                      + $"step in the window {stepIndex}, animation lock {ActionManager.Instance()->AnimationLock:0.00}, specialist {GameState.SpecialistEquipped()}; the next craft gets a new rotation");
+                                      + $"step in the window {stepIndex}, animation lock {ActionManager.Instance()->AnimationLock:0.00}, specialist {GameState.SpecialistEquipped()}, "
+                                      + $"delineations {GameState.Delineations}; the next craft gets a new rotation");
             // Not one the rotation hangs on: go on without it, and Basic Synthesis finishes what progress is left at the end.
             if (!fallback && !Essential.Contains(raphaelId))
             {
@@ -866,6 +878,8 @@ internal sealed unsafe class Crafter
             solveAgainAfterCraft = false;
             macro.Clear();
         }
+        // The delineations ran low: the next craft's rotation leaves the specialist actions out.
+        if (macro.Any(SpecialistActions.Contains) && GameState.Delineations < DelineationsPerCraft) macro.Clear();
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
         // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.

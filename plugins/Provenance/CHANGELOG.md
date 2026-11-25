@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.5
+
+- Crafting: the specialist actions (Heart and Soul, Quick Innovation) each use up a Crafter's Delineation, and
+  the game refuses them without one, soul crystal or not ("Cannot execute at this time"). The run only checked
+  the crystal, so rotations planned with them went wrong. It now plans specialist actions only with at least 2
+  Crafter's Delineations in the bags, says so in the run log when there are fewer, and works the rotation out
+  again when they run low partway through.
+
 ## 0.23.4
 
 - The debug log (and so the bug report) now says when the crafter eats or takes medicine, or that the buff

@@ -100,6 +100,16 @@ internal static unsafe class GameState
     public static int JobLevel(uint classJob) => Data.PlanService.JobLevel(classJob);
 
     /// <summary>The soul crystal slot holds a specialist soul.</summary>
+    /// <summary>
+    /// Crafter's Delineation: each specialist action (Careful Observation, Heart and Soul, Quick Innovation) uses one;
+    /// without any the game refuses them ("Cannot execute at this time"), soul crystal or not. Fact from Artisan (BSD-3),
+    /// seen in a live log: both refused with the crystal equipped.
+    /// </summary>
+    public const uint Delineation = 28724;
+
+    /// <summary>Crafter's Delineations in the bags.</summary>
+    public static int Delineations => BagCount(Delineation);
+
     public static bool SpecialistEquipped()
     {
         var c = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
