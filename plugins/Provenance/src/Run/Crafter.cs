@@ -69,6 +69,24 @@ internal sealed unsafe class Crafter
     private Task<RaphaelSolution>? solving;
     private RaphaelRequest? solvingFor;
     private List<uint> macro = new();
+    /// <summary>The solution <see cref="macro"/> came from (null: none, or Basic Synthesis alone).</summary>
+    private RaphaelSolution? planned;
+    /// <summary>This craft's actions: the rotation, with the changes made on Good and Excellent steps.</summary>
+    private List<uint> rotation = new();
+    /// <summary>Follows this craft with the simulator to react to Good and Excellent steps (null: not reacting this craft).</summary>
+    private CraftWatch? watch;
+    /// <summary>The quality the rotation of this craft was planned to reach (Normal steps throughout).</summary>
+    private int rotationQuality = -1;
+    /// <summary>The action of the rotation the game's numbers were last checked before (each one once).</summary>
+    private int watchedAt = -1;
+    /// <summary>The condition of the step the next action goes on.</summary>
+    private CraftCondition stepCondition;
+    /// <summary>Since when the game's numbers differ from the prediction (they can lag a moment behind the window).</summary>
+    private DateTime differsSince;
+    /// <summary>The quality and step number the Synthesis window showed last.</summary>
+    private int seenQuality = -1, seenStep = -1;
+    /// <summary>A rotation that falls short of HQ, waiting for its HQ chance before the run log says so.</summary>
+    private (RaphaelRequest Request, RaphaelSolution Solution, string Text, string Hint, bool React, DateTime Since)? qualityNote;
     /// <summary>The HQ ingredients the rotation in use was worked out for (null: not an HQ craft).</summary>
     private IReadOnlyList<int>? macroHq;
     private int actionIndex;
@@ -126,8 +144,10 @@ internal sealed unsafe class Crafter
     public string Status { get; private set; } = "";
     public string? Failure { get; private set; }
     public string CurrentAction { get; private set; } = "";
-    public int ActionNumber => Math.Min(actionIndex, macro.Count);
-    public int ActionCount => macro.Count;
+    public int ActionNumber => Math.Min(actionIndex, Steps.Count);
+    public int ActionCount => Steps.Count;
+    /// <summary>The actions of the craft under way, or the rotation between crafts.</summary>
+    private List<uint> Steps => MidCraft ? rotation : macro;
     public IReadOnlyList<CraftJob> Upcoming => pending.ToList();
     /// <summary>The last rotation worked out: recipe, stats, HQ ingredients, steps and the quality it reaches (bug report).</summary>
     public string LastSolve { get; private set; } = "";
@@ -171,6 +191,9 @@ internal sealed unsafe class Crafter
         settling = null;
         macro.Clear();
         macroHq = null;
+        planned = null;
+        watch = null;
+        qualityNote = null;
         LastQuality = -1;
         SteadyHandUsed = 0;
         ForgetLive();
@@ -250,6 +273,7 @@ internal sealed unsafe class Crafter
 
     public void Tick()
     {
+        FlushQualityNote();
         if (Finished || step is Step.Idle or Step.Paused || DateTime.UtcNow < waitUntil) return;
         if (step is Step.SwitchJob or Step.Repair or Step.Consumables or Step.OpenRecipe or Step.Ingredients or Step.Synthesize && GetOffMount()) return;
         if (step == Step.WaitingForMaterials)
@@ -516,6 +540,7 @@ internal sealed unsafe class Crafter
             {
                 log($"{why} Finishing {plugin.Plans.Catalog!.ItemName(r.ItemId)} with Basic Synthesis instead.", true);
                 macro = new List<uint> { BasicSynthesis };
+                planned = null;
                 Go(Step.OpenRecipe);
                 return;
             }
@@ -524,6 +549,7 @@ internal sealed unsafe class Crafter
         }
         var solution = task.Result;
         macro = solution.Actions.ToList();
+        planned = solution;
         LastQuality = solution.FinalQuality;
         DebugLog.Write("crafter", $"rotation {macro.Count} steps, quality {solution.FinalQuality} of {solution.MaxQuality}: {string.Join(" ", macro)}");
         var name = plugin.Plans.Catalog!.ItemName(r.ItemId);
@@ -535,8 +561,12 @@ internal sealed unsafe class Crafter
             && warnedOnce.Add($"quality {r.RecipeId} {solution.FinalQuality}"))
         {
             var allHq = macroHq != null && Current.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId)).Select(i => i.Amount).SequenceEqual(macroHq);
-            log($"{name}: the best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality, so it comes out HQ only sometimes. "
-                + (allHq ? "Food and medicine (Character page) or better gear raise it." : "More HQ ingredients, food and medicine (Character page) or better gear raise it."), true);
+            var head = $"{name}: the best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality";
+            var hint = allHq ? "Food and medicine (Character page) or better gear raise it." : "More HQ ingredients, food and medicine (Character page) or better gear raise it.";
+            // How often it comes out HQ with Good and Excellent steps is worked out in the background; said once it's known.
+            if (solvingFor is { } asked2 && solution.Simulable && CraftActions.NormalConditions(r.RecipeId))
+                qualityNote = (asked2, solution, head, hint, plugin.Config.Crafting.ReactToConditions, DateTime.UtcNow);
+            else log($"{head}, so it comes out HQ only sometimes. {hint}", true);
         }
         Go(Step.OpenRecipe);
     }
@@ -730,7 +760,14 @@ internal sealed unsafe class Crafter
             fallback = false;
             stepIndexBefore = -1;
             windowChecked = false;
-            DebugLog.Write("crafter", $"synthesis started: recipe {Current!.Recipe.RecipeId}, craft {doneThisJob + 1} of {Current.Crafts}, rotation {macro.Count} steps");
+            rotation = macro.ToList();
+            rotationQuality = planned?.FinalQuality ?? -1;
+            watch = StartWatch(out var notWatching);
+            watchedAt = -1;
+            differsSince = default;
+            seenQuality = seenStep = -1;
+            DebugLog.Write("crafter", $"synthesis started: recipe {Current!.Recipe.RecipeId}, craft {doneThisJob + 1} of {Current.Crafts}, rotation {macro.Count} steps; "
+                                      + (watch != null ? "reacting to Good and Excellent steps" : "not reacting: " + notWatching));
             Status = $"Crafting {plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId)}";
             Go(Step.Acting);
             return;
@@ -764,6 +801,11 @@ internal sealed unsafe class Crafter
             Go(Step.WaitResult);
             return;
         }
+        if (synth->AtkValuesCount > 15)
+        {
+            seenQuality = synth->AtkValues[9].Int;
+            seenStep = synth->AtkValues[15].Int;
+        }
         if (Services.Condition[ConditionFlag.ExecutingCraftingAction] || !GenericHelpers.IsAddonReady(synth)) { Wait(0.1); return; }
 
         var stepIndex = synth->AtkValuesCount > 15 ? synth->AtkValues[15].Int : -1;
@@ -785,9 +827,12 @@ internal sealed unsafe class Crafter
             CheckSynthesisWindow(synth);
         }
 
+        // Reacting to Good and Excellent steps: the game's numbers first, then maybe a change to the rest of the rotation.
+        if (watch is { Active: true } && !fallback && actionIndex < rotation.Count && watchedAt != actionIndex && !WatchStep(synth)) return;
+
         var job = Current!.Recipe.Job.ClassJobId();
         uint raphaelId;
-        if (!fallback && actionIndex < macro.Count) raphaelId = macro[actionIndex];
+        if (!fallback && actionIndex < rotation.Count) raphaelId = rotation[actionIndex];
         else
         {
             if (!fallback)
@@ -795,8 +840,10 @@ internal sealed unsafe class Crafter
                 log("The rotation ended before the item was finished; completing it with Basic Synthesis. The next craft gets a fresh rotation.", true);
                 // Planned on stats that weren't right: plan the next one again from the live numbers.
                 macro = new List<uint>();
+                planned = null;
             }
             fallback = true;
+            StopWatching("the rotation ended before the item was finished");
             // Finished another way than planned: the quality it ends at isn't known.
             LastQuality = -1;
             raphaelId = BasicSynthesis;
@@ -809,7 +856,7 @@ internal sealed unsafe class Crafter
             // The first action gets a little longer: the craft can take a moment to accept actions.
             if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(actionIndex == 0 ? 4 : 2);
             if (DateTime.UtcNow < deadline) { Wait(0.1); return; }
-            var why = $"the game says {GameState.ActionStatus(type, id)}, step {actionIndex + 1} of {macro.Count}";
+            var why = $"the game says {GameState.ActionStatus(type, id)}, step {actionIndex + 1} of {rotation.Count}";
             if (SpecialistActions.Contains(raphaelId) && !specialistRefused)
             {
                 specialistRefused = true;
@@ -818,7 +865,8 @@ internal sealed unsafe class Crafter
             // The rest of this rotation was planned with that action in it (and a first-step action like Reflect only
             // works first): the next craft gets a rotation worked out afresh, instead of the same one going wrong again.
             solveAgainAfterCraft = true;
-            DebugLog.Write("crafter", $"[!] step {actionIndex + 1}/{macro.Count} {CurrentAction} ({id}) refused: {GameState.ActionStatus(type, id)}; "
+            StopWatching($"the game refused {CurrentAction}");
+            DebugLog.Write("crafter", $"[!] step {actionIndex + 1}/{rotation.Count} {CurrentAction} ({id}) refused: {GameState.ActionStatus(type, id)}; "
                                       + $"step in the window {stepIndex}, animation lock {ActionManager.Instance()->AnimationLock:0.00}, specialist {GameState.SpecialistEquipped()}, "
                                       + $"delineations {GameState.Delineations}; the next craft gets a new rotation");
             // Not one the rotation hangs on: go on without it, and Basic Synthesis finishes what progress is left at the end.
@@ -839,10 +887,14 @@ internal sealed unsafe class Crafter
         deadline = DateTime.UtcNow.AddSeconds(6);
         stepIndexBefore = stepIndex;
         actionPending = GameState.Use(type, id);
-        DebugLog.Write("crafter", $"step {actionIndex + 1}/{macro.Count} {CurrentAction} ({id}){(fallback ? " fallback" : "")}: {(actionPending ? "sent" : "not sent")}");
+        DebugLog.Write("crafter", $"step {actionIndex + 1}/{rotation.Count} {CurrentAction} ({id}){(fallback ? " fallback" : "")}: {(actionPending ? "sent" : "not sent")}");
         if (actionPending) actionsUsed++;
         if (actionPending && raphaelId == StellarSteadyHand) SteadyHandUsed++;
-        if (actionPending && !fallback) actionIndex++;
+        if (actionPending && !fallback)
+        {
+            if (watch is { Active: true }) watch.Used(raphaelId, stepCondition);
+            actionIndex++;
+        }
         Wait(0.25);
     }
 
@@ -868,6 +920,17 @@ internal sealed unsafe class Crafter
         }
         var name = plugin.Plans.Catalog!.ItemName(Current!.Recipe.ItemId);
         log($"Crafted {name} ({doneThisJob} of {Current.Crafts}).", false);
+        if (watch is { } w)
+        {
+            watch = null;
+            // The window shows the last action's result when its step number moved on after it; otherwise the simulator's
+            // numbers hold as long as they matched the game's.
+            var updated = seenStep != stepIndexBefore;
+            var final = updated ? seenQuality : w.Active ? w.PredictedQuality : -1;
+            DebugLog.Write("crafter", $"reacted {w.GoodReactions}× on Good, {w.ExcellentReactions}× on Excellent; final quality {final} (window {seenQuality}{(updated ? "" : " from before the last action")}, "
+                                      + $"simulator {w.PredictedQuality}{(w.Active ? "" : ", stopped: " + w.Stopped)}), planned {rotationQuality}");
+            if (ConditionReaction.Summary(w.GoodReactions, w.ExcellentReactions, final, rotationQuality) is { } reacted) log(reacted, false);
+        }
         if (Current.Cosmic && macro.Contains(StellarSteadyHand)) macro.Clear();
         DebugLog.Write("crafter", $"crafted {name} ({doneThisJob} of {Current.Crafts}), {actionsUsed} actions, rotation quality {LastQuality}, Steady Hand used {SteadyHandUsed}");
         Crafted?.Invoke(Current.Recipe);
@@ -884,6 +947,108 @@ internal sealed unsafe class Crafter
         Wait(0.6);
         // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.
         Go(doneThisJob < Current.Crafts ? macro.Count == 0 ? Step.Solve : Step.Ingredients : Step.NextRecipe, keepWait: true);
+    }
+
+    // ------------------------------------------------------------------ reacting to Good and Excellent steps
+
+    // Crafting buffs by status id (as Artisan reads them, RawInformation/Character/Buffs.cs).
+    private const uint InnerQuietStatus = 251, WasteNotStatus = 252, GreatStridesStatus = 254, WasteNot2Status = 257, ManipulationStatus = 1164,
+        InnovationStatus = 2189, MuscleMemoryStatus = 2191, VenerationStatus = 2226, HeartAndSoulStatus = 2665, TrainedPerfectionStatus = 3813;
+
+    /// <summary>
+    /// A watch for this craft when it reacts to Good and Excellent steps: the setting is on, the craft wants quality (an HQ
+    /// craft or a collectable), it's a normal recipe (not expert, not a Cosmic Exploration mission), and the simulator plays
+    /// the rotation to the quality Raphael said. Otherwise null, and why.
+    /// </summary>
+    private CraftWatch? StartWatch(out string why)
+    {
+        var job = Current!;
+        why = "";
+        if (!plugin.Config.Crafting.ReactToConditions) { why = "turned off"; return null; }
+        if (job.Cosmic || job.SteadyHand > 0) { why = "a Cosmic Exploration mission"; return null; }
+        if ((job.Quality ?? (job.Hq ? -1 : 0)) == 0) { why = "no quality wanted"; return null; }
+        if (!CraftActions.NormalConditions(job.Recipe.RecipeId)) { why = "an expert recipe, or one with other conditions"; return null; }
+        if (planned is not { Simulable: true } solution || !solution.Actions.SequenceEqual(macro))
+        {
+            why = "Raphael didn't say what this rotation was worked out for";
+            return null;
+        }
+        return CraftWatch.For(solution.Sim!, solution.InitialQuality, solution.MaxQuality, macro, solution.FinalQuality, out why);
+    }
+
+    private void StopWatching(string why)
+    {
+        if (watch is not { Active: true } w) return;
+        w.Stop(why);
+        DebugLog.Write("crafter", $"[!] no more reacting this craft: {why}");
+    }
+
+    /// <summary>
+    /// Before the next action: the game's numbers against the simulator's, then on a Good or Excellent step maybe a change to
+    /// the rest of the rotation. False while waiting a moment for numbers that differ (the buffs can lag behind the window).
+    /// </summary>
+    private bool WatchStep(AtkUnitBase* synth)
+    {
+        var w = watch!;
+        if (synth->AtkValuesCount <= 15)
+        {
+            StopWatching("the Synthesis window has fewer values than expected");
+            return true;
+        }
+        var reading = ReadStep(synth);
+        if (w.Compare(reading, out var condition) is { } differs)
+        {
+            if (differsSince == default) differsSince = DateTime.UtcNow;
+            if (DateTime.UtcNow - differsSince < TimeSpan.FromSeconds(1.5)) { Wait(0.1); return false; }
+            differsSince = default;
+            StopWatching($"before step {actionIndex + 1} the game shows {differs}; the game: {reading}; the simulator: {w.Predicted}");
+            return true;
+        }
+        differsSince = default;
+        watchedAt = actionIndex;
+        stepCondition = condition;
+        if (w.React(condition, rotation.GetRange(actionIndex, rotation.Count - actionIndex)) is { } edit)
+        {
+            var was = rotation[actionIndex];
+            rotation.RemoveRange(actionIndex, rotation.Count - actionIndex);
+            rotation.AddRange(edit.Actions);
+            DebugLog.Write("crafter", $"step {actionIndex + 1} is {condition}: planned {CraftActions.Name(was)}, now {edit.Choice.Edit}; "
+                                      + $"predicted quality {w.Shown(edit.Choice.KeptQuality)} -> {w.Shown(edit.Choice.ChosenQuality)}");
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The step as the game shows it: progress, quality, durability and condition from the Synthesis window (AtkValues 5, 9,
+    /// 7 and 12, as Artisan reads them), the CP and the crafting buffs from the player.
+    /// </summary>
+    private static CraftReading ReadStep(AtkUnitBase* synth)
+    {
+        var values = synth->AtkValues;
+        var progress = values[5].Int;
+        var quality = values[9].Int;
+        var durability = values[7].Int;
+        var condition = values[12].Int;
+        var me = Services.Objects.LocalPlayer;
+        int Param(uint id) => me?.StatusList.FirstOrDefault(s => s.StatusId == id) is { } status ? status.Param : 0;
+        bool Has(uint id) => me?.StatusList.Any(s => s.StatusId == id) == true;
+        var wasteNot = Param(WasteNot2Status);
+        if (wasteNot == 0) wasteNot = Param(WasteNotStatus);
+        return new CraftReading(progress, quality, durability, (int)(me?.CurrentCp ?? 0), condition, Param(InnerQuietStatus), Param(InnovationStatus),
+            Param(VenerationStatus), Param(GreatStridesStatus), wasteNot, Param(ManipulationStatus), Param(MuscleMemoryStatus),
+            Has(HeartAndSoulStatus), Has(TrainedPerfectionStatus));
+    }
+
+    /// <summary>The run log's note about a rotation that falls short of HQ, once its HQ chance is known (or after a few seconds without).</summary>
+    private void FlushQualityNote()
+    {
+        if (qualityNote is not { } note) return;
+        var estimate = raphael.HqEstimateFor(note.Request, note.Solution, note.React);
+        if (estimate == null && DateTime.UtcNow - note.Since < TimeSpan.FromSeconds(5)) return;
+        qualityNote = null;
+        log(estimate is { } e
+            ? $"{note.Text}; counting the Good and Excellent steps that come along, {HqChance.Describe(e.HqPercent)}. {note.Hint}"
+            : $"{note.Text}, so it comes out HQ only sometimes. {note.Hint}", true);
     }
 
     // ------------------------------------------------------------------ recipes the game adjusts

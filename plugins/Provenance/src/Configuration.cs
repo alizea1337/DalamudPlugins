@@ -311,6 +311,12 @@ public sealed class CraftingSettings
     public bool AimForHq { get; set; } = true;
     /// <summary>Let rotations use Heart and Soul and Quick Innovation when a specialist soul is equipped.</summary>
     public bool UseSpecialistActions { get; set; } = true;
+    /// <summary>
+    /// On a Good or Excellent step of an HQ craft or a collectable, make one small change to the rotation when the simulator
+    /// says it ends with more quality and still finishes (Precise Touch, Tricks of the Trade, Intensive Synthesis, or a later
+    /// action brought forward). Settings files from before have it on.
+    /// </summary>
+    public bool ReactToConditions { get; set; } = true;
 }
 
 /// <summary>Food and medicine to use while crafting and while gathering. None picked: no consumables.</summary>

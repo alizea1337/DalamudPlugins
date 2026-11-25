@@ -717,6 +717,10 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("High quality by default", ref v, "New items in the order start with HQ on; switch it per item in Browse or on the plan. Crafted materials that go into an HQ item are made HQ too; everything else gets the fastest rotation.")) { cr.AimForHq = v; Config.Save(); }
         v = cr.UseSpecialistActions;
         if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
+        v = cr.ReactToConditions;
+        if (Ui.Checkbox("React to Good and Excellent steps", ref v,
+                "On a Good or Excellent step, the rotation can swap in Precise Touch, Tricks of the Trade or Intensive Synthesis, or bring a later action forward, "
+                + "when that ends with more quality and still finishes the item. For HQ crafts and collectables, not expert recipes.")) { cr.ReactToConditions = v; Config.Save(); }
         Ui.Text("Repair gear below");
         ImGui.SameLine(0, 10 * s);
         var repair = cr.RepairBelow;
