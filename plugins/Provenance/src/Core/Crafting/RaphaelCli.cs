@@ -69,12 +69,16 @@ public sealed record RaphaelSolution(IReadOnlyList<uint> Actions, int FinalQuali
 public static class RaphaelCli
 {
     public static string Arguments(RaphaelRequest r)
+        => "solve " + Options(r) + " --output-variables action_ids final_quality recipe_max_quality initial_quality settings";
+
+    /// <summary>What to solve, as <c>solve</c> takes it (and the serve mode's <c>prepare</c>): recipe, stats, actions, HQ ingredients, target, food, medicine.</summary>
+    public static string Options(RaphaelRequest r)
     {
         var a = new StringBuilder();
         // The game's own numbers for the recipe, when they differ from the sheet's (raphael-cli takes one or the other).
         if (r.Live is { } live)
-            a.Append(CultureInfo.InvariantCulture, $"solve --custom-recipe {live.RecipeLevel} {live.Progress} {live.Quality} {live.Durability}");
-        else a.Append(CultureInfo.InvariantCulture, $"solve --recipe-id {r.RecipeId}");
+            a.Append(CultureInfo.InvariantCulture, $"--custom-recipe {live.RecipeLevel} {live.Progress} {live.Quality} {live.Durability}");
+        else a.Append(CultureInfo.InvariantCulture, $"--recipe-id {r.RecipeId}");
         a.Append(CultureInfo.InvariantCulture, $" --level {r.Level} --stats {r.Craftsmanship} {r.Control} {r.Cp}");
         if (r.Manipulation) a.Append(" --manipulation");
         // Heart and Soul / Quick Innovation only add quality; with no quality wanted raphael-cli even
@@ -87,7 +91,6 @@ public static class RaphaelCli
         if (r.SteadyHand > 0) a.Append(CultureInfo.InvariantCulture, $" --stellar-steady-hand {Math.Min(r.SteadyHand, 3)}");
         if (r.Food != 0) a.Append(CultureInfo.InvariantCulture, $" --food {r.Food}{(r.FoodHq ? ",HQ" : "")}");
         if (r.Potion != 0) a.Append(CultureInfo.InvariantCulture, $" --potion {r.Potion}{(r.PotionHq ? ",HQ" : "")}");
-        a.Append(" --output-variables action_ids final_quality recipe_max_quality initial_quality settings");
         return a.ToString();
     }
 

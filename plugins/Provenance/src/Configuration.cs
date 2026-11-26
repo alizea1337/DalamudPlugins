@@ -312,7 +312,8 @@ public sealed class CraftingSettings
     /// <summary>Let rotations use Heart and Soul and Quick Innovation when a specialist soul is equipped.</summary>
     public bool UseSpecialistActions { get; set; } = true;
     /// <summary>
-    /// On a Good or Excellent step of an HQ craft or a collectable, make one small change to the rotation when the simulator
+    /// On a Good or Excellent step of an HQ craft or a collectable, have Raphael work out the rest of the rotation again from
+    /// there (raphael-cli's serve mode); without an answer in time, make one small change to the rotation when the simulator
     /// says it ends with more quality and still finishes (Precise Touch, Tricks of the Trade, Intensive Synthesis, or a later
     /// action brought forward). Settings files from before have it on.
     /// </summary>

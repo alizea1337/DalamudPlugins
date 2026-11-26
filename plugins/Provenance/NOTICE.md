@@ -158,8 +158,28 @@ IMPLIED WARRANTIES ARE DISCLAIMED.
 ## Raphael
 
 `raphael-cli.exe` is built from raphael-rs by KonaeAkira (<https://github.com/KonaeAkira/raphael-rs>),
-Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds). Provenance runs it as a
-separate program to work out crafting rotations.
+Apache License 2.0 (`Resources/LICENSE-raphael.txt` in release builds), at commit 9311b0d with
+Provenance's patch `Raphael/raphael-rs-serve.patch` applied (the release workflow applies it before
+building). Provenance runs it as a separate program to work out crafting rotations, and keeps one
+running while it crafts to work out the rest of a rotation again on Good and Excellent steps.
+
+The patch changes these raphael-rs files:
+
+- `raphael-solver/src/macro_solver/solver.rs`: `MacroSolver::solve` is split into `prepare` (the
+  bound solvers' precomputes, run once) and `PreparedMacroSolver::solve_from` /
+  `solve_from_condition` (a search from any mid-craft state, the first step under a given
+  condition, with Precise Touch, Tricks of the Trade and Intensive Synthesis on a Good or Excellent
+  one). The finish check ignores a touch combo the finish solver doesn't store. `solve` itself works
+  as before.
+- `raphael-solver/src/macro_solver/search_queue.rs`, `raphael-solver/src/actions.rs`: the first
+  step's condition is kept through the search (`use_action_combo_in`).
+- `raphael-solver/src/lib.rs`, `raphael-solver/src/macro_solver/mod.rs`: `PreparedMacroSolver` and
+  `BumpPool` exported.
+- `raphael-cli/src/commands/serve.rs` (new), `raphael-cli/src/main.rs`,
+  `raphael-cli/src/commands/mod.rs`: the `serve` command, a line protocol on stdin and stdout
+  (`prepare` with `solve`'s options, `solve` from a state and condition, `cancel`, `quit`).
+- `raphael-cli/src/commands/solve.rs`: working out the settings from the options is moved into
+  `setup`, so `serve` shares it; `solve`'s output is unchanged.
 
 Adapted files:
 

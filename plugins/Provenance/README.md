@@ -77,8 +77,9 @@ keeps it from sliding things around.
   best gearset, with repair, your food and medicine, and a Raphael rotation for your live stats
   (best quality for HQ items, with HQ ingredients first; the crafted materials under an HQ item are
   made HQ too, everything else gets the fastest rotation). On a Good or Excellent step of an HQ
-  craft or a collectable, it can change one action of the rotation when that ends with more quality
-  and still finishes the item (a setting, on by default). Pause and Stop wait for the item
+  craft or a collectable, Raphael works out the rest of the rotation again from there; when it has
+  no answer within 6 seconds, one action of the rotation changes instead when that ends with more
+  quality and still finishes the item (a setting, on by default). Pause and Stop wait for the item
   being crafted. Recipes whose materials aren't in your bags are skipped and listed.
 - **Scrips**: master books and folklore tomes the order needs are bought at a scrip or token
   exchange and read before anything else. Materials only sold for scrips (white, purple or orange,

@@ -52,7 +52,10 @@ public sealed class CraftWatch
     public int GoodReactions { get; private set; }
     public int ExcellentReactions { get; private set; }
     public int Reactions => GoodReactions + ExcellentReactions;
+    /// <summary>Of the reactions, the ones where Raphael worked out the rest of the rotation afresh (<see cref="Replanning"/>).</summary>
+    public int Replans { get; private set; }
     public SimState Predicted => predicted;
+    public SimSettings Settings => settings;
 
     /// <summary>The quality the game should show now, as the simulator has it.</summary>
     public int PredictedQuality => Math.Min(recipeMaxQuality, initialQuality + predicted.Quality);
@@ -136,16 +139,69 @@ public sealed class CraftWatch
     }
 
     /// <summary>
+    /// Whether this step is one to react to: still watching, a Good or Excellent step, and the rotation's next action takes a
+    /// step (not Heart and Soul or Quick Innovation, as with <see cref="ConditionReaction.Choose"/>).
+    /// </summary>
+    public bool CanReact(CraftCondition condition, IReadOnlyList<uint> rest)
+        => Active && ConditionReaction.IsSpecial(condition) && rest.Count > 0 && RaphaelSim.FromId(rest[0]) is { } first && RaphaelSim.UsesStep(first)
+           && RaphaelSim.FromIds(rest) != null;
+
+    /// <summary>
     /// The edit for this step of the rotation (<paramref name="rest"/>: Raphael's ids from this step on), or null to keep
     /// it. Counts the reaction.
     /// </summary>
     public (List<uint> Actions, ReactionChoice Choice)? React(CraftCondition condition, IReadOnlyList<uint> rest)
     {
-        if (!Active || !ConditionReaction.IsSpecial(condition) || RaphaelSim.FromIds(rest) is not { } plan) return null;
-        if (ConditionReaction.Choose(settings, predicted, plan, condition) is not { } choice) return null;
+        if (Cheap(condition, rest) is not { } choice) return null;
+        Count(condition);
+        return (choice.Rest.Select(RaphaelSim.Id).ToList(), choice);
+    }
+
+    /// <summary>What the cheap reaction would do on this step (nothing counted).</summary>
+    private ReactionChoice? Cheap(CraftCondition condition, IReadOnlyList<uint> rest)
+        => !Active || !ConditionReaction.IsSpecial(condition) || RaphaelSim.FromIds(rest) is not { } plan ? null
+            : ConditionReaction.Choose(settings, predicted, plan, condition);
+
+    private void Count(CraftCondition condition)
+    {
         if (condition == CraftCondition.Good) GoodReactions++;
         else ExcellentReactions++;
-        return (choice.Rest.Select(RaphaelSim.Id).ToList(), choice);
+    }
+
+    /// <summary>
+    /// Raphael's new rest of the rotation for this step (<paramref name="replanned"/>, worked out from <see cref="Predicted"/>
+    /// under <paramref name="condition"/>), checked with the simulator against the cheap reaction (<see cref="Replanning.Accept"/>).
+    /// Null, with why, when it isn't taken; the cheap reaction then takes the step. Counts the reaction when the rotation
+    /// changes.
+    /// </summary>
+    /// <param name="quality">The quality the new rest reaches, and <paramref name="beaten"/> what the cheap reaction would (simulator numbers).</param>
+    public List<uint>? Replan(CraftCondition condition, IReadOnlyList<uint> rest, IReadOnlyList<uint> replanned, out int quality, out int beaten, out string why)
+    {
+        quality = beaten = -1;
+        why = "";
+        if (!Active || RaphaelSim.FromIds(rest) is not { } plan)
+        {
+            why = "not watching any more";
+            return null;
+        }
+        if (RaphaelSim.FromIds(replanned) is not { } actions)
+        {
+            why = "it has an action the simulator doesn't know";
+            return null;
+        }
+        quality = Replanning.Accept(settings, predicted, plan, actions, condition, Cheap(condition, rest), out beaten);
+        if (quality < 0)
+        {
+            quality = Replanning.Quality(settings, predicted, actions, condition);
+            why = quality < 0 ? "the simulator says it doesn't finish" : "the simulator says the cheap reaction does better";
+            return null;
+        }
+        if (!replanned.SequenceEqual(rest))
+        {
+            Count(condition);
+            Replans++;
+        }
+        return replanned.ToList();
     }
 
     /// <summary>The quality an edit's numbers mean on screen (counting the starting quality, capped at the recipe's most).</summary>

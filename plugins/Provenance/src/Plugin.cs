@@ -236,6 +236,9 @@ public sealed class Plugin : IDalamudPlugin
         try { OtherPlugins.Dispose(); }
         catch (Exception e) { Services.Log.Error(e, "Leaving the other plugins' stop lists on unload failed"); }
         Plans.Dispose();
+        // The serve process (re-planning while crafting) ends with the plugin.
+        try { Raphael.Dispose(); }
+        catch (Exception e) { Services.Log.Error(e, "Ending Raphael's serve process on unload failed"); }
         UI.JobIcons.Dispose();
         fonts.Dispose();
         ECommons.ECommonsMain.Dispose();

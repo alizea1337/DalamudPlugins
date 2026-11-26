@@ -719,8 +719,9 @@ internal sealed class SettingsPage : Page
         if (Ui.Checkbox("Use specialist actions", ref v, "Heart and Soul and Quick Innovation, when a specialist soul is equipped.")) { cr.UseSpecialistActions = v; Config.Save(); }
         v = cr.ReactToConditions;
         if (Ui.Checkbox("React to Good and Excellent steps", ref v,
-                "On a Good or Excellent step, the rotation can swap in Precise Touch, Tricks of the Trade or Intensive Synthesis, or bring a later action forward, "
-                + "when that ends with more quality and still finishes the item. For HQ crafts and collectables; not for expert recipes or Cosmic Exploration missions.")) { cr.ReactToConditions = v; Config.Save(); }
+                "On a Good or Excellent step, Raphael works out the rest of the rotation again from there. When it has no answer within 6 seconds, the rotation "
+                + "swaps in Precise Touch, Tricks of the Trade or Intensive Synthesis, or brings a later action forward, when that ends with more quality and still "
+                + "finishes the item. For HQ crafts and collectables; not for expert recipes or Cosmic Exploration missions.")) { cr.ReactToConditions = v; Config.Save(); }
         Ui.Text("Repair gear below");
         ImGui.SameLine(0, 10 * s);
         var repair = cr.RepairBelow;

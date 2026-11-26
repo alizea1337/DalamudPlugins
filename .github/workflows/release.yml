@@ -58,6 +58,12 @@ jobs:
           # Pinned so every release ships the same solver; bump deliberately.
           git clone https://github.com/KonaeAkira/raphael-rs.git raphael-rs
           git -C raphael-rs checkout 9311b0d262259bd8db727fbec2dfd08ff453b87b
+          if ($LASTEXITCODE -ne 0) { throw "raphael-rs checkout failed" }
+          # Provenance's patch: raphael-cli's serve mode (re-planning mid-craft), see plugins/Provenance/NOTICE.md.
+          git -C raphael-rs apply --check "$PWD/plugins/Provenance/Raphael/raphael-rs-serve.patch"
+          if ($LASTEXITCODE -ne 0) { throw "The raphael-rs patch doesn't apply" }
+          git -C raphael-rs apply "$PWD/plugins/Provenance/Raphael/raphael-rs-serve.patch"
+          if ($LASTEXITCODE -ne 0) { throw "The raphael-rs patch doesn't apply" }
           cargo build --release --package raphael-cli --manifest-path raphael-rs/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw "raphael-cli build failed" }
           Copy-Item raphael-rs/target/release/raphael-cli.exe plugins/Provenance/Resources/raphael-cli.exe -Force

@@ -1,0 +1,917 @@
+diff --git a/raphael-cli/src/commands/mod.rs b/raphael-cli/src/commands/mod.rs
+index 7c0a3db..92db36d 100644
+--- a/raphael-cli/src/commands/mod.rs
++++ b/raphael-cli/src/commands/mod.rs
+@@ -3,6 +3,7 @@ use raphael_data::Locale;
+ pub mod ingredients;
+ pub mod search_mission;
+ pub mod search_recipe;
++pub mod serve;
+ pub mod solve;
+ 
+ #[derive(Copy, Clone, clap::ValueEnum, Debug)]
+diff --git a/raphael-cli/src/commands/serve.rs b/raphael-cli/src/commands/serve.rs
+new file mode 100644
+index 0000000..660d9a8
+--- /dev/null
++++ b/raphael-cli/src/commands/serve.rs
+@@ -0,0 +1,353 @@
++//! `serve`: a long-running solver for re-planning the rest of a craft.
++//!
++//! A line protocol on stdin/stdout. Once started it prints `serve 1` (the protocol version). Then:
++//!
++//! * `prepare <solve arguments>`: the same arguments as `solve` (recipe, stats, level, Manipulation,
++//!   specialist actions, HQ ingredients / initial quality, target quality, food, potion...; `--threads`
++//!   and `--output-variables` are ignored). Runs the solver's precomputes once and keeps them.
++//!   Answers `ready <ms> <initial_quality> <recipe_max_quality> "<settings>"` (settings as `solve`
++//!   prints them) or `error <message>`. A new `prepare` replaces the previous one.
++//! * `solve <id> <condition> cp=.. durability=.. progress=.. quality=.. inner_quiet=.. waste_not=..
++//!   innovation=.. veneration=.. great_strides=.. muscle_memory=.. manipulation=..
++//!   trained_perfection_available=0|1 heart_and_soul_available=0|1 quick_innovation_available=0|1
++//!   trained_perfection_active=0|1 heart_and_soul_active=0|1 combo=none|begin|basic|standard`:
++//!   the rest of the rotation from that state, where the next step has `<condition>` (normal, good,
++//!   excellent, poor) and every later one is assumed Normal. `quality` doesn't count the initial
++//!   quality (as the simulator has it). Answers `solved <id> <ms> [<action ids>]` (ids as `solve`'s
++//!   `action_ids`), `nosolution <id> <ms>` or `error <id> <message>`.
++//! * `cancel <id>`: interrupts that solve if it is still running (it then answers `error <id> Interrupted`).
++//! * `quit`, or the end of stdin: exits at once.
++//!
++//! Errors are always one line. Everything else (logs) goes to stderr. Release builds abort on a panic: the
++//! process then ends, which the client sees as its stdout closing.
++
++use std::io::{BufRead, Write};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::mpsc::{Receiver, channel};
++use std::time::Instant;
++
++use clap::{Args, Parser};
++use raphael_data::{MEALS, POTIONS, RECIPES};
++use raphael_sim::{Combo, Condition, Effects, SimulationState, SpecialQualityState};
++use raphael_solver::{AtomicFlag, BumpPool, MacroSolver, SolverException, SolverSettings};
++
++use super::solve::{ConsumableArg, SolveArgs, setup};
++
++pub const PROTOCOL_VERSION: u32 = 1;
++
++#[derive(Args, Debug)]
++pub struct ServeArgs {
++    /// Maximum number of threads available to the solver
++    #[arg(long)]
++    pub threads: Option<usize>,
++}
++
++#[derive(Parser, Debug)]
++#[command(name = "prepare")]
++struct PrepareLine {
++    #[command(flatten)]
++    args: SolveArgs,
++}
++
++/// Shared with the stdin reader: the id of the solve running now (0: none) and its interrupt flag.
++struct Control {
++    running: AtomicU64,
++    interrupt: AtomicFlag,
++}
++
++fn answer(line: &str) {
++    let mut out = std::io::stdout().lock();
++    let _ = writeln!(out, "{line}");
++    let _ = out.flush();
++}
++
++fn one_line(text: &str) -> String {
++    text.lines()
++        .map(str::trim)
++        .filter(|l| !l.is_empty())
++        .collect::<Vec<_>>()
++        .join(" | ")
++}
++
++/// What `solve` would panic on (release builds abort on a panic), as an error instead.
++fn check(args: &SolveArgs) -> Result<(), String> {
++    if args.recipe_id.is_none() && args.item_id.is_none() && args.custom_recipe.is_empty() {
++        return Err("one of --recipe-id, --item-id or --custom-recipe is needed".to_owned());
++    }
++    if let Some(id) = args.recipe_id
++        && RECIPES.get(id).is_none()
++    {
++        return Err(format!("no recipe with id {id}"));
++    }
++    if args.recipe_id.is_none()
++        && args.custom_recipe.is_empty()
++        && let Some(id) = args.item_id
++        && !RECIPES.values().any(|r| r.item_id == id)
++    {
++        return Err(format!("no recipe for item {id}"));
++    }
++    let known = |list: &[raphael_data::Consumable], arg: Option<ConsumableArg>| match arg {
++        Some(ConsumableArg::NQ(id)) => list.iter().any(|c| c.item_id == id && !c.hq),
++        Some(ConsumableArg::HQ(id)) => list.iter().any(|c| c.item_id == id && c.hq),
++        None => true,
++    };
++    if !known(MEALS, args.food) {
++        return Err("unknown food".to_owned());
++    }
++    if !known(POTIONS, args.potion) {
++        return Err("unknown potion".to_owned());
++    }
++    Ok(())
++}
++
++pub fn execute(args: &ServeArgs) {
++    if let Some(threads) = args.threads {
++        // The only pool: every prepare and solve runs on it.
++        let _ = rayon::ThreadPoolBuilder::new()
++            .num_threads(threads)
++            .build_global();
++    }
++    let control = Arc::new(Control {
++        running: AtomicU64::new(0),
++        interrupt: AtomicFlag::new(),
++    });
++    let (tx, rx) = channel::<String>();
++    {
++        let control = control.clone();
++        std::thread::spawn(move || {
++            let stdin = std::io::stdin();
++            for line in stdin.lock().lines() {
++                let Ok(line) = line else { break };
++                let trimmed = line.trim();
++                if trimmed == "quit" {
++                    std::process::exit(0);
++                }
++                if let Some(id) = trimmed.strip_prefix("cancel ") {
++                    if let Ok(id) = id.trim().parse::<u64>()
++                        && id != 0
++                        && control.running.load(Ordering::SeqCst) == id
++                    {
++                        control.interrupt.set();
++                    }
++                    continue;
++                }
++                if tx.send(line).is_err() {
++                    break;
++                }
++            }
++            // stdin closed: whoever started us is gone.
++            std::process::exit(0);
++        });
++    }
++
++    answer(&format!("serve {PROTOCOL_VERSION}"));
++    let mut next: Option<String> = None;
++    loop {
++        let line = match next.take() {
++            Some(line) => line,
++            None => match rx.recv() {
++                Ok(line) => line,
++                Err(_) => return,
++            },
++        };
++        let line = line.trim();
++        let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
++        match command {
++            "" => {}
++            "prepare" => next = prepared_session(rest, &rx, &control),
++            "solve" => {
++                let id = rest.split_whitespace().next().unwrap_or("0");
++                answer(&format!("error {id} not prepared"));
++            }
++            _ => answer(&format!("error unknown command {command}")),
++        }
++    }
++}
++
++/// Prepares a solver and answers `solve` lines with it until another command comes; returns that command.
++fn prepared_session(rest: &str, rx: &Receiver<String>, control: &Control) -> Option<String> {
++    let started = Instant::now();
++    let argv = std::iter::once("prepare").chain(rest.split_whitespace());
++    let args = match PrepareLine::try_parse_from(argv) {
++        Ok(line) => line.args,
++        Err(e) => {
++            answer(&format!("error {}", one_line(&e.to_string())));
++            return None;
++        }
++    };
++    if let Err(e) = check(&args) {
++        answer(&format!("error {e}"));
++        return None;
++    }
++    let setup = setup(&args);
++    let settings = setup.settings;
++    let allocator = BumpPool::default();
++    control.interrupt.clear();
++    let mut solver = MacroSolver::new(
++        SolverSettings {
++            simulator_settings: settings,
++            allow_non_max_quality_solutions: true,
++        },
++        Box::new(|_| {}),
++        Box::new(|_| {}),
++        control.interrupt.clone(),
++    );
++    let mut prepared = match solver.prepare(&allocator) {
++        Ok(prepared) => prepared,
++        Err(e) => {
++            answer(&format!("error {}", one_line(&format!("{e:?}"))));
++            return None;
++        }
++    };
++    answer(&format!(
++        "ready {} {} {} \"{:?}\"",
++        started.elapsed().as_millis(),
++        setup.initial_quality,
++        setup.recipe_max_quality,
++        settings
++    ));
++
++    loop {
++        let line = rx.recv().ok()?;
++        let trimmed = line.trim();
++        let (command, rest) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
++        if command.is_empty() {
++            continue;
++        }
++        if command == "prepare" {
++            return Some(line);
++        }
++        if command != "solve" {
++            answer(&format!("error unknown command {command}"));
++            continue;
++        }
++        let mut words = rest.split_whitespace();
++        let id = words
++            .next()
++            .and_then(|w| w.parse::<u64>().ok())
++            .unwrap_or(0);
++        if id == 0 {
++            answer("error 0 a solve needs an id above 0");
++            continue;
++        }
++        let request = match parse_request(words, &settings) {
++            Ok(request) => request,
++            Err(e) => {
++                answer(&format!("error {id} {e}"));
++                continue;
++            }
++        };
++        let started = Instant::now();
++        control.interrupt.clear();
++        control.running.store(id, Ordering::SeqCst);
++        let result = prepared.solve_from_condition(request.0, request.1);
++        control.running.store(0, Ordering::SeqCst);
++        let ms = started.elapsed().as_millis();
++        match result {
++            Ok(actions) => {
++                let ids: Vec<u32> = actions.iter().map(|a| a.action_id()).collect();
++                answer(&format!("solved {id} {ms} {ids:?}"));
++            }
++            Err(SolverException::NoSolution) => answer(&format!("nosolution {id} {ms}")),
++            Err(e) => answer(&format!("error {id} {}", one_line(&format!("{e:?}")))),
++        }
++    }
++}
++
++fn flag(value: &str) -> Result<bool, String> {
++    match value {
++        "0" => Ok(false),
++        "1" => Ok(true),
++        _ => Err(format!("{value} isn't 0 or 1")),
++    }
++}
++
++/// Reads `<condition> key=value...` into the state to solve from and the next step's condition.
++fn parse_request<'a>(
++    mut words: impl Iterator<Item = &'a str>,
++    settings: &raphael_sim::Settings,
++) -> Result<(SimulationState, Condition), String> {
++    let condition = match words.next().unwrap_or("") {
++        "normal" => Condition::Normal,
++        "good" => Condition::Good,
++        "excellent" => Condition::Excellent,
++        "poor" => Condition::Poor,
++        other => return Err(format!("unknown condition '{other}'")),
++    };
++    const KEYS: [&str; 17] = [
++        "cp",
++        "durability",
++        "progress",
++        "quality",
++        "inner_quiet",
++        "waste_not",
++        "innovation",
++        "veneration",
++        "great_strides",
++        "muscle_memory",
++        "manipulation",
++        "trained_perfection_available",
++        "heart_and_soul_available",
++        "quick_innovation_available",
++        "trained_perfection_active",
++        "heart_and_soul_active",
++        "combo",
++    ];
++    let mut values: [Option<&str>; 17] = [None; 17];
++    for word in words {
++        let (key, value) = word
++            .split_once('=')
++            .ok_or_else(|| format!("'{word}' isn't key=value"))?;
++        let i = KEYS
++            .iter()
++            .position(|k| *k == key)
++            .ok_or_else(|| format!("unknown key '{key}'"))?;
++        values[i] = Some(value);
++    }
++    let get = |i: usize| values[i].ok_or_else(|| format!("{} is missing", KEYS[i]));
++    let number = |i: usize, most: u16| -> Result<u16, String> {
++        let n: u16 = get(i)?
++            .parse()
++            .map_err(|_| format!("{} isn't a number", KEYS[i]))?;
++        if n > most {
++            return Err(format!("{} {n} is above {most}", KEYS[i]));
++        }
++        Ok(n)
++    };
++    let small = |i: usize, most: u16| number(i, most).map(|n| n as u8);
++    let combo = match get(16)? {
++        "none" => Combo::None,
++        "begin" => Combo::SynthesisBegin,
++        "basic" => Combo::BasicTouch,
++        "standard" => Combo::StandardTouch,
++        other => return Err(format!("unknown combo '{other}'")),
++    };
++    let effects = Effects::new()
++        .with_inner_quiet(small(4, 10)?)
++        .with_waste_not(small(5, 8)?)
++        .with_innovation(small(6, 4)?)
++        .with_veneration(small(7, 4)?)
++        .with_great_strides(small(8, 3)?)
++        .with_muscle_memory(small(9, 5)?)
++        .with_manipulation(small(10, 8)?)
++        .with_trained_perfection_available(flag(get(11)?)?)
++        .with_heart_and_soul_available(flag(get(12)?)?)
++        .with_quick_innovation_available(flag(get(13)?)?)
++        .with_trained_perfection_active(flag(get(14)?)?)
++        .with_heart_and_soul_active(flag(get(15)?)?)
++        .with_special_quality_state(SpecialQualityState::Normal)
++        .with_combo(combo);
++    let state = SimulationState {
++        cp: number(0, settings.max_cp)?,
++        durability: number(1, settings.max_durability)?,
++        progress: number(2, u16::MAX)?,
++        quality: number(3, u16::MAX)?,
++        unreliable_quality: 0,
++        effects,
++    };
++    if state.is_final(settings) {
++        return Err("the state is final".to_owned());
++    }
++    Ok((state, condition))
++}
+diff --git a/raphael-cli/src/commands/solve.rs b/raphael-cli/src/commands/solve.rs
+index 7f36009..236ef40 100644
+--- a/raphael-cli/src/commands/solve.rs
++++ b/raphael-cli/src/commands/solve.rs
+@@ -159,14 +159,24 @@ fn map_and_clamp_hq_ingredients(recipe: &raphael_data::Recipe, hq_ingredients: [
+     modified_hq_ingredients
+ }
+ 
+-pub fn execute(args: &SolveArgs) {
+-    if args.recipe_id.is_none() && args.item_id.is_none() && args.custom_recipe.is_empty() {
+-        error!(
+-            "One of the arguments '--recipe-id', '--item-id', or '--custom-recipe' must be provided"
+-        );
+-        panic!();
+-    }
++/// What `solve` works out from its arguments before solving (shared with `serve`'s `prepare`).
++pub struct SolveSetup {
++    pub recipe_id: u32,
++    pub recipe: raphael_data::Recipe,
++    pub food: Option<raphael_data::Consumable>,
++    pub potion: Option<raphael_data::Consumable>,
++    pub craftsmanship: u16,
++    pub control: u16,
++    pub cp: u16,
++    pub crafter_stats: CrafterStats,
++    /// `max_quality` is already the target quality less the initial quality.
++    pub settings: raphael_sim::Settings,
++    pub initial_quality: u16,
++    pub target_quality: u16,
++    pub recipe_max_quality: u16,
++}
+ 
++pub fn execute(args: &SolveArgs) {
+     if let Some(threads) = args.threads {
+         rayon::ThreadPoolBuilder::new()
+             .num_threads(threads)
+@@ -174,6 +184,105 @@ pub fn execute(args: &SolveArgs) {
+             .unwrap();
+     }
+ 
++    let SolveSetup {
++        recipe_id,
++        recipe,
++        food,
++        potion,
++        craftsmanship,
++        control,
++        cp,
++        crafter_stats,
++        settings,
++        initial_quality,
++        target_quality,
++        recipe_max_quality,
++    } = setup(args);
++
++    let solver_settings = SolverSettings {
++        simulator_settings: settings,
++        allow_non_max_quality_solutions: true,
++    };
++
++    let mut solver = MacroSolver::new(
++        solver_settings,
++        Box::new(|_| {}),
++        Box::new(|_| {}),
++        AtomicFlag::new(),
++    );
++    let actions = solver.solve().expect("Failed to solve");
++
++    let final_state = SimulationState::from_macro(&settings, &actions).unwrap();
++    let state_quality = final_state.quality;
++    let final_quality = state_quality.saturating_add(initial_quality);
++    let steps = actions.len();
++    let duration: u8 = actions.iter().map(|action| action.time_cost()).sum();
++    let action_ids: Vec<u32> = actions.iter().map(|f| f.action_id()).collect();
++
++    if args.output_variables.is_empty() {
++        println!("Recipe ID: {}", recipe_id);
++        println!(
++            "Progress: {}/{}",
++            final_state.progress, settings.max_progress
++        );
++        println!("Quality: {}/{}", final_quality, recipe_max_quality);
++        println!(
++            "Durability: {}/{}",
++            final_state.durability, settings.max_durability
++        );
++        println!("Steps: {}", steps);
++        println!("Duration: {} seconds", duration);
++        println!("\nActions:");
++        for action in actions {
++            println!("{:?}", action);
++        }
++    } else {
++        let mut output_string = "".to_owned();
++
++        for identifier in &args.output_variables {
++            let map_to_debug_str = |actions: Vec<raphael_sim::Action>| match &*(*identifier) {
++                "recipe_id" => format!("{:?}", recipe_id),
++                "item_id" => format!("{:?}", recipe.item_id),
++                "recipe" => format!("\"{:?}\"", recipe),
++                "food" => format!("\"{:?}\"", food),
++                "potion" => format!("\"{:?}\"", potion),
++                "craftsmanship" => format!("{:?}", craftsmanship),
++                "control" => format!("{:?}", control),
++                "cp" => format!("{:?}", cp),
++                "crafter_stats" => format!("\"{:?}\"", crafter_stats),
++                "settings" => format!("\"{:?}\"", settings),
++                "initial_quality" => format!("{:?}", initial_quality),
++                "target_quality" => format!("{:?}", target_quality),
++                "recipe_max_quality" => format!("{:?}", recipe_max_quality),
++                "actions" => format!("\"{:?}\"", actions),
++                "action_ids" => format!("\"{:?}\"", action_ids),
++                "final_state" => format!("\"{:?}\"", final_state),
++                "state_quality" => format!("{:?}", state_quality),
++                "final_quality" => format!("{:?}", final_quality),
++                "steps" => format!("{:?}", steps),
++                "duration" => format!("{:?}", duration),
++                _ => "Undefined".to_owned(),
++            };
++
++            output_string += &(map_to_debug_str(actions.clone()) + &args.output_field_separator);
++        }
++
++        println!(
++            "{}",
++            output_string.trim_end_matches(&args.output_field_separator)
++        );
++    }
++}
++
++/// The recipe, stats and settings `solve` works with (panics on bad arguments, as `solve` always did).
++pub fn setup(args: &SolveArgs) -> SolveSetup {
++    if args.recipe_id.is_none() && args.item_id.is_none() && args.custom_recipe.is_empty() {
++        error!(
++            "One of the arguments '--recipe-id', '--item-id', or '--custom-recipe' must be provided"
++        );
++        panic!();
++    }
++
+     let use_custom_recipe = !args.custom_recipe.is_empty();
+     let mut recipe: raphael_data::Recipe = if use_custom_recipe {
+         raphael_data::Recipe {
+@@ -343,77 +452,18 @@ pub fn execute(args: &SolveArgs) {
+     let recipe_max_quality = settings.max_quality;
+     settings.max_quality = target_quality.saturating_sub(initial_quality);
+ 
+-    let solver_settings = SolverSettings {
+-        simulator_settings: settings,
+-        allow_non_max_quality_solutions: true,
+-    };
+-
+-    let mut solver = MacroSolver::new(
+-        solver_settings,
+-        Box::new(|_| {}),
+-        Box::new(|_| {}),
+-        AtomicFlag::new(),
+-    );
+-    let actions = solver.solve().expect("Failed to solve");
+-
+-    let final_state = SimulationState::from_macro(&settings, &actions).unwrap();
+-    let state_quality = final_state.quality;
+-    let final_quality = state_quality.saturating_add(initial_quality);
+-    let steps = actions.len();
+-    let duration: u8 = actions.iter().map(|action| action.time_cost()).sum();
+-    let action_ids: Vec<u32> = actions.iter().map(|f| f.action_id()).collect();
+-
+-    if args.output_variables.is_empty() {
+-        println!("Recipe ID: {}", recipe_id);
+-        println!(
+-            "Progress: {}/{}",
+-            final_state.progress, settings.max_progress
+-        );
+-        println!("Quality: {}/{}", final_quality, recipe_max_quality);
+-        println!(
+-            "Durability: {}/{}",
+-            final_state.durability, settings.max_durability
+-        );
+-        println!("Steps: {}", steps);
+-        println!("Duration: {} seconds", duration);
+-        println!("\nActions:");
+-        for action in actions {
+-            println!("{:?}", action);
+-        }
+-    } else {
+-        let mut output_string = "".to_owned();
+-
+-        for identifier in &args.output_variables {
+-            let map_to_debug_str = |actions: Vec<raphael_sim::Action>| match &*(*identifier) {
+-                "recipe_id" => format!("{:?}", recipe_id),
+-                "item_id" => format!("{:?}", recipe.item_id),
+-                "recipe" => format!("\"{:?}\"", recipe),
+-                "food" => format!("\"{:?}\"", food),
+-                "potion" => format!("\"{:?}\"", potion),
+-                "craftsmanship" => format!("{:?}", craftsmanship),
+-                "control" => format!("{:?}", control),
+-                "cp" => format!("{:?}", cp),
+-                "crafter_stats" => format!("\"{:?}\"", crafter_stats),
+-                "settings" => format!("\"{:?}\"", settings),
+-                "initial_quality" => format!("{:?}", initial_quality),
+-                "target_quality" => format!("{:?}", target_quality),
+-                "recipe_max_quality" => format!("{:?}", recipe_max_quality),
+-                "actions" => format!("\"{:?}\"", actions),
+-                "action_ids" => format!("\"{:?}\"", action_ids),
+-                "final_state" => format!("\"{:?}\"", final_state),
+-                "state_quality" => format!("{:?}", state_quality),
+-                "final_quality" => format!("{:?}", final_quality),
+-                "steps" => format!("{:?}", steps),
+-                "duration" => format!("{:?}", duration),
+-                _ => "Undefined".to_owned(),
+-            };
+-
+-            output_string += &(map_to_debug_str(actions.clone()) + &args.output_field_separator);
+-        }
+-
+-        println!(
+-            "{}",
+-            output_string.trim_end_matches(&args.output_field_separator)
+-        );
++    SolveSetup {
++        recipe_id,
++        recipe,
++        food,
++        potion,
++        craftsmanship,
++        control,
++        cp,
++        crafter_stats,
++        settings,
++        initial_quality,
++        target_quality,
++        recipe_max_quality,
+     }
+ }
+diff --git a/raphael-cli/src/main.rs b/raphael-cli/src/main.rs
+index fddff0c..766cbaf 100644
+--- a/raphael-cli/src/main.rs
++++ b/raphael-cli/src/main.rs
+@@ -20,6 +20,8 @@ enum Commands {
+     Solve(commands::solve::SolveArgs),
+     /// Show ingredients for a recipe
+     Ingredients(commands::ingredients::IngredientsArgs),
++    /// Keep a prepared solver running and re-plan from mid-craft states (a line protocol on stdin/stdout)
++    Serve(commands::serve::ServeArgs),
+ }
+ 
+ #[derive(Parser, Debug)]
+@@ -58,5 +60,6 @@ fn main() {
+         },
+         Commands::Solve(args) => commands::solve::execute(args),
+         Commands::Ingredients(args) => commands::ingredients::execute(args),
++        Commands::Serve(args) => commands::serve::execute(args),
+     }
+ }
+diff --git a/raphael-solver/src/actions.rs b/raphael-solver/src/actions.rs
+index 675d677..e690e0d 100644
+--- a/raphael-solver/src/actions.rs
++++ b/raphael-solver/src/actions.rs
+@@ -184,12 +184,23 @@ pub const PROGRESS_ONLY_SEARCH_ACTIONS: [ActionCombo; 16] = [
+ ];
+ 
+ pub fn use_action_combo(
++    settings: &SolverSettings,
++    state: SimulationState,
++    action_combo: ActionCombo,
++) -> Result<SimulationState, ActionError> {
++    use_action_combo_in(settings, state, action_combo, Condition::Normal)
++}
++
++/// Like `use_action_combo`, but the first action of the combo is used under `first_condition`.
++pub fn use_action_combo_in(
+     settings: &SolverSettings,
+     mut state: SimulationState,
+     action_combo: ActionCombo,
++    first_condition: Condition,
+ ) -> Result<SimulationState, ActionError> {
+-    for action in action_combo.actions() {
+-        state = state.use_action(*action, Condition::Normal, &settings.simulator_settings)?;
++    for (i, action) in action_combo.actions().iter().enumerate() {
++        let condition = if i == 0 { first_condition } else { Condition::Normal };
++        state = state.use_action(*action, condition, &settings.simulator_settings)?;
+     }
+     // All combos are already implemented as ActionCombo, so we reset the combo to None for cases
+     // where the full combo is not used, reducing state space.
+diff --git a/raphael-solver/src/lib.rs b/raphael-solver/src/lib.rs
+index 05f676a..e180856 100644
+--- a/raphael-solver/src/lib.rs
++++ b/raphael-solver/src/lib.rs
+@@ -10,7 +10,8 @@ mod step_lower_bound_solver;
+ use step_lower_bound_solver::StepLbSolver;
+ 
+ mod macro_solver;
+-pub use macro_solver::MacroSolver;
++pub use macro_solver::{MacroSolver, PreparedMacroSolver};
++pub use bump_scope::BumpPool;
+ 
+ mod utils;
+ pub use utils::AtomicFlag;
+diff --git a/raphael-solver/src/macro_solver/mod.rs b/raphael-solver/src/macro_solver/mod.rs
+index eb058a7..62b5856 100644
+--- a/raphael-solver/src/macro_solver/mod.rs
++++ b/raphael-solver/src/macro_solver/mod.rs
+@@ -2,4 +2,4 @@ mod pareto_front;
+ mod search_queue;
+ mod solver;
+ 
+-pub use solver::MacroSolver;
++pub use solver::{MacroSolver, PreparedMacroSolver};
+diff --git a/raphael-solver/src/macro_solver/search_queue.rs b/raphael-solver/src/macro_solver/search_queue.rs
+index a8684e7..832b91a 100644
+--- a/raphael-solver/src/macro_solver/search_queue.rs
++++ b/raphael-solver/src/macro_solver/search_queue.rs
+@@ -1,14 +1,14 @@
+ use std::collections::{BTreeSet, hash_map::Entry};
+ use std::sync::Mutex;
+ 
+-use raphael_sim::SimulationState;
++use raphael_sim::{Condition, SimulationState};
+ use rayon::prelude::*;
+ use rustc_hash::FxHashMap;
+ use smallvec::SmallVec;
+ 
+ use crate::{
+     SolverException, SolverSettings,
+-    actions::{ActionCombo, use_action_combo},
++    actions::{ActionCombo, use_action_combo_in},
+ };
+ 
+ use super::pareto_front::ParetoFront;
+@@ -138,10 +138,16 @@ pub struct SearchQueue {
+     visited_nodes: Vec<SearchNode>,
+     num_inserted_nodes: usize,
+     initial_state: SimulationState,
++    /// Condition of the first step after `initial_state` (all later steps are Normal).
++    first_condition: Condition,
+ }
+ 
+ impl SearchQueue {
+-    pub fn new(settings: SolverSettings, initial_state: SimulationState) -> Self {
++    pub fn new(
++        settings: SolverSettings,
++        initial_state: SimulationState,
++        first_condition: Condition,
++    ) -> Self {
+         let mut search_queue = Self {
+             settings,
+             pareto_front: ParetoFront::default(),
+@@ -150,6 +156,7 @@ impl SearchQueue {
+             visited_nodes: Vec::new(),
+             num_inserted_nodes: 0,
+             initial_state,
++            first_condition,
+         };
+         if let Ok(root) = Candidate::try_new(SearchScore::MAX, ActionCombo::None, 0) {
+             search_queue.push_sorted(&[&[root]]);
+@@ -236,11 +243,13 @@ impl SearchQueue {
+             .into_par_iter()
+             .map(|search_node| {
+                 let mut state = self.initial_state;
+-                let actions = self.get_actions_from_node_idx(search_node.parent_idx());
+-                for action in actions {
+-                    state = use_action_combo(&self.settings, state, action).unwrap();
++                let mut actions = self.get_actions_from_node_idx(search_node.parent_idx());
++                actions.push(search_node.action());
++                for (i, action) in actions.into_iter().enumerate() {
++                    // actions[0] is the root's ActionCombo::None when the root itself is replayed.
++                    let condition = if i == 0 { self.first_condition } else { Condition::Normal };
++                    state = use_action_combo_in(&self.settings, state, action, condition).unwrap();
+                 }
+-                state = use_action_combo(&self.settings, state, search_node.action()).unwrap();
+                 (search_node, state)
+             })
+             .collect();
+diff --git a/raphael-solver/src/macro_solver/solver.rs b/raphael-solver/src/macro_solver/solver.rs
+index 6c8e0f8..880c6fa 100644
+--- a/raphael-solver/src/macro_solver/solver.rs
++++ b/raphael-solver/src/macro_solver/solver.rs
+@@ -3,7 +3,7 @@ use raphael_sim::*;
+ use rayon::prelude::*;
+ 
+ use super::search_queue::{SearchQueueStats, SearchScore};
+-use crate::actions::{ActionCombo, FULL_SEARCH_ACTIONS, use_action_combo};
++use crate::actions::{ActionCombo, FULL_SEARCH_ACTIONS, use_action_combo_in};
+ use crate::finish_solver::FinishSolverStats;
+ use crate::macro_solver::search_queue::{Batch, Candidate, SearchQueue};
+ use crate::quality_upper_bound_solver::{
+@@ -74,28 +74,32 @@ impl<'a> MacroSolver<'a> {
+     }
+ 
+     pub fn solve(&mut self) -> Result<Vec<Action>, SolverException> {
++        let allocator = BumpPool::default();
++        let initial_state = SimulationState::new(&self.settings.simulator_settings);
++        self.prepare(&allocator)?.solve_from(initial_state)
++    }
++
++    /// Runs the bound-solver precomputes once. The returned handle keeps the precomputed
++    /// (and lazily extended) bound tables alive so that `solve_from` can be called repeatedly.
++    pub fn prepare<'s, 'alloc>(
++        &'s mut self,
++        allocator: &'alloc BumpPool,
++    ) -> Result<PreparedMacroSolver<'s, 'a, 'alloc>, SolverException> {
+         log::debug!(
+             "rayon::current_num_threads() = {}",
+             rayon::current_num_threads()
+         );
+ 
+         self.last_solve_runtime_stats = MacroSolverStats::default();
+-        let allocator = BumpPool::default();
+         let mut quality_ub_solver =
+-            QualityUbSolver::new(self.settings, self.interrupt_signal.clone(), &allocator);
++            QualityUbSolver::new(self.settings, self.interrupt_signal.clone(), allocator);
+         let mut step_lb_solver =
+-            StepLbSolver::new(self.settings, self.interrupt_signal.clone(), &allocator);
+-
+-        let _total_time = ScopedTimer::new("Total Time");
++            StepLbSolver::new(self.settings, self.interrupt_signal.clone(), allocator);
+ 
+         let initial_state = SimulationState::new(&self.settings.simulator_settings);
+ 
+         let timer = ScopedTimer::new("Finish Solver");
+         self.finish_solver.precompute()?;
+-        if !self.finish_solver.can_finish(&initial_state)? {
+-            self.last_solve_runtime_stats.finish_solver_stats = self.finish_solver.runtime_stats();
+-            return Err(SolverException::NoSolution);
+-        }
+         drop(timer);
+ 
+         let timer = ScopedTimer::new("Quality UB Solver");
+@@ -114,15 +118,11 @@ impl<'a> MacroSolver<'a> {
+             step_lb_solver.precompute()?;
+         }
+ 
+-        let timer = ScopedTimer::new("Search");
+-        let actions = self
+-            .do_solve(&mut quality_ub_solver, &mut step_lb_solver, initial_state)?
+-            .actions();
+-        drop(timer);
+-
+-        log::debug!("{:?}", self.runtime_stats());
+-
+-        Ok(actions)
++        Ok(PreparedMacroSolver {
++            macro_solver: self,
++            quality_ub_solver,
++            step_lb_solver,
++        })
+     }
+ 
+     fn do_solve<'alloc>(
+@@ -130,8 +130,10 @@ impl<'a> MacroSolver<'a> {
+         quality_ub_solver: &mut QualityUbSolver<'alloc>,
+         step_lb_solver: &mut StepLbSolver<'alloc>,
+         state: SimulationState,
++        first_condition: Condition,
+     ) -> Result<Solution, SolverException> {
+-        let mut search_queue = SearchQueue::new(self.settings, state);
++        let mut search_queue = SearchQueue::new(self.settings, state, first_condition);
++        let mut condition = first_condition; // only the root batch is expanded under it
+         let mut solution: Option<Solution> = None;
+         let mut min_accepted_score = SearchScore::MIN;
+ 
+@@ -163,7 +165,7 @@ impl<'a> MacroSolver<'a> {
+                 .map(|chunk| {
+                     let mut worker_data = create_worker_data();
+                     for &(state, backtrack_id) in chunk {
+-                        worker_data.process_state(state, score, backtrack_id)?;
++                        worker_data.process_state(state, score, backtrack_id, condition)?;
+                     }
+                     Ok(worker_data)
+                 })
+@@ -211,6 +213,7 @@ impl<'a> MacroSolver<'a> {
+             }
+ 
+             (self.progress_callback)(search_queue.runtime_stats().processed_nodes);
++            condition = Condition::Normal;
+         }
+ 
+         self.last_solve_runtime_stats = MacroSolverStats {
+@@ -235,6 +238,46 @@ impl<'a> MacroSolver<'a> {
+     }
+ }
+ 
++pub struct PreparedMacroSolver<'s, 'a, 'alloc> {
++    macro_solver: &'s mut MacroSolver<'a>,
++    quality_ub_solver: QualityUbSolver<'alloc>,
++    step_lb_solver: StepLbSolver<'alloc>,
++}
++
++impl PreparedMacroSolver<'_, '_, '_> {
++    /// Solves from an arbitrary (mid-craft) state, assuming Normal conditions from here on.
++    pub fn solve_from(&mut self, state: SimulationState) -> Result<Vec<Action>, SolverException> {
++        self.solve_from_condition(state, Condition::Normal)
++    }
++
++    /// Solves from `state` where the next step has `condition` (Good/Excellent also enable
++    /// Precise Touch, Tricks of the Trade and Intensive Synthesis); later steps are assumed Normal.
++    /// The first returned action is meant to be used under `condition`.
++    pub fn solve_from_condition(
++        &mut self,
++        state: SimulationState,
++        condition: Condition,
++    ) -> Result<Vec<Action>, SolverException> {
++        let _timer = ScopedTimer::new("Search");
++        let solver = &mut *self.macro_solver;
++        // A mid-craft state can carry a touch combo, which the FinishSolver never stores (the
++        // search resets combos after every ActionCombo). Combos don't affect progress actions.
++        let mut finish_state = state;
++        if finish_state.effects.combo() != Combo::SynthesisBegin {
++            finish_state.effects.set_combo(Combo::None);
++        }
++        if !solver.finish_solver.can_finish(&finish_state)? {
++            solver.last_solve_runtime_stats.finish_solver_stats =
++                solver.finish_solver.runtime_stats();
++            return Err(SolverException::NoSolution);
++        }
++        let solution =
++            solver.do_solve(&mut self.quality_ub_solver, &mut self.step_lb_solver, state, condition)?;
++        log::debug!("{:?}", solver.runtime_stats());
++        Ok(solution.actions())
++    }
++}
++
+ struct WorkerResult<'alloc> {
+     quality_ub_states: QualityUbStates<'alloc>,
+     step_lb_states: StepLbStates<'alloc>,
+@@ -303,9 +346,19 @@ impl<'main, 'alloc> WorkerData<'main, 'alloc> {
+         state: SimulationState,
+         score: SearchScore,
+         backtrack_id: usize,
++        condition: Condition,
+     ) -> Result<(), SolverException> {
+-        for action in FULL_SEARCH_ACTIONS {
+-            if let Ok(state) = use_action_combo(self.settings, state, action) {
++        const GOOD_ONLY: [ActionCombo; 3] = [
++            ActionCombo::Single(Action::PreciseTouch),
++            ActionCombo::Single(Action::TricksOfTheTrade),
++            ActionCombo::Single(Action::IntensiveSynthesis),
++        ];
++        let extra: &[ActionCombo] = match condition {
++            Condition::Good | Condition::Excellent => &GOOD_ONLY,
++            _ => &[],
++        };
++        for &action in FULL_SEARCH_ACTIONS.iter().chain(extra) {
++            if let Ok(state) = use_action_combo_in(self.settings, state, action, condition) {
+                 if !state.is_final(&self.settings.simulator_settings) {
+                     if !self.finish_solver.can_finish(&state)? {
+                         continue;

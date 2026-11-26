@@ -16,8 +16,13 @@ namespace Provenance.Integrations;
 /// Solutions are cached per recipe and stats, and the ones found are kept on disk (next to the settings), so a later
 /// session has them at once until the stats change. A new raphael-cli starts the kept ones afresh.
 /// </summary>
-internal sealed class Raphael
+internal sealed class Raphael : IDisposable
 {
+    /// <summary>The one raphael-cli in serve mode, for re-planning on Good and Excellent steps.</summary>
+    public RaphaelServer Server { get; } = new(ExecutablePath, line => DebugLog.Write("raphael", line));
+
+    public void Dispose() => Server.Dispose();
+
     private const string ExeName = "raphael-cli.exe";
     private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
 

@@ -71,6 +71,18 @@ internal sealed unsafe class Crafter
     private List<uint> macro = new();
     /// <summary>The solution <see cref="macro"/> came from (null: none, or Basic Synthesis alone).</summary>
     private RaphaelSolution? planned;
+    /// <summary>The request <see cref="planned"/> was solved for.</summary>
+    private RaphaelRequest? plannedFor;
+    /// <summary>What the serve process was asked to prepare for <see cref="planned"/> (null: this rotation isn't re-planned).</summary>
+    private RaphaelRequest? serveRequest;
+    /// <summary>The numbers of the rotation <see cref="serveRequest"/> is for.</summary>
+    private SimSettings? serveSim;
+    /// <summary>A re-plan sent to Raphael for the step at <see cref="actionIndex"/>, waited for up to <see cref="Replanning.Wait"/>.</summary>
+    private (long Id, Task<ServeAnswer> Answer, DateTime Since, CraftCondition Condition)? replanning;
+    /// <summary>A re-plan began with actions that take no step (Heart and Soul): the actions up to here are on its step still, not re-planned again.</summary>
+    private int replanCoversUntil = -1;
+    /// <summary>The first action of the rotation a full re-plan wrote (-1: none this craft).</summary>
+    private int replannedFrom = -1;
     /// <summary>This craft's actions: the rotation, with the changes made on Good and Excellent steps.</summary>
     private List<uint> rotation = new();
     /// <summary>Follows this craft with the simulator to react to Good and Excellent steps (null: not reacting this craft).</summary>
@@ -194,6 +206,10 @@ internal sealed unsafe class Crafter
         macro.Clear();
         macroHq = null;
         planned = null;
+        plannedFor = null;
+        serveRequest = null;
+        replanning = null;
+        raphael.Server.End("a new crafting list");
         watch = null;
         qualityNote = null;
         LastQuality = -1;
@@ -277,7 +293,10 @@ internal sealed unsafe class Crafter
     {
         // The run ended: a note still waiting for its HQ chance isn't said any more.
         if (Finished || step == Step.Idle) qualityNote = null;
-        if (Finished || step is Step.Idle or Step.Paused || DateTime.UtcNow < waitUntil) return;
+        if (Finished || step is Step.Idle or Step.Paused) return;
+        // Crafting: the serve process stays (it ends a few minutes after the last tick, in a pause or once the run stopped).
+        if (serveRequest != null && serveSim != null && step != Step.WaitingForMaterials) raphael.Server.Prepare(serveRequest, serveSim);
+        if (DateTime.UtcNow < waitUntil) return;
         if (step is Step.SwitchJob or Step.Repair or Step.Consumables or Step.OpenRecipe or Step.Ingredients or Step.Synthesize && GetOffMount()) return;
         if (step == Step.WaitingForMaterials)
         {
@@ -346,6 +365,8 @@ internal sealed unsafe class Crafter
             doneThisJob = 0;
             macro.Clear();
             ForgetLive();
+            serveRequest = null;
+            raphael.Server.End("another recipe");
         }
 
         var catalog = plugin.Plans.Catalog!;
@@ -554,6 +575,9 @@ internal sealed unsafe class Crafter
         var solution = task.Result;
         macro = solution.Actions.ToList();
         planned = solution;
+        plannedFor = solvingFor;
+        // Re-planning on Good and Excellent steps: the serve process prepares while the recipe opens and the ingredients go in.
+        WarmReplanner();
         LastQuality = solution.FinalQuality;
         DebugLog.Write("crafter", $"rotation {macro.Count} steps, quality {solution.FinalQuality} of {solution.MaxQuality}: {string.Join(" ", macro)}");
         var name = plugin.Plans.Catalog!.ItemName(r.ItemId);
@@ -769,6 +793,12 @@ internal sealed unsafe class Crafter
             watch = StartWatch(out var notWatching);
             watchedAt = -1;
             addedAt = -1;
+            // A re-plan still out from a craft that ended early: its answer isn't wanted.
+            if (replanning is { } stale) raphael.Server.GiveUp(stale.Id);
+            replanning = null;
+            replanCoversUntil = -1;
+            replannedFrom = -1;
+            if (watch != null) WarmReplanner();
             differsSince = default;
             seenQuality = seenStep = -1;
             DebugLog.Write("crafter", $"synthesis started: recipe {Current!.Recipe.RecipeId}, craft {doneThisJob + 1} of {Current.Crafts}, rotation {macro.Count} steps; "
@@ -833,6 +863,7 @@ internal sealed unsafe class Crafter
         }
 
         // Reacting to Good and Excellent steps: the game's numbers first, then maybe a change to the rest of the rotation.
+        if (replanning != null && !ReplanArrived()) return;
         if (watch is { Active: true } && !fallback && actionIndex < rotation.Count && watchedAt != actionIndex && !WatchStep(synth)) return;
 
         var job = Current!.Recipe.Job.ClassJobId();
@@ -870,7 +901,7 @@ internal sealed unsafe class Crafter
             // The rest of this rotation was planned with that action in it (and a first-step action like Reflect only
             // works first): the next craft gets a rotation worked out afresh, instead of the same one going wrong again.
             // Not for an action a reaction put in: the plan itself is fine.
-            var putIn = !fallback && actionIndex == addedAt;
+            var putIn = !fallback && (actionIndex == addedAt || replannedFrom >= 0 && actionIndex >= replannedFrom);
             if (!putIn) solveAgainAfterCraft = true;
             StopWatching($"the game refused {CurrentAction}");
             DebugLog.Write("crafter", $"[!] step {actionIndex + 1}/{rotation.Count} {CurrentAction} ({id}) refused: {GameState.ActionStatus(type, id)}; "
@@ -935,9 +966,9 @@ internal sealed unsafe class Crafter
             // numbers hold as long as they matched the game's.
             var updated = seenStep != stepIndexBefore;
             var final = updated ? seenQuality : w.Active ? w.PredictedQuality : -1;
-            DebugLog.Write("crafter", $"reacted {w.GoodReactions}× on Good, {w.ExcellentReactions}× on Excellent; final quality {final} (window {seenQuality}{(updated ? "" : " from before the last action")}, "
+            DebugLog.Write("crafter", $"reacted {w.GoodReactions}× on Good, {w.ExcellentReactions}× on Excellent ({w.Replans} re-planned); final quality {final} (window {seenQuality}{(updated ? "" : " from before the last action")}, "
                                       + $"simulator {w.PredictedQuality}{(w.Active ? "" : ", stopped: " + w.Stopped)}), planned {rotationQuality}");
-            if (ConditionReaction.Summary(w.GoodReactions, w.ExcellentReactions, final, rotationQuality) is { } reacted) log(reacted, false);
+            if (ConditionReaction.Summary(w.GoodReactions, w.ExcellentReactions, final, rotationQuality, w.Replans) is { } reacted) log(reacted, false);
         }
         if (Current.Cosmic && macro.Contains(StellarSteadyHand)) macro.Clear();
         DebugLog.Write("crafter", $"crafted {name} ({doneThisJob} of {Current.Crafts}), {actionsUsed} actions, rotation quality {LastQuality}, Steady Hand used {SteadyHandUsed}");
@@ -970,18 +1001,46 @@ internal sealed unsafe class Crafter
     /// </summary>
     private CraftWatch? StartWatch(out string why)
     {
+        if (!Reacting(out why)) return null;
+        var solution = planned!;
+        return CraftWatch.For(solution.Sim!, solution.InitialQuality, solution.MaxQuality, macro, solution.FinalQuality, out why);
+    }
+
+    /// <summary>
+    /// Whether this recipe's crafts react to Good and Excellent steps (the setting is on, the craft wants quality, a normal
+    /// recipe, and Raphael said what the rotation was worked out for); otherwise why not.
+    /// </summary>
+    private bool Reacting(out string why)
+    {
         var job = Current!;
         why = "";
-        if (!plugin.Config.Crafting.ReactToConditions) { why = "turned off"; return null; }
-        if (job.Cosmic || job.SteadyHand > 0) { why = "a Cosmic Exploration mission"; return null; }
-        if ((job.Quality ?? (job.Hq ? -1 : 0)) == 0) { why = "no quality wanted"; return null; }
-        if (!CraftActions.NormalConditions(job.Recipe.RecipeId)) { why = "an expert recipe, or one with other conditions"; return null; }
+        if (!plugin.Config.Crafting.ReactToConditions) { why = "turned off"; return false; }
+        if (job.Cosmic || job.SteadyHand > 0) { why = "a Cosmic Exploration mission"; return false; }
+        if ((job.Quality ?? (job.Hq ? -1 : 0)) == 0) { why = "no quality wanted"; return false; }
+        if (!CraftActions.NormalConditions(job.Recipe.RecipeId)) { why = "an expert recipe, or one with other conditions"; return false; }
         if (planned is not { Simulable: true } solution || !solution.Actions.SequenceEqual(macro))
         {
             why = "Raphael didn't say what this rotation was worked out for";
-            return null;
+            return false;
         }
-        return CraftWatch.For(solution.Sim!, solution.InitialQuality, solution.MaxQuality, macro, solution.FinalQuality, out why);
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the serve process ready for this recipe's rotation (it prepares in the background; the same rotation again
+    /// changes nothing). The request is the one the rotation was solved for, with the options raphael-cli kept (it drops the
+    /// specialist actions, then Manipulation, when it fails with them).
+    /// </summary>
+    private void WarmReplanner()
+    {
+        if (Current == null || !Reacting(out _) || plannedFor is not { } asked || planned?.Sim is not { } sim)
+        {
+            serveRequest = null;
+            return;
+        }
+        serveRequest = asked with { Specialist = asked.Specialist && sim.HeartAndSoul, Manipulation = asked.Manipulation && sim.Manipulation };
+        serveSim = sim;
+        raphael.Server.Prepare(serveRequest, sim);
     }
 
     private void StopWatching(string why)
@@ -1015,6 +1074,73 @@ internal sealed unsafe class Crafter
         differsSince = default;
         watchedAt = actionIndex;
         stepCondition = condition;
+        var rest = rotation.GetRange(actionIndex, rotation.Count - actionIndex);
+        // The step a re-plan already began with Heart and Soul or Quick Innovation: its actions stand.
+        if (actionIndex <= replanCoversUntil || !w.CanReact(condition, rest)) return true;
+        var blocked = serveRequest == null ? "not prepared for this rotation" : Replanning.Blocked(w.Predicted, raphael.Server.NotReady(serveRequest));
+        if (blocked == null && raphael.Server.Solve(serveRequest!, w.Predicted, condition) is { } sent)
+        {
+            replanning = (sent.Id, sent.Answer, DateTime.UtcNow, condition);
+            Wait(0.05);
+            return false;
+        }
+        CheapReaction(condition, blocked ?? "Raphael is busy");
+        return true;
+    }
+
+    /// <summary>
+    /// Waiting for Raphael's re-plan of this step: true once it's settled (the new rest of the rotation, or the cheap reaction
+    /// after an error, no rotation or <see cref="Replanning.Wait"/> without an answer).
+    /// </summary>
+    private bool ReplanArrived()
+    {
+        var (id, answer, since, condition) = replanning!.Value;
+        var w = watch!;
+        if (!answer.IsCompleted)
+        {
+            if (DateTime.UtcNow - since < Replanning.Wait) { Wait(0.05); return false; }
+            replanning = null;
+            raphael.Server.GiveUp(id);
+            CheapReaction(condition, $"no answer within {Replanning.Wait.TotalSeconds:0} seconds");
+            return true;
+        }
+        replanning = null;
+        var a = answer.Result;
+        var waited = (int)(DateTime.UtcNow - since).TotalMilliseconds;
+        if (a.Outcome != ServeOutcome.Solved)
+        {
+            CheapReaction(condition, a.Outcome == ServeOutcome.NoSolution ? "Raphael found no rotation from here" : "Raphael failed: " + a.Error);
+            return true;
+        }
+        var rest = rotation.GetRange(actionIndex, rotation.Count - actionIndex);
+        var state = Replanning.Summary(w.Predicted, w.Settings);
+        if (w.Replan(condition, rest, a.Actions, out var quality, out var beaten, out var why) is not { } actions)
+        {
+            DebugLog.Write("crafter", $"step {actionIndex + 1} is {condition}: re-planned in {waited} ms ({state}), not taken: {why} "
+                                      + $"(predicted quality {w.Shown(quality)}, cheap reaction {w.Shown(beaten)})");
+            CheapReaction(condition, "the re-plan wasn't taken");
+            return true;
+        }
+        var changed = !actions.SequenceEqual(rest);
+        if (changed)
+        {
+            rotation.RemoveRange(actionIndex, rotation.Count - actionIndex);
+            rotation.AddRange(actions);
+            replannedFrom = replannedFrom < 0 ? actionIndex : Math.Min(replannedFrom, actionIndex);
+            var lead = RaphaelSim.FromIds(actions) is { } sim ? Replanning.LeadingNonSteps(sim) : 0;
+            if (lead > 0) replanCoversUntil = actionIndex + lead;
+        }
+        DebugLog.Write("crafter", $"step {actionIndex + 1} is {condition}: re-planned in {waited} ms (Raphael {a.Ms} ms; {state}): "
+                                  + (changed ? $"{actions.Count} actions from here, {string.Join(" ", actions.Take(3).Select(CraftActions.Name))}…" : "the rotation stays")
+                                  + $"; predicted quality {w.Shown(quality)}, cheap reaction {w.Shown(beaten)}");
+        return true;
+    }
+
+    /// <summary>The cheap reaction (<see cref="ConditionReaction"/>) takes this step, with why it wasn't re-planned (debug log).</summary>
+    private void CheapReaction(CraftCondition condition, string why)
+    {
+        var w = watch!;
+        DebugLog.Write("crafter", $"step {actionIndex + 1} is {condition}: cheap reaction ({why})");
         if (w.React(condition, rotation.GetRange(actionIndex, rotation.Count - actionIndex)) is { } edit)
         {
             var was = rotation[actionIndex];
@@ -1024,7 +1150,6 @@ internal sealed unsafe class Crafter
             DebugLog.Write("crafter", $"step {actionIndex + 1} is {condition}: planned {CraftActions.Name(was)}, now {edit.Choice.Edit}; "
                                       + $"predicted quality {w.Shown(edit.Choice.KeptQuality)} -> {w.Shown(edit.Choice.ChosenQuality)}");
         }
-        return true;
     }
 
     /// <summary>
@@ -1056,7 +1181,7 @@ internal sealed unsafe class Crafter
         if (estimate == null && DateTime.UtcNow - note.Since < TimeSpan.FromSeconds(5)) return;
         qualityNote = null;
         log(estimate is { } e
-            ? $"{note.Text}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent)}. {note.Hint}"
+            ? $"{note.Text}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent, note.React && raphael.Server.Supported != false)}. {note.Hint}"
             : $"{note.Text}, so it comes out HQ only sometimes. {note.Hint}", true);
     }
 
@@ -1160,6 +1285,11 @@ internal sealed unsafe class Crafter
     private void Go(Step next, bool keepWait = false)
     {
         if (next == Step.Finished) Status = "All crafts done";
+        if (next is Step.Finished or Step.Failed)
+        {
+            serveRequest = null;
+            raphael.Server.End(next == Step.Finished ? "all crafts done" : "crafting stopped");
+        }
         step = next;
         deadline = default;
         if (next is not Step.Ingredients) { attempts = 0; swaps = 0; }

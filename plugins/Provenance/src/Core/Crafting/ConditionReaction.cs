@@ -155,9 +155,10 @@ public static class ConditionReaction
 
     /// <summary>
     /// The run log's line for a craft that reacted: "Reacted to 2 Good steps and 1 Excellent step: quality 16,820 instead of
-    /// the planned 14,286." Null when it didn't react.
+    /// the planned 14,286." With steps Raphael re-planned (<paramref name="replanned"/> of them): "Reacted to 3 Good steps
+    /// (2 re-planned): …". Null when it didn't react.
     /// </summary>
-    public static string? Summary(int good, int excellent, int finalQuality, int plannedQuality)
+    public static string? Summary(int good, int excellent, int finalQuality, int plannedQuality, int replanned = 0)
     {
         if (good + excellent == 0) return null;
         static string Steps(int n, string what) => $"{n} {what} {(n == 1 ? "step" : "steps")}";
@@ -165,6 +166,7 @@ public static class ConditionReaction
         if (good > 0) parts.Add(Steps(good, "Good"));
         if (excellent > 0) parts.Add(Steps(excellent, "Excellent"));
         var line = $"Reacted to {string.Join(" and ", parts)}";
+        if (replanned > 0) line += good + excellent == 1 ? " (re-planned)" : $" ({replanned} re-planned)";
         if (finalQuality < 0) return line + ".";
         return plannedQuality >= 0
             ? $"{line}: quality {finalQuality:N0} instead of the planned {plannedQuality:N0}."
@@ -185,12 +187,17 @@ public static class HqChance
 {
     public const int DefaultCrafts = 2000;
 
-    /// <summary>"about 59% of crafts come out HQ", for an average HQ chance in percent.</summary>
-    public static string Describe(double hqPercent)
+    /// <summary>
+    /// "about 59% of crafts come out HQ", for an average HQ chance in percent. <paramref name="floor"/>: the estimate is the
+    /// cheap reaction's while the crafter re-plans in full (<see cref="Replanning"/>), which does better: "at least about
+    /// 59% of crafts come out HQ".
+    /// </summary>
+    public static string Describe(double hqPercent, bool floor = false)
     {
         var n = (int)Math.Round(hqPercent, MidpointRounding.AwayFromZero);
         return n >= 100 ? "nearly every craft comes out HQ"
             : n < 1 ? "hardly any craft comes out HQ"
+            : floor ? $"at least about {n}% of crafts come out HQ"
             : $"about {n}% of crafts come out HQ";
     }
 
