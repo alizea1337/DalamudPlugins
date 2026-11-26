@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.25.0
+
+- Crafting: on a Good or Excellent step the crafter now works out the whole rest of the rotation again from
+  where the craft stands, so the extra quality, CP or durability that step brings is used for the rest of the
+  craft. Measured offline on a level 100 potion: about 88 crafts in 100 come out HQ, against about 59 with
+  0.24's small changes and 53 with the rotation as planned. It applies to the same crafts as before (HQ crafts
+  and collectables, not expert recipes or Cosmic Exploration missions) and is part of *React to Good and
+  Excellent steps* (Settings, Crafting).
+  - For this, Provenance keeps its rotation solver (Raphael) running while a recipe is crafted, using at most
+    half your processor's cores, at low priority, and up to about 2 GB of memory; it ends when the recipe,
+    the run or the game does.
+  - Most answers come within a fraction of a second. When one takes longer than 6 seconds, that step gets
+    0.24's small change instead, and the craft goes on.
+  - The game's numbers are still compared with the plan at every step; at the first difference the crafter
+    stops reacting for that craft.
+- The Plan page's HQ chance reads "at least about N%" once the solver is known to work, since reacting
+  usually does better than the estimate.
+- The solver Provenance ships (raphael-cli) is now built with a small patch of ours that adds this mode; see
+  NOTICE.md.
+
 ## 0.24.1
 
 - Plan page: the rotation and HQ chance shown for an HQ craft now count the crafting food and medicine picked on
