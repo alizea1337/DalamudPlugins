@@ -742,7 +742,7 @@ index a8684e7..832b91a 100644
              })
              .collect();
 diff --git a/raphael-solver/src/macro_solver/solver.rs b/raphael-solver/src/macro_solver/solver.rs
-index 6c8e0f8..880c6fa 100644
+index 6c8e0f8..ef92151 100644
 --- a/raphael-solver/src/macro_solver/solver.rs
 +++ b/raphael-solver/src/macro_solver/solver.rs
 @@ -3,7 +3,7 @@ use raphael_sim::*;
@@ -754,7 +754,7 @@ index 6c8e0f8..880c6fa 100644
  use crate::finish_solver::FinishSolverStats;
  use crate::macro_solver::search_queue::{Batch, Candidate, SearchQueue};
  use crate::quality_upper_bound_solver::{
-@@ -74,28 +74,32 @@ impl<'a> MacroSolver<'a> {
+@@ -74,25 +74,34 @@ impl<'a> MacroSolver<'a> {
      }
  
      pub fn solve(&mut self) -> Result<Vec<Action>, SolverException> {
@@ -789,14 +789,12 @@ index 6c8e0f8..880c6fa 100644
  
          let timer = ScopedTimer::new("Finish Solver");
          self.finish_solver.precompute()?;
--        if !self.finish_solver.can_finish(&initial_state)? {
--            self.last_solve_runtime_stats.finish_solver_stats = self.finish_solver.runtime_stats();
--            return Err(SolverException::NoSolution);
--        }
-         drop(timer);
- 
-         let timer = ScopedTimer::new("Quality UB Solver");
-@@ -114,15 +118,11 @@ impl<'a> MacroSolver<'a> {
+         if !self.finish_solver.can_finish(&initial_state)? {
++            // Not even progress can be finished from the start: no need for the other precomputes.
+             self.last_solve_runtime_stats.finish_solver_stats = self.finish_solver.runtime_stats();
+             return Err(SolverException::NoSolution);
+         }
+@@ -114,15 +123,11 @@ impl<'a> MacroSolver<'a> {
              step_lb_solver.precompute()?;
          }
  
@@ -817,7 +815,7 @@ index 6c8e0f8..880c6fa 100644
      }
  
      fn do_solve<'alloc>(
-@@ -130,8 +130,10 @@ impl<'a> MacroSolver<'a> {
+@@ -130,8 +135,10 @@ impl<'a> MacroSolver<'a> {
          quality_ub_solver: &mut QualityUbSolver<'alloc>,
          step_lb_solver: &mut StepLbSolver<'alloc>,
          state: SimulationState,
@@ -829,7 +827,7 @@ index 6c8e0f8..880c6fa 100644
          let mut solution: Option<Solution> = None;
          let mut min_accepted_score = SearchScore::MIN;
  
-@@ -163,7 +165,7 @@ impl<'a> MacroSolver<'a> {
+@@ -163,7 +170,7 @@ impl<'a> MacroSolver<'a> {
                  .map(|chunk| {
                      let mut worker_data = create_worker_data();
                      for &(state, backtrack_id) in chunk {
@@ -838,7 +836,7 @@ index 6c8e0f8..880c6fa 100644
                      }
                      Ok(worker_data)
                  })
-@@ -211,6 +213,7 @@ impl<'a> MacroSolver<'a> {
+@@ -211,6 +218,7 @@ impl<'a> MacroSolver<'a> {
              }
  
              (self.progress_callback)(search_queue.runtime_stats().processed_nodes);
@@ -846,7 +844,7 @@ index 6c8e0f8..880c6fa 100644
          }
  
          self.last_solve_runtime_stats = MacroSolverStats {
-@@ -235,6 +238,46 @@ impl<'a> MacroSolver<'a> {
+@@ -235,6 +243,46 @@ impl<'a> MacroSolver<'a> {
      }
  }
  
@@ -893,7 +891,7 @@ index 6c8e0f8..880c6fa 100644
  struct WorkerResult<'alloc> {
      quality_ub_states: QualityUbStates<'alloc>,
      step_lb_states: StepLbStates<'alloc>,
-@@ -303,9 +346,19 @@ impl<'main, 'alloc> WorkerData<'main, 'alloc> {
+@@ -303,9 +351,19 @@ impl<'main, 'alloc> WorkerData<'main, 'alloc> {
          state: SimulationState,
          score: SearchScore,
          backtrack_id: usize,

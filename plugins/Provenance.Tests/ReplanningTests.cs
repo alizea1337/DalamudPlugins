@@ -107,23 +107,61 @@ public class ReplanningTests
         var cheap = ConditionReaction.Choose(s, watch.Predicted, plan, CraftCondition.Good)!;
         var cheapIds = cheap.Rest.Select(RaphaelSim.Id).ToList();
 
-        // As good as the cheap edit: taken, counted as a Good reaction that was re-planned.
-        var taken = watch.Replan(CraftCondition.Good, rest, cheapIds, out var quality, out var beaten, out _);
-        Assert.Equal(cheapIds, taken);
+        // Just as good as the cheap edit, in as many actions: not taken (the cheap reaction takes the step).
+        Assert.Null(watch.Replan(CraftCondition.Good, rest, cheapIds, out var quality, out var beaten, out var why));
         Assert.Equal(cheap.ChosenQuality, quality);
         Assert.Equal(cheap.ChosenQuality, beaten);
-        Assert.Equal((1, 1), (watch.GoodReactions, watch.Replans));
+        Assert.Contains("does as well", why);
 
-        // The plan as it stands is worse than the cheap edit here: not taken, nothing counted.
-        Assert.Null(watch.Replan(CraftCondition.Good, rest, rest, out _, out _, out var why));
-        Assert.Contains("cheap reaction does better", why);
+        // The plan as it stands is worse than the cheap edit here: not taken.
+        Assert.Null(watch.Replan(CraftCondition.Good, rest, rest, out _, out _, out why));
+        Assert.Contains("does as well", why);
         // One that doesn't finish, or nothing at all: not taken.
         Assert.Null(watch.Replan(CraftCondition.Good, rest, cheapIds.Take(cheapIds.Count / 2).ToList(), out _, out _, out why));
         Assert.Contains("doesn't finish", why);
         Assert.Null(watch.Replan(CraftCondition.Good, rest, Array.Empty<uint>(), out _, out _, out _));
         Assert.Null(watch.Replan(CraftCondition.Good, rest, new uint[] { 999999 }, out _, out _, out why));
         Assert.Contains("doesn't know", why);
-        Assert.Equal((1, 1), (watch.GoodReactions, watch.Replans));
+        // Nothing taken, nothing counted.
+        Assert.Equal((0, 0), (watch.GoodReactions, watch.Replans));
+    }
+
+    [Fact]
+    public void A_tie_goes_to_the_re_plan_only_when_it_is_shorter()
+    {
+        // Near the end of a craft: one Careful Synthesis finishes it.
+        var (s, rotation, _) = RaphaelSimTests.Rotations[0];
+        var st = RaphaelSim.Play(s, SimState.Start(s), rotation.Take(rotation.Length - 1))!.Value;
+        Assert.False(st.IsFinal(s));
+        var rest = new[] { SimAction.Observe, SimAction.CarefulSynthesis };
+        Assert.True(Replanning.Accept(s, st, rest, new[] { SimAction.CarefulSynthesis }, CraftCondition.Normal, null, out _) >= 0);
+        Assert.Equal(-1, Replanning.Accept(s, st, rest, new[] { SimAction.Observe, SimAction.CarefulSynthesis }, CraftCondition.Normal, null, out _));
+        Assert.Equal(-1, Replanning.Accept(s, st, rest, new[] { SimAction.Observe, SimAction.Observe, SimAction.CarefulSynthesis }, CraftCondition.Normal, null, out _));
+    }
+
+    [Fact]
+    public void Nothing_to_re_plan_when_the_rotation_reaches_the_cap()
+    {
+        var (s, rotation, quality) = RaphaelSimTests.Rotations[4]; // reaches 100%
+        var ids = rotation.Select(RaphaelSim.Id).ToList();
+        var watch = CraftWatch.For(s, 0, s.MaxQuality, ids, quality, out _)!;
+        Assert.True(watch.RestReachesCap(CraftCondition.Normal, ids));
+        var (s0, r0, q0) = RaphaelSimTests.Rotations[0]; // falls short
+        var ids0 = r0.Select(RaphaelSim.Id).ToList();
+        Assert.False(CraftWatch.For(s0, 0, s0.MaxQuality, ids0, q0, out _)!.RestReachesCap(CraftCondition.Normal, ids0));
+    }
+
+    [Fact]
+    public void Without_delineations_the_re_plan_gets_no_specialist_actions()
+    {
+        var (s, _, _) = RaphaelSimTests.Rotations[1];
+        var st = SimState.Start(s);
+        Assert.Equal(st, Replanning.WithoutSpecialist(st, false));
+        var none = Replanning.WithoutSpecialist(st, true);
+        Assert.False(none.HeartAndSoulAvailable);
+        Assert.False(none.QuickInnovationAvailable);
+        Assert.Contains("heart_and_soul_available=0 quick_innovation_available=0", ServeProtocol.Solve(1, none, CraftCondition.Good));
+        Assert.Contains("heart_and_soul_available=1 quick_innovation_available=1", ServeProtocol.Solve(1, st, CraftCondition.Good));
     }
 
     [Fact]
@@ -132,8 +170,9 @@ public class ReplanningTests
         var (s, rotation, quality) = RaphaelSimTests.Rotations[0];
         var ids = rotation.Select(RaphaelSim.Id).ToList();
         var watch = CraftWatch.For(s, 0, s.MaxQuality, ids, quality, out _)!;
-        // On a Normal step nothing beats the plan, and the plan itself is taken without counting.
-        Assert.Equal(ids, watch.Replan(CraftCondition.Normal, ids, ids, out _, out _, out _));
+        // Raphael answers with the plan itself: a tie in as many actions, so the plan stays as it is, nothing counted.
+        Assert.Null(watch.Replan(CraftCondition.Normal, ids, ids, out var replanned, out var beaten, out _));
+        Assert.Equal(beaten, replanned);
         Assert.Equal((0, 0), (watch.Reactions, watch.Replans));
     }
 
@@ -211,31 +250,37 @@ public class ReplanningTests
         var s = solution.Sim!;
         var lines = new List<string>();
         using var server = new RaphaelServer(() => exe, l => { lock (lines) lines.Add(l); });
-        Assert.NotNull(server.NotReady(Request));
-        Assert.Null(server.Solve(Request, SimState.Start(s), CraftCondition.Good));
+        Assert.NotNull(server.NotReady(Request.CacheKey));
+        Assert.Null(server.Solve(Request.CacheKey, SimState.Start(s), CraftCondition.Good));
         server.Prepare(Request, s);
-        WaitUntil(() => server.NotReady(Request) == null, TimeSpan.FromSeconds(60));
-        Assert.Null(server.NotReady(Request));
+        WaitUntil(() => server.NotReady(Request.CacheKey) == null || server.Supported == false, TimeSpan.FromSeconds(60));
+        // A local raphael-cli built without the patch: nothing to test here.
+        if (server.Supported == false) return;
+        Assert.Null(server.NotReady(Request.CacheKey));
         Assert.True(server.Supported);
+        Assert.True(server.Works);
+        Assert.True(server.KeepAlive(Request.CacheKey));
+        Assert.False(server.KeepAlive("another"));
 
         // A few actions in, a Good step: the answer beats or matches the cheap reaction, within the crafter's wait.
         var plan = RaphaelSim.FromIds(solution.Actions)!;
         var st = RaphaelSim.Play(s, SimState.Start(s), plan.Take(6))!.Value;
-        var sent = server.Solve(Request, st, CraftCondition.Good)!.Value;
+        var sent = server.Solve(Request.CacheKey, st, CraftCondition.Good)!.Value;
         // One at a time.
-        Assert.Null(server.Solve(Request, st, CraftCondition.Good));
-        Assert.NotNull(server.NotReady(Request));
+        Assert.Null(server.Solve(Request.CacheKey, st, CraftCondition.Good));
+        Assert.NotNull(server.NotReady(Request.CacheKey));
         var answer = await sent.Answer.WaitAsync(Replanning.Wait);
         Assert.Equal(ServeOutcome.Solved, answer.Outcome);
         Assert.Equal(sent.Id, answer.Id);
         var rest = plan.Skip(6).ToList();
         var cheap = ConditionReaction.Choose(s, st, rest, CraftCondition.Good);
-        Assert.True(Replanning.Accept(s, st, rest, RaphaelSim.FromIds(answer.Actions)!, CraftCondition.Good, cheap, out var beaten) >= beaten);
+        var q = Replanning.Quality(s, st, RaphaelSim.FromIds(answer.Actions)!, CraftCondition.Good);
+        Assert.True(q >= (cheap?.ChosenQuality ?? Replanning.Quality(s, st, rest, CraftCondition.Good)));
 
         // Another recipe's request isn't served; ending it makes it unready.
-        Assert.NotNull(server.NotReady(Request with { Control = 5000 }));
+        Assert.NotNull(server.NotReady((Request with { Control = 5000 }).CacheKey));
         server.End("test");
-        Assert.NotNull(server.NotReady(Request));
+        Assert.NotNull(server.NotReady(Request.CacheKey));
         lock (lines) Assert.Contains(lines, l => l.StartsWith("serve: prepared in", StringComparison.Ordinal));
     }
 
@@ -251,13 +296,13 @@ public class ReplanningTests
         server.Prepare(Request, s);
         WaitUntil(() => server.Supported != null, TimeSpan.FromSeconds(10));
         Assert.False(server.Supported);
-        Assert.StartsWith("Raphael's re-planning failed earlier", server.NotReady(Request));
+        Assert.StartsWith("Raphael's re-planning failed (", server.NotReady(Request.CacheKey));
         // Another recipe doesn't try it again, nor log again.
         int before;
         lock (lines) before = lines.Count;
         server.Prepare(Request with { RecipeId = 1 }, s);
-        WaitUntil(() => server.NotReady(Request with { RecipeId = 1 })?.StartsWith("Raphael's re-planning failed", StringComparison.Ordinal) == true, TimeSpan.FromSeconds(5));
-        Assert.StartsWith("Raphael's re-planning failed earlier", server.NotReady(Request with { RecipeId = 1 }));
+        WaitUntil(() => server.NotReady((Request with { RecipeId = 1 }).CacheKey)?.StartsWith("Raphael's re-planning failed", StringComparison.Ordinal) == true, TimeSpan.FromSeconds(5));
+        Assert.StartsWith("Raphael's re-planning failed (", server.NotReady((Request with { RecipeId = 1 }).CacheKey));
         lock (lines) Assert.Equal(before, lines.Count);
     }
 }

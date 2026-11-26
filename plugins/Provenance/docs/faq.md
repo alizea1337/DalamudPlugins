@@ -140,12 +140,14 @@ what would help.
 
 Raphael plans a rotation as if every step were Normal. When a step comes up Good or Excellent, Raphael works out
 the rest of the rotation again from the craft as it stands, with that step's condition; a copy of Raphael kept
-running for the recipe (on half your CPU cores) usually answers in well under a second. When it has no answer
+running for the recipe (on half your CPU cores) usually answers in well under a second. It uses up to about 2 GB of
+memory while the recipe is crafted, and stops when the recipe changes or the run ends. When it has no answer
 within 6 seconds, or Heart and Soul is active, the run tries a few small changes to the rest of the rotation
 instead: Precise Touch, Tricks of the Trade or Intensive Synthesis in place of the next action or before it, or one
 of the next actions brought forward. It works out each in a simulator and takes the one that ends with the most
 quality and still finishes the item; when nothing beats the plan, the plan stays. Raphael's new rotation is taken
-only when the simulator says it does at least as well as those small changes. The HQ chance on the Plan page
+only when the simulator says it does better than those small changes, or as well in fewer actions; when the rotation
+already reaches full quality (or a collectable's target), Raphael isn't asked. The HQ chance on the Plan page
 counts only the small changes, so it's a floor. It only does this for HQ crafts and collectables (more than a collectable's target is worth nothing), not
 for expert recipes or Cosmic Exploration missions. After every step it checks the game's numbers against the
 simulator's; at the first difference, or when the game refuses an action, it stops reacting and plays the rest of

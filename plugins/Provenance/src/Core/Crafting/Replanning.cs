@@ -128,29 +128,49 @@ public static class Replanning
     /// Poor and every later one Normal. -1 when an action can't be used or it doesn't finish; capped at what it aims for.
     /// </summary>
     public static int Quality(SimSettings s, SimState st, IReadOnlyList<SimAction> actions, CraftCondition c)
+        => Quality(s, st, actions, c, out _);
+
+    /// <param name="used">How many of the actions are used before the item is finished.</param>
+    public static int Quality(SimSettings s, SimState st, IReadOnlyList<SimAction> actions, CraftCondition c, out int used)
     {
+        used = 0;
         foreach (var a in actions)
         {
             if (st.IsFinal(s)) break;
             if (!RaphaelSim.TryUse(st, a, c, s, out st)) return -1;
+            used++;
             if (RaphaelSim.UsesStep(a)) c = c == CraftCondition.Excellent ? CraftCondition.Poor : CraftCondition.Normal;
         }
         return st.Progress >= s.MaxProgress ? Math.Min(st.Quality, s.MaxQuality) : -1;
     }
 
     /// <summary>
-    /// Whether Raphael's new rest of the rotation is taken: it must finish, and by the simulator's count end with at least
-    /// the quality the cheap reaction would (or the plan, when the cheap reaction keeps it). Returns its quality, or -1
-    /// when it isn't taken.
+    /// The state to re-plan from: without Heart and Soul and Quick Innovation still to use when <paramref name="none"/> (too
+    /// few Crafter's Delineations, or the game refused one), so Raphael doesn't put them in.
+    /// </summary>
+    public static SimState WithoutSpecialist(SimState st, bool none)
+    {
+        if (!none) return st;
+        st.HeartAndSoulAvailable = false;
+        st.QuickInnovationAvailable = false;
+        return st;
+    }
+
+    /// <summary>
+    /// Whether Raphael's new rest of the rotation is taken: it must finish, and by the simulator's count end with more
+    /// quality than the cheap reaction would (or the plan, when the cheap reaction keeps it), or as much in fewer actions.
+    /// Returns its quality, or -1 when it isn't taken.
     /// </summary>
     /// <param name="rest">The rotation from this step on as it stands.</param>
     /// <param name="cheap">What the cheap reaction would do here (null: keep the plan).</param>
     public static int Accept(SimSettings s, in SimState st, IReadOnlyList<SimAction> rest, IReadOnlyList<SimAction> replanned, CraftCondition c,
         ReactionChoice? cheap, out int beaten)
     {
-        beaten = cheap?.ChosenQuality ?? Quality(s, st, rest, c);
-        var q = replanned.Count == 0 ? -1 : Quality(s, st, replanned, c);
-        return q >= 0 && q >= beaten ? q : -1;
+        beaten = Quality(s, st, cheap?.Rest ?? rest, c, out var otherUsed);
+        if (cheap != null) beaten = cheap.ChosenQuality;
+        var used = 0;
+        var q = replanned.Count == 0 ? -1 : Quality(s, st, replanned, c, out used);
+        return q >= 0 && (q > beaten || q == beaten && used < otherUsed) ? q : -1;
     }
 
     /// <summary>

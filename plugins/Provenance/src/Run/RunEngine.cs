@@ -1163,6 +1163,8 @@ internal sealed class RunEngine : IDisposable
 
     private void End(RunPhase phase, string headline, string detail, bool problem)
     {
+        // Raphael's serve process (re-planning while crafting) goes with the run, not a few minutes later.
+        Crafter.Release("the run ended");
         Phase = phase;
         EndedAt = DateTime.Now;
         Headline = headline;

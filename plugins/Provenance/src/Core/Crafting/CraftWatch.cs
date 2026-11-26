@@ -157,6 +157,13 @@ public sealed class CraftWatch
         return (choice.Rest.Select(RaphaelSim.Id).ToList(), choice);
     }
 
+    /// <summary>
+    /// The rotation as it stands already ends at the most quality it aims for (the recipe's most, or a collectable's target)
+    /// from this step: nothing to re-plan for.
+    /// </summary>
+    public bool RestReachesCap(CraftCondition condition, IReadOnlyList<uint> rest)
+        => RaphaelSim.FromIds(rest) is { } plan && Replanning.Quality(settings, predicted, plan, condition) >= settings.MaxQuality;
+
     /// <summary>What the cheap reaction would do on this step (nothing counted).</summary>
     private ReactionChoice? Cheap(CraftCondition condition, IReadOnlyList<uint> rest)
         => !Active || !ConditionReaction.IsSpecial(condition) || RaphaelSim.FromIds(rest) is not { } plan ? null
@@ -193,7 +200,7 @@ public sealed class CraftWatch
         if (quality < 0)
         {
             quality = Replanning.Quality(settings, predicted, actions, condition);
-            why = quality < 0 ? "the simulator says it doesn't finish" : "the simulator says the cheap reaction does better";
+            why = quality < 0 ? "the simulator says it doesn't finish" : "the simulator says the cheap reaction does as well, in as few actions";
             return null;
         }
         if (!replanned.SequenceEqual(rest))

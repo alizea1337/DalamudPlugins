@@ -77,6 +77,8 @@ internal sealed unsafe class Crafter
     private RaphaelRequest? serveRequest;
     /// <summary>The numbers of the rotation <see cref="serveRequest"/> is for.</summary>
     private SimSettings? serveSim;
+    /// <summary><see cref="serveRequest"/>'s key, worked out once (the serve process is kept alive with it every frame).</summary>
+    private string? serveKey;
     /// <summary>A re-plan sent to Raphael for the step at <see cref="actionIndex"/>, waited for up to <see cref="Replanning.Wait"/>.</summary>
     private (long Id, Task<ServeAnswer> Answer, DateTime Since, CraftCondition Condition)? replanning;
     /// <summary>A re-plan began with actions that take no step (Heart and Soul): the actions up to here are on its step still, not re-planned again.</summary>
@@ -207,9 +209,8 @@ internal sealed unsafe class Crafter
         macroHq = null;
         planned = null;
         plannedFor = null;
-        serveRequest = null;
         replanning = null;
-        raphael.Server.End("a new crafting list");
+        DropReplanner("a new crafting list");
         watch = null;
         qualityNote = null;
         LastQuality = -1;
@@ -294,8 +295,12 @@ internal sealed unsafe class Crafter
         // The run ended: a note still waiting for its HQ chance isn't said any more.
         if (Finished || step == Step.Idle) qualityNote = null;
         if (Finished || step is Step.Idle or Step.Paused) return;
-        // Crafting: the serve process stays (it ends a few minutes after the last tick, in a pause or once the run stopped).
-        if (serveRequest != null && serveSim != null && step != Step.WaitingForMaterials) raphael.Server.Prepare(serveRequest, serveSim);
+        // Crafting: the serve process stays (it ends a few minutes after the last tick in a pause, and when the run stops).
+        if (serveKey != null && step != Step.WaitingForMaterials)
+        {
+            if (!plugin.Config.Crafting.ReactToConditions) DropReplanner("reacting to Good and Excellent steps was turned off");
+            else if (!raphael.Server.KeepAlive(serveKey)) raphael.Server.Prepare(serveRequest!, serveSim!, serveKey);
+        }
         if (DateTime.UtcNow < waitUntil) return;
         if (step is Step.SwitchJob or Step.Repair or Step.Consumables or Step.OpenRecipe or Step.Ingredients or Step.Synthesize && GetOffMount()) return;
         if (step == Step.WaitingForMaterials)
@@ -365,8 +370,7 @@ internal sealed unsafe class Crafter
             doneThisJob = 0;
             macro.Clear();
             ForgetLive();
-            serveRequest = null;
-            raphael.Server.End("another recipe");
+            DropReplanner("another recipe");
         }
 
         var catalog = plugin.Plans.Catalog!;
@@ -833,6 +837,12 @@ internal sealed unsafe class Crafter
         if (synth == null || !synth->IsVisible)
         {
             if (Services.Condition[ConditionFlag.ExecutingCraftingAction]) { Wait(0.2); return; }
+            // The craft ended while a re-plan was out: its answer isn't wanted any more.
+            if (replanning is { } gone)
+            {
+                raphael.Server.GiveUp(gone.Id);
+                replanning = null;
+            }
             Go(Step.WaitResult);
             return;
         }
@@ -981,7 +991,8 @@ internal sealed unsafe class Crafter
             macro.Clear();
         }
         // The delineations ran low: the next craft's rotation leaves the specialist actions out.
-        if (macro.Any(SpecialistActions.Contains) && GameState.Delineations < DelineationsPerCraft) macro.Clear();
+        // (A re-plan may have put them in this craft's rotation too: the next one is worked out again then, without them.)
+        if ((macro.Any(SpecialistActions.Contains) || rotation.Any(SpecialistActions.Contains)) && GameState.Delineations < DelineationsPerCraft) macro.Clear();
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
         // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.
@@ -1036,11 +1047,34 @@ internal sealed unsafe class Crafter
         if (Current == null || !Reacting(out _) || plannedFor is not { } asked || planned?.Sim is not { } sim)
         {
             serveRequest = null;
+            serveSim = null;
+            serveKey = null;
             return;
         }
         serveRequest = asked with { Specialist = asked.Specialist && sim.HeartAndSoul, Manipulation = asked.Manipulation && sim.Manipulation };
         serveSim = sim;
-        raphael.Server.Prepare(serveRequest, sim);
+        serveKey = serveRequest.CacheKey;
+        raphael.Server.Prepare(serveRequest, sim, serveKey);
+    }
+
+    /// <summary>This crafter's rotation isn't re-planned any more: its serve process ends (when it's still this one's).</summary>
+    private void DropReplanner(string why)
+    {
+        if (serveKey != null) raphael.Server.EndFor(serveKey, why);
+        serveRequest = null;
+        serveSim = null;
+        serveKey = null;
+    }
+
+    /// <summary>The run stopped or ended: the serve process goes now, not a few minutes later.</summary>
+    public void Release(string why)
+    {
+        if (replanning is { } waiting)
+        {
+            raphael.Server.GiveUp(waiting.Id);
+            replanning = null;
+        }
+        DropReplanner(why);
     }
 
     private void StopWatching(string why)
@@ -1077,8 +1111,12 @@ internal sealed unsafe class Crafter
         var rest = rotation.GetRange(actionIndex, rotation.Count - actionIndex);
         // The step a re-plan already began with Heart and Soul or Quick Innovation: its actions stand.
         if (actionIndex <= replanCoversUntil || !w.CanReact(condition, rest)) return true;
-        var blocked = serveRequest == null ? "not prepared for this rotation" : Replanning.Blocked(w.Predicted, raphael.Server.NotReady(serveRequest));
-        if (blocked == null && raphael.Server.Solve(serveRequest!, w.Predicted, condition) is { } sent)
+        var blocked = serveKey == null ? "not prepared for this rotation"
+            : w.RestReachesCap(condition, rest) ? "the rotation already reaches the most quality it aims for"
+            : Replanning.Blocked(w.Predicted, raphael.Server.NotReady(serveKey));
+        // Heart and Soul and Quick Innovation only with a Crafter's Delineation for each, and not after the game refused one.
+        var from = Replanning.WithoutSpecialist(w.Predicted, specialistRefused || GameState.Delineations < DelineationsPerCraft);
+        if (blocked == null && raphael.Server.Solve(serveKey!, from, condition) is { } sent)
         {
             replanning = (sent.Id, sent.Answer, DateTime.UtcNow, condition);
             Wait(0.05);
@@ -1181,7 +1219,7 @@ internal sealed unsafe class Crafter
         if (estimate == null && DateTime.UtcNow - note.Since < TimeSpan.FromSeconds(5)) return;
         qualityNote = null;
         log(estimate is { } e
-            ? $"{note.Text}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent, note.React && raphael.Server.Supported != false)}. {note.Hint}"
+            ? $"{note.Text}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent, note.React && raphael.Server.Works)}. {note.Hint}"
             : $"{note.Text}, so it comes out HQ only sometimes. {note.Hint}", true);
     }
 
@@ -1285,11 +1323,7 @@ internal sealed unsafe class Crafter
     private void Go(Step next, bool keepWait = false)
     {
         if (next == Step.Finished) Status = "All crafts done";
-        if (next is Step.Finished or Step.Failed)
-        {
-            serveRequest = null;
-            raphael.Server.End(next == Step.Finished ? "all crafts done" : "crafting stopped");
-        }
+        if (next is Step.Finished or Step.Failed) DropReplanner(next == Step.Finished ? "all crafts done" : "crafting stopped");
         step = next;
         deadline = default;
         if (next is not Step.Ingredients) { attempts = 0; swaps = 0; }

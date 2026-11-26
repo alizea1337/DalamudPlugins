@@ -752,7 +752,7 @@ internal sealed class PlanService : IDisposable
         var head = $"The best rotation reaches {solution.FinalQuality:N0} of {solution.MaxQuality:N0} quality";
         var estimate = CraftActions.NormalConditions(recipe.RecipeId) ? raphael.HqEstimateFor(request, solution, config().Crafting.ReactToConditions) : null;
         var note = estimate is { } e
-            ? $"{head}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent, config().Crafting.ReactToConditions && raphael.Server.Supported != false)}."
+            ? $"{head}. Estimated with the Good and Excellent steps that come along: {HqChance.Describe(e.HqPercent, config().Crafting.ReactToConditions && raphael.Server.Works)}."
             : $"{head}, so it comes out HQ only sometimes.";
         return missing.Length == 0 ? note
             : $"{note} This counts {missing} as picked on the Character page, but you have none in your bags: without {them} the crafter reaches less.";

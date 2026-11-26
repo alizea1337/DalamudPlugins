@@ -242,6 +242,7 @@ internal sealed unsafe class CosmicRun
     private void Finish(string reason, bool problem, bool missionLeft = true, bool goHome = false)
     {
         Paused = Pausing = false;
+        crafter.Release("the run ended");
         if (goHome && !problem && plugin.Config.AfterOrder.AfterCosmic && Integrations.Cosmic.ActiveMission == 0)
         {
             trip.Cancel();

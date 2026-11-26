@@ -331,6 +331,7 @@ internal sealed unsafe class TribeRun
     private void Finish(string reason, bool problem)
     {
         Paused = Pausing = false;
+        crafter.Release("the run ended");
         Waiting = null;
         WaitingForCutscene = false;
         stepper.Stop();

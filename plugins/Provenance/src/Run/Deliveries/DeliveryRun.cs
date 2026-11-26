@@ -230,6 +230,7 @@ internal sealed unsafe class DeliveryRun
     private void Finish(string reason, bool problem)
     {
         Paused = Pausing = false;
+        crafter.Release("the run ended");
         CancelWorkers();
         gatherer.Pause();
         gatherer.Stop();
