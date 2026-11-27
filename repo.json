@@ -40,7 +40,7 @@
     "InternalName": "Provenance",
     "Punchline": "Turns a Teamcraft list into finished items: gathers, fishes, buys and crafts every material for you.",
     "Description": "Provenance takes a Teamcraft list (link, copied text or import string) or items you pick in its recipe browser, works out every material down to the crystals, then gets everything and crafts it in one run: items from your retainers, master books and folklore tomes from scrip exchanges (earning the scrips with collectables when needed), vendors, monster drops with a basic combo, its own gathering including timed nodes and collectables, its own fishing and spearfishing including mooch chains, Fisher's Intuition and fish windows, and crafting with Raphael rotations. No market board. Requires vnavmesh. Open /provenance to get started.",
-    "Changelog": "- Crafting: on a Good or Excellent step the crafter now works out the whole rest of the rotation again from\n  where the craft stands, so the extra quality, CP or durability that step brings is used for the rest of the\n  craft. Measured offline on a level 100 potion: about 88 crafts in 100 come out HQ, against about 59 with\n  0.24's small changes and 53 with the rotation as planned. It applies to the same crafts as before (HQ crafts\n  and collectables, not expert recipes or Cosmic Exploration missions) and is part of *React to Good and\n  Excellent steps* (Settings, Crafting).\n  - For this, Provenance keeps its rotation solver (Raphael) running while a recipe is crafted, using at most\n    half your processor's cores, at low priority, and up to about 2 GB of memory; it ends when the recipe,\n    the run or the game does.\n  - Most answers come within a fraction of a second. When one takes longer than 6 seconds, that step gets\n    0.24's small change instead, and the craft goes on.\n  - The game's numbers are still compared with the plan at every step; at the first difference the crafter\n    stops reacting for that craft.\n- The Plan page's HQ chance reads \"at least about N%\" once the solver is known to work, since reacting\n  usually does better than the estimate.\n- The solver Provenance ships (raphael-cli) is now built with a small patch of ours that adds this mode; see\n  NOTICE.md.\r\n",
+    "Changelog": "- Crafting: food and medicine were only checked when a recipe's crafts began, so in a long batch they ran out\n  between two crafts. The next craft then started without them, on a rotation planned with their CP, ran out of\n  CP near the end and was finished with Basic Synthesis. Now, before every craft, food or medicine that would run\n  out during it is renewed first, and when the stats differ from the ones the rotation was planned with (nothing\n  left to renew it with), the rotation is worked out again for the new numbers.\n- Crafting: HQ ingredients were passed to the rotation solver in the wrong places when a recipe has ingredients\n  that can't be high quality ahead of ones that can. The solver then planned as if the craft started at no\n  quality (the Juwelenremedium potions start at 10,600 from their HQ water), so rotations aimed far too low, the\n  Plan page's HQ estimate was far too pessimistic, and reacting to Good and Excellent steps switched itself off\n  at the first step of every craft. They're passed the way the solver counts them now.\r\n",
     "Tags": [
       "crafting",
       "gathering",
@@ -62,12 +62,12 @@
     "FeedbackMessage": null,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "AssemblyVersion": "0.25.0.0",
-    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.25.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.25.0/latest.zip",
+    "AssemblyVersion": "0.25.1.0",
+    "DownloadLinkInstall": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.25.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/alizea1337/DalamudPlugins/releases/download/Provenance-v0.25.1/latest.zip",
     "TestingAssemblyVersion": null,
     "TestingDalamudApiLevel": null,
     "DownloadLinkTesting": null,
-    "LastUpdate": 1795671565
+    "LastUpdate": 1795774281
   }
 ]
