@@ -654,6 +654,8 @@ internal sealed unsafe class CosmicRun
         if (!crafter.Finished) return;
         if (crafter.Failure is { } why)
         {
+            // Leave this mission with the player, rather than reporting it or spending another attempt.
+            if (crafter.ResultNeedsReview) { Finish(why, true); return; }
             // Something to show for it: report that much; otherwise give the mission up.
             if (Integrations.Cosmic.Rank > Tier.None)
             {

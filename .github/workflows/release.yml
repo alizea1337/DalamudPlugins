@@ -20,7 +20,7 @@ jobs:
         id: tag
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:GITHUB_REF_NAME
           if ($tag -notmatch '^(?<plugin>[A-Za-z0-9]+)-v(?<version>\d+\.\d+\.\d+(\.\d+)?)(?<testing>-testing)?$') {
             throw "Tag '$tag' does not match <Plugin>-v<version>[-testing]"
           }
@@ -28,11 +28,11 @@ jobs:
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
           "testing=$([bool]$Matches.testing)" >> $env:GITHUB_OUTPUT
 
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@v5
         with:
-          ref: main
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Install .NET
         uses: actions/setup-dotnet@v5
@@ -44,12 +44,6 @@ jobs:
         run: |
           Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
           Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
-
-      - name: Test
-        shell: pwsh
-        run: |
-          $tests = "plugins/${{ steps.tag.outputs.plugin }}.Tests"
-          if (Test-Path $tests) { dotnet test $tests -c Release } else { Write-Host "No test project for this plugin" }
 
       - name: Build raphael-cli (Provenance)
         if: steps.tag.outputs.plugin == 'Provenance'
@@ -69,18 +63,33 @@ jobs:
           Copy-Item raphael-rs/target/release/raphael-cli.exe plugins/Provenance/Resources/raphael-cli.exe -Force
           Copy-Item raphael-rs/LICENSE plugins/Provenance/Resources/LICENSE-raphael.txt -Force
 
+      - name: Test
+        shell: pwsh
+        env:
+          PLUGIN: ${{ steps.tag.outputs.plugin }}
+          PROVENANCE_REQUIRE_RAPHAEL: '1'
+          PROVENANCE_RAPHAEL_EXE: ${{ github.workspace }}/plugins/Provenance/Resources/raphael-cli.exe
+        run: |
+          $tests = "plugins/$env:PLUGIN.Tests"
+          if ($env:PLUGIN -eq 'Provenance' -or (Test-Path $tests)) { dotnet test $tests -c Release } else { Write-Host 'No test project for this plugin' }
+
       - name: Build
         shell: pwsh
+        env:
+          PLUGIN: ${{ steps.tag.outputs.plugin }}
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          $v = "${{ steps.tag.outputs.version }}"
+          $v = $env:VERSION
           if ($v.Split('.').Count -eq 3) { $v = "$v.0" }
-          dotnet build "plugins/${{ steps.tag.outputs.plugin }}" -c Release -p:Version=$v
+          dotnet build "plugins/$env:PLUGIN" -c Release -p:Version=$v
 
       - name: Collect package
         id: pkg
         shell: pwsh
+        env:
+          PLUGIN: ${{ steps.tag.outputs.plugin }}
         run: |
-          $plugin = "${{ steps.tag.outputs.plugin }}"
+          $plugin = $env:PLUGIN
           $zip = Get-ChildItem "plugins/$plugin/bin" -Recurse -Filter latest.zip | Select-Object -First 1
           if (-not $zip) { throw "latest.zip not found under plugins/$plugin/bin" }
           $out = $zip.DirectoryName
@@ -108,21 +117,38 @@ jobs:
           body_path: changelog.txt
           files: ${{ steps.pkg.outputs.zip }}
 
-      - name: Update repo.json
-        shell: pwsh
-        run: |
-          $plugin = "${{ steps.tag.outputs.plugin }}"
-          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/latest.zip"
-          $changelog = Get-Content -Raw changelog.txt
-          $testing = "${{ steps.tag.outputs.testing }}" -eq "True"
-          ./scripts/Update-RepoJson.ps1 -ManifestPath "${{ steps.pkg.outputs.manifest }}" -DownloadUrl $url -Changelog $changelog -Testing:$testing
+      - name: Checkout main for the feed
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          path: feed
 
-      - name: Commit repo.json
+      - name: Update and push repo.json
+        working-directory: feed
         shell: pwsh
+        env:
+          MANIFEST: ${{ steps.pkg.outputs.manifest }}
+          TESTING: ${{ steps.tag.outputs.testing }}
         run: |
+          $url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/latest.zip"
+          $changelog = Get-Content -Raw (Join-Path $env:GITHUB_WORKSPACE changelog.txt)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add repo.json
-          git diff --cached --quiet; if ($LASTEXITCODE -eq 0) { Write-Host "repo.json unchanged"; exit 0 }
-          git commit -m "chore: update feed for ${{ github.ref_name }}"
-          git push origin HEAD:main
+          # Another tag may have published meanwhile. Re-apply this entry to the new feed,
+          # never force-push or cancel a queued release.
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-RepoJson.ps1') -RepoJsonPath (Join-Path $PWD 'repo.json') -ManifestPath $env:MANIFEST -DownloadUrl $url -Changelog $changelog -Testing:($env:TESTING -eq 'True')
+            git add -- repo.json
+            if ($LASTEXITCODE -ne 0) { throw 'Could not stage repo.json' }
+            git diff --cached --quiet
+            if ($LASTEXITCODE -eq 0) { Write-Host 'repo.json unchanged'; exit 0 }
+            git commit -m "chore: update feed for $env:GITHUB_REF_NAME"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not commit repo.json' }
+            git push origin HEAD:main
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            git fetch origin main
+            if ($LASTEXITCODE -ne 0) { throw 'Could not fetch main' }
+            git checkout --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Could not check out the updated main' }
+          }
+          throw 'Could not publish repo.json after five attempts'

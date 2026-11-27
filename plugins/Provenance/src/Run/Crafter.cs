@@ -2,13 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using ECommons;
 using ECommons.Automation;
+using ECommons.Automation.UIInput;
 using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Provenance.Core.Catalog;
 using Provenance.Core.Character;
@@ -16,6 +19,7 @@ using Provenance.Core.Crafting;
 using Provenance.Core.Estimating;
 using Provenance.Data;
 using Provenance.Integrations;
+using EventFramework = FFXIVClientStructs.FFXIV.Client.Game.Event.EventFramework;
 
 namespace Provenance.Run;
 
@@ -62,6 +66,8 @@ internal sealed unsafe class Crafter
     private DateTime waitUntil;
     private DateTime deadline;
     private int attempts;
+    private int preClickReplans;
+    private CraftResult? result;
     /// <summary>Clicks on HQ for a slot the game had already filled with NQ ones (each should swap one).</summary>
     private int swaps;
     /// <summary>Swap clicks before giving up on them (when they don't take, the craft goes ahead with what's in).</summary>
@@ -159,6 +165,7 @@ internal sealed unsafe class Crafter
     public int DoneThisRecipe => doneThisJob;
     public string Status { get; private set; } = "";
     public string? Failure { get; private set; }
+    public bool ResultNeedsReview { get; private set; }
     public string CurrentAction { get; private set; } = "";
     public int ActionNumber => Math.Min(actionIndex, Steps.Count);
     public int ActionCount => Steps.Count;
@@ -195,11 +202,14 @@ internal sealed unsafe class Crafter
         History.Clear();
         warnedOnce.Clear();
         lastUse.Clear();
+        preClickReplans = 0;
+        EndResultWatch();
         pending.AddRange(jobs.Where(j => j.Crafts > 0));
         CraftsTotal = pending.Sum(j => j.Crafts);
         CraftsDone = 0;
         Current = null;
         Failure = null;
+        ResultNeedsReview = false;
         pauseRequested = false;
         // Nothing of an earlier list carries over: a rotation still being worked out, the one in use, its quality.
         solving = null;
@@ -604,6 +614,7 @@ internal sealed unsafe class Crafter
                 log($"{why} Finishing {plugin.Plans.Catalog!.ItemName(r.ItemId)} with Basic Synthesis instead.", true);
                 macro = new List<uint> { BasicSynthesis };
                 planned = null;
+                plannedFor = null;
                 Go(Step.OpenRecipe);
                 return;
             }
@@ -812,9 +823,15 @@ internal sealed unsafe class Crafter
 
     private void Synthesize()
     {
+        if (result is { Outcome: not CraftOutcome.Unknown }) { Fail("The craft ended before its start could be confirmed.", reviewResult: true); return; }
         if (Visible("Synthesis"))
         {
+            if (result == null) { Fail("Another synthesis is already open."); return; }
+            var activeRecipe = ActiveRecipe();
+            if (activeRecipe == 0 && DateTime.UtcNow < deadline) { Wait(0.1); return; }
+            if (!result.MatchesRecipe(activeRecipe)) { Fail("Couldn't confirm the recipe in the synthesis window.", reviewResult: true); return; }
             synthStarted = DateTime.UtcNow;
+            preClickReplans = 0;
             actionsUsed = 0;
             // Time between two crafts of the same recipe, for estimates.
             if (lastCraftEnded != default && doneThisJob > 0 && synthStarted - lastCraftEnded < TimeSpan.FromSeconds(30))
@@ -848,17 +865,41 @@ internal sealed unsafe class Crafter
         }
         if (deadline == default)
         {
-            if (Current!.Cosmic)
+            // Also runs on a retry, but never once the synthesis window has opened.
+            var job = Current!;
+            var start = CraftStartCheck.Decide(plannedFor, GameState.LiveStats(Discipline.Hand), job.UseConsumables && !job.Cosmic, preClickReplans);
+            if (start == CraftStart.Stop) { Fail("Couldn't confirm your crafting stats before starting the craft."); return; }
+            if (start != CraftStart.Click)
             {
-                if (Addon(CosmicNotebook) is var cosmic && cosmic != null) new AddonMaster.WKSRecipeNotebook((nint)cosmic).Synthesize();
+                preClickReplans++;
+                EndResultWatch();
+                macro.Clear();
+                planned = null;
+                plannedFor = null;
+                DropReplanner("crafting stats changed before synthesis");
+                Go(start == CraftStart.CheckConsumables ? Step.Consumables : Step.Solve);
+                return;
             }
-            else if (Addon("RecipeNote") is var note && note != null) new AddonMaster.RecipeNote((nint)note).Synthesize();
+            var notebook = Addon(job.Cosmic ? CosmicNotebook : "RecipeNote");
+            if (notebook != null && GenericHelpers.IsAddonReady(notebook))
+            {
+                if (SelectedRecipe() != job.Recipe.RecipeId) { Fail("The selected recipe changed before synthesis."); return; }
+                var button = job.Cosmic ? new AddonMaster.WKSRecipeNotebook(notebook).SynthesizeButton
+                    : new AddonMaster.RecipeNote(notebook).Addon->SynthesizeButton;
+                if (notebook->IsVisible && button != null && button->AtkResNode != null && button->IsEnabled && button->AtkResNode->IsVisible())
+                {
+                    result = new CraftResult(job.Recipe.ItemId, job.Recipe.RecipeId);
+                    Services.Chat.LogMessage += OnCraftLog;
+                    button->ClickAddonButton(notebook);
+                }
+            }
             deadline = DateTime.UtcNow.AddSeconds(8);
             Wait(0.5);
             return;
         }
         if (DateTime.UtcNow > deadline)
         {
+            if (result != null) { Fail("Couldn't confirm that synthesis started. Check your materials before starting again.", reviewResult: true); return; }
             if (++attempts > 2) { Fail("The synthesis didn't start."); return; }
             deadline = default;
         }
@@ -869,9 +910,8 @@ internal sealed unsafe class Crafter
     private void Acting()
     {
         var synth = Addon("Synthesis");
-        if (synth == null || !synth->IsVisible)
+        if (synth == null || !synth->IsVisible || result is { Outcome: not CraftOutcome.Unknown })
         {
-            if (Services.Condition[ConditionFlag.ExecutingCraftingAction]) { Wait(0.2); return; }
             // The craft ended while a re-plan was out: its answer isn't wanted any more.
             if (replanning is { } gone)
             {
@@ -887,6 +927,7 @@ internal sealed unsafe class Crafter
             seenStep = synth->AtkValues[15].Int;
         }
         if (Services.Condition[ConditionFlag.ExecutingCraftingAction] || !GenericHelpers.IsAddonReady(synth)) { Wait(0.1); return; }
+        if (result?.MatchesRecipe(ActiveRecipe()) != true) { Fail("Couldn't confirm the active recipe before using a crafting action.", reviewResult: true); return; }
 
         var stepIndex = synth->AtkValuesCount > 15 ? synth->AtkValues[15].Int : -1;
         if (actionPending)
@@ -984,13 +1025,21 @@ internal sealed unsafe class Crafter
 
     private void WaitResult()
     {
-        if (Visible("Synthesis") || Services.Condition[ConditionFlag.ExecutingCraftingAction]) { Wait(0.2); return; }
-        if (!Ready(Current!.Cosmic ? CosmicNotebook : "RecipeNote"))
+        var now = DateTime.UtcNow;
+        if (deadline == default) deadline = now.AddSeconds(8);
+        var busy = Visible("Synthesis") || Services.Condition[ConditionFlag.ExecutingCraftingAction];
+        // The last mission craft need not reopen its notebook. Only the notebook gets a
+        // shorter grace period; the game still has the full eight seconds to report a result.
+        var cosmic = Current!.Cosmic;
+        var settled = Ready(cosmic ? CosmicNotebook : "RecipeNote") || now >= (cosmic ? deadline.AddSeconds(-6.5) : deadline);
+        switch (result!.Resolve(busy, settled, now >= deadline))
         {
-            // After a mission's last craft the game doesn't open its crafting log again: a moment is enough there.
-            if (deadline == default) deadline = DateTime.UtcNow.AddSeconds(Current.Cosmic ? 1.5 : 8);
-            if (DateTime.UtcNow < deadline) { Wait(0.2); return; }
+            case ResultStep.Wait: Wait(0.2); return;
+            case ResultStep.Count: break;
+            case ResultStep.Failed: Fail("The synthesis failed or was cancelled. Check your materials before starting again.", reviewResult: true); return;
+            default: Fail("Couldn't confirm the craft result. Check the item before starting again.", reviewResult: true); return;
         }
+        EndResultWatch();
         doneThisJob++;
         CraftsDone++;
         CurrentAction = "";
@@ -1106,6 +1155,7 @@ internal sealed unsafe class Crafter
     /// <summary>The run stopped or ended: the serve process goes now, not a few minutes later.</summary>
     public void Release(string why)
     {
+        EndResultWatch();
         if (replanning is { } waiting)
         {
             raphael.Server.GiveUp(waiting.Id);
@@ -1348,8 +1398,10 @@ internal sealed unsafe class Crafter
         Go(Step.Paused);
     }
 
-    private void Fail(string message)
+    private void Fail(string message, bool reviewResult = false)
     {
+        EndResultWatch();
+        ResultNeedsReview = reviewResult;
         Failure = message;
         Status = message;
         CurrentAction = "";
@@ -1368,6 +1420,28 @@ internal sealed unsafe class Crafter
     }
 
     private void Wait(double seconds) => waitUntil = DateTime.UtcNow.AddSeconds(seconds);
+
+    private void OnCraftLog(ILogMessage message)
+    {
+        if (result == null || !Services.Framework.IsInFrameworkUpdateThread || message.Address == 0) return;
+        // The entry is valid only during this callback. Read the relationship, not names.
+        // The sheet's IntegerParameter(1) is index 0 in Dalamud's parameter list.
+        var source = ((LogMessageQueueItem*)message.Address)->SourceKind switch
+        {
+            EntityRelationKind.LocalPlayer => CraftSource.Self,
+            EntityRelationKind.None => CraftSource.None,
+            _ => CraftSource.Other,
+        };
+        var item = message.TryGetIntParameter(0, out var raw) && raw > 0 ? Dalamud.Utility.ItemUtil.GetBaseId((uint)raw).ItemId : 0u;
+        result.Observe(message.LogMessageId, item, source);
+    }
+
+    private void EndResultWatch()
+    {
+        if (result == null) return;
+        Services.Chat.LogMessage -= OnCraftLog;
+        result = null;
+    }
 
     private static Ingredient? Missing(CraftJob job) => job.Cosmic ? null : MissingIngredient(job.Recipe);
 
@@ -1397,4 +1471,13 @@ internal sealed unsafe class Crafter
     }
 
     private static uint SelectedRecipe() => SelectedEntry() is var e && e != null ? e->RecipeId : 0u;
+
+    // Read only with the synthesis window open. The event handler runs the craft;
+    // the recipe notebook can already have a different recipe selected.
+    private static uint ActiveRecipe()
+    {
+        var events = EventFramework.Instance();
+        var craft = events == null ? null : events->GetCraftEventHandler();
+        return craft == null ? 0u : craft->RecipeId;
+    }
 }

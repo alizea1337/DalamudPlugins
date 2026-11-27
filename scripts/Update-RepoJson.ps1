@@ -28,6 +28,12 @@ $repo = @()
 if ($repoRaw.Trim().Length -gt 2) { $repo = @($repoRaw | ConvertFrom-Json) }
 
 $existing = $repo | Where-Object { $_.InternalName -eq $manifest.InternalName } | Select-Object -First 1
+$incoming = [version]$manifest.AssemblyVersion
+if (($existing.AssemblyVersion -and ([version]$existing.AssemblyVersion -gt $incoming -or ($Testing -and [version]$existing.AssemblyVersion -eq $incoming))) -or
+    ($Testing -and $existing.TestingAssemblyVersion -and [version]$existing.TestingAssemblyVersion -gt $incoming)) {
+    Write-Host "Skipping superseded release $($manifest.InternalName) $incoming (testing: $Testing)"
+    return
+}
 $now = [int][double]::Parse((Get-Date -UFormat %s))
 $internal = $manifest.InternalName
 

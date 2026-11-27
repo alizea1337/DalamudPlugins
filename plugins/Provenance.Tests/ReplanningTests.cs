@@ -215,9 +215,11 @@ public class ReplanningTests
 
     // ------------------------------------------------------------------ the process (needs a built raphael-cli with serve)
 
-    /// <summary>plugins/Provenance/Resources/raphael-cli.exe (gitignored; built by CI after the tests, so they skip there).</summary>
+    // Release CI requires the very binary it just copied. A native build can be tested elsewhere by path.
     private static string? Exe()
     {
+        if (Environment.GetEnvironmentVariable("PROVENANCE_RAPHAEL_EXE") is { Length: > 0 } path) return path;
+        if (!OperatingSystem.IsWindows()) return null;
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
             var exe = Path.Combine(dir.FullName, "plugins", "Provenance", "Resources", "raphael-cli.exe");
@@ -228,12 +230,28 @@ public class ReplanningTests
         return null;
     }
 
-    private static RaphaelSolution SolveOnce(string exe, RaphaelRequest r)
+    private sealed class SolverFactAttribute : FactAttribute
+    {
+        public SolverFactAttribute()
+        {
+            if (Exe() == null && Environment.GetEnvironmentVariable("PROVENANCE_REQUIRE_RAPHAEL") != "1")
+                Skip = "No packaged solver. Set PROVENANCE_RAPHAEL_EXE to test a native build with serve.";
+        }
+    }
+
+    private sealed class WindowsFactAttribute : FactAttribute
+    {
+        public WindowsFactAttribute() { if (!OperatingSystem.IsWindows()) Skip = "This fallback check uses Windows hostname.exe."; }
+    }
+
+    private static async Task<RaphaelSolution> SolveOnce(string exe, RaphaelRequest r)
     {
         using var p = Process.Start(new ProcessStartInfo(exe, RaphaelCli.Arguments(r)) { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
-        var output = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-        return RaphaelCli.ParseSolution(output)!;
+        var output = p.StandardOutput.ReadToEndAsync();
+        try { await p.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2)); }
+        finally { if (!p.HasExited) p.Kill(entireProcessTree: true); }
+        Assert.Equal(0, p.ExitCode);
+        return Assert.IsType<RaphaelSolution>(RaphaelCli.ParseSolution(await output));
     }
 
     private static void WaitUntil(Func<bool> ready, TimeSpan most)
@@ -242,11 +260,12 @@ public class ReplanningTests
         while (!ready() && DateTime.UtcNow < until) Thread.Sleep(50);
     }
 
-    [Fact]
+    [SolverFact]
     public async Task Re_plans_a_real_craft()
     {
-        if (Exe() is not { } exe) return;
-        var solution = SolveOnce(exe, Request);
+        var exe = Exe();
+        Assert.True(File.Exists(exe), "Required Raphael executable not found: " + (exe ?? "plugins/Provenance/Resources/raphael-cli.exe"));
+        var solution = await SolveOnce(exe!, Request);
         var s = solution.Sim!;
         var lines = new List<string>();
         using var server = new RaphaelServer(() => exe, l => { lock (lines) lines.Add(l); });
@@ -254,10 +273,8 @@ public class ReplanningTests
         Assert.Null(server.Solve(Request.CacheKey, SimState.Start(s), CraftCondition.Good));
         server.Prepare(Request, s);
         WaitUntil(() => server.NotReady(Request.CacheKey) == null || server.Supported == false, TimeSpan.FromSeconds(60));
-        // A local raphael-cli built without the patch: nothing to test here.
-        if (server.Supported == false) return;
+        Assert.True(server.Supported, "The tested executable must support serve.");
         Assert.Null(server.NotReady(Request.CacheKey));
-        Assert.True(server.Supported);
         Assert.True(server.Works);
         Assert.True(server.KeepAlive(Request.CacheKey));
         Assert.False(server.KeepAlive("another"));
@@ -284,12 +301,12 @@ public class ReplanningTests
         lock (lines) Assert.Contains(lines, l => l.StartsWith("serve: prepared in", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [WindowsFact]
     public void A_raphael_cli_without_serve_falls_back_quietly()
     {
         // hostname.exe answers something else than "serve 1" and ends: no serve mode.
         var other = Path.Combine(Environment.SystemDirectory, "hostname.exe");
-        if (!File.Exists(other)) return;
+        Assert.True(File.Exists(other));
         var (s, _, _) = RaphaelSimTests.Rotations[0];
         var lines = new List<string>();
         using var server = new RaphaelServer(() => other, l => { lock (lines) lines.Add(l); });

@@ -1260,6 +1260,12 @@ internal sealed unsafe class TribeRun
     private void TickCrafting()
     {
         crafter.Tick();
+        if (crafter.ResultNeedsReview && crafter.Failure is { } resultProblem)
+        {
+            EndCrafting();
+            AwaitUser(resultProblem);
+            return;
+        }
         // The stepper looks at the counts (and the facility access) while it wants the craft; once it doesn't, it waits
         // until the crafter has stopped at a safe point and left the crafting log.
         if (stepper.State == StepperState.NeedsCraft) stepper.Tick();

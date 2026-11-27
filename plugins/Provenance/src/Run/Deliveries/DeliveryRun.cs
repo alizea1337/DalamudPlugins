@@ -397,7 +397,11 @@ internal sealed unsafe class DeliveryRun
         crafter.Tick();
         Status = crafter.Status;
         if (!crafter.Finished) return;
-        if (crafter.Failure is { } why) Log("Crafting: " + why, true);
+        if (crafter.Failure is { } why)
+        {
+            if (crafter.ResultNeedsReview) { Finish(why, true); return; }
+            Log("Crafting: " + why, true);
+        }
         foreach (var h in crafter.History.Where(h => h.Skipped != null)) Log($"Not crafted: {Catalog!.ItemName(h.Job.Recipe.ItemId)} ({h.Skipped}).", true);
         Interact.Close("RecipeNote");
         NextAfterCrafting();
