@@ -142,6 +142,13 @@ internal static unsafe class GameState
     }
 
     /// <summary>NQ + HQ count in the main bags (including crystals).</summary>
+    /// <summary>
+    /// The item can be high quality. Raphael counts HQ ingredients only over the ones that can (its recipe data drops the
+    /// others), so the amounts it's given must skip them.
+    /// </summary>
+    public static bool CanBeHq(uint itemId)
+        => Services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId)?.CanBeHq == true;
+
     public static int BagCount(uint itemId)
     {
         var inv = InventoryManager.Instance();

@@ -9,8 +9,9 @@ namespace Provenance.Core.Crafting;
 /// <summary>What Raphael needs to solve one craft.</summary>
 /// <param name="TargetQuality">null: as much quality as possible. 0: progress only (fastest macro).</param>
 /// <param name="HqIngredients">
-/// HQ ingredients going in, per ingredient of the recipe in its order (crystals left out); they start the craft
-/// with quality. Null or all 0 for none.
+/// HQ ingredients going in, per ingredient of the recipe that can be HQ, in the recipe's order (crystals and other
+/// ingredients that can't be HQ left out, as raphael-cli's recipe data leaves them out); they start the craft with
+/// quality. Null or all 0 for none.
 /// </param>
 /// <param name="SteadyHand">Stellar Steady Hand uses a Cosmic Exploration mission lends (0: none).</param>
 /// <param name="Food">Food the rotation may count on (item id, 0: none); <paramref name="Potion"/> the same for medicine.</param>

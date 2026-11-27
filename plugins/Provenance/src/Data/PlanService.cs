@@ -773,7 +773,7 @@ internal sealed class PlanService : IDisposable
         if (RunActive?.Invoke() == true && hqRequests.TryGetValue(recipe.RecipeId, out var kept)) return kept;
         var cfg = config();
         var stats = Catalog is { } catalog ? CraftStats(job.Stats, catalog, cfg) : job.Stats;
-        var hqIn = recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId))
+        var hqIn = recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId) && GameState.CanBeHq(i.ItemId))
             .Select(i => Plan.CraftSteps.Any(l => l.ItemId == i.ItemId && l.Hq) ? i.Amount : Math.Min(i.Amount, ownedHq.GetValueOrDefault(i.ItemId)))
             .ToArray();
         // As the crafter: a rotation can use both specialist actions, one delineation each.

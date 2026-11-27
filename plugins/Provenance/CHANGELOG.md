@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.25.1
+
+- Crafting: food and medicine were only checked when a recipe's crafts began, so in a long batch they ran out
+  between two crafts. The next craft then started without them, on a rotation planned with their CP, ran out of
+  CP near the end and was finished with Basic Synthesis. Now, before every craft, food or medicine that would run
+  out during it is renewed first, and when the stats differ from the ones the rotation was planned with (nothing
+  left to renew it with), the rotation is worked out again for the new numbers.
+- Crafting: HQ ingredients were passed to the rotation solver in the wrong places when a recipe has ingredients
+  that can't be high quality ahead of ones that can. The solver then planned as if the craft started at no
+  quality (the Juwelenremedium potions start at 10,600 from their HQ water), so rotations aimed far too low, the
+  Plan page's HQ estimate was far too pessimistic, and reacting to Good and Excellent steps switched itself off
+  at the first step of every craft. They're passed the way the solver counts them now.
+
 ## 0.25.0
 
 - Crafting: on a Good or Excellent step the crafter now works out the whole rest of the rotation again from

@@ -482,7 +482,7 @@ internal sealed unsafe class Crafter
         var (food, medicine) = plugin.Config.Consumables.For(Discipline.Hand);
         foreach (var (choice, isMedicine) in new[] { (food, false), (medicine, true) })
         {
-            if (choice.ItemId == 0 || GameState.BuffSecondsLeft(isMedicine) > 60)
+            if (choice.ItemId == 0 || GameState.BuffSecondsLeft(isMedicine) > BuffNeeded())
             {
                 if (choice.ItemId != 0 && warnedOnce.Add("active" + choice.ItemId + (isMedicine ? "m" : "f")))
                     DebugLog.Write("crafter", $"{(isMedicine ? "medicine" : "food")} {choice.ItemId}: already active, {GameState.BuffSecondsLeft(isMedicine):0} s left");
@@ -511,14 +511,42 @@ internal sealed unsafe class Crafter
     /// <summary>Stats seen last tick while waiting for them to settle after a gearset change or food.</summary>
     private int[]? settling;
     private DateTime settledAt;
+    /// <summary>The Craftsmanship, Control and CP the rotation in hand was planned with.</summary>
+    private int[]? macroStats;
+
+    /// <summary>
+    /// How long food and medicine must last for the next craft not to lose them partway: the craft's steps at the time
+    /// an action takes here, and half a minute more (at least a minute and a half).
+    /// </summary>
+    private double BuffNeeded() => Math.Max(90, plugin.Config.Timings.SecondsPerAction * Math.Max(macro.Count, 25) + 30);
+
+    /// <summary>
+    /// Before the next craft: food or medicine picked and in the bags would run out during it, or the stats are no longer
+    /// the ones the rotation was planned with (a buff ran out with nothing left to renew it).
+    /// </summary>
+    private bool RefreshDue()
+    {
+        if (Current is not { UseConsumables: true } || Current.Cosmic) return false;
+        var (food, medicine) = plugin.Config.Consumables.For(Discipline.Hand);
+        var need = BuffNeeded();
+        foreach (var (choice, isMedicine) in new[] { (food, false), (medicine, true) })
+            if (choice.ItemId != 0 && GameState.BuffSecondsLeft(isMedicine) <= need && GameState.BagCount(choice.ItemId) > 0)
+            {
+                DebugLog.Write("crafter", $"{(isMedicine ? "medicine" : "food")} {choice.ItemId}: {GameState.BuffSecondsLeft(isMedicine):0} s left, the next craft takes about {need:0} s: renewing it first");
+                return true;
+            }
+        return macroStats != null && macro.Count > 0 && !GameState.LiveStats(Discipline.Hand).SequenceEqual(macroStats);
+    }
 
     private void Solve()
     {
         var r = Current!.Recipe;
         if (solving == null)
         {
-            if (macro.Count > 0) { Go(Step.OpenRecipe); return; }
             var stats = GameState.LiveStats(Discipline.Hand);
+            // The rotation in hand fits the stats it was planned with; other numbers (food or medicine ran out, or came
+            // back) are planned for afresh once they have settled.
+            if (macro.Count > 0 && (macroStats == null || stats.SequenceEqual(macroStats))) { settling = null; Go(Step.OpenRecipe); return; }
             // Right after a gearset change or food the game can still show the previous numbers: wait
             // until they are on the right job and have stayed the same for a moment.
             if (GameState.CurrentJob != r.Job.ClassJobId() || stats[0] <= 0 || settling == null || !stats.SequenceEqual(settling))
@@ -531,6 +559,11 @@ internal sealed unsafe class Crafter
             }
             if (DateTime.UtcNow < settledAt) { Wait(0.2); return; }
             settling = null;
+            if (macro.Count > 0)
+            {
+                DebugLog.Write("crafter", $"stats now {string.Join("/", stats)}, the rotation was planned for {string.Join("/", macroStats!)}: planning again");
+                macro.Clear();
+            }
             Services.Log.Information("Solving {Recipe} at Craftsmanship {C}, Control {Co}, CP {Cp}, level {L}", r.RecipeId, stats[0], stats[1], stats[2], GameState.JobLevel(r.Job.ClassJobId()));
             var c = plugin.Config.Crafting;
             var manipulation = plugin.Plans.Catalog!.ManipulationQuest.TryGetValue(r.Job.ClassJobId(), out var quest) && QuestManager.IsQuestComplete(quest);
@@ -543,6 +576,7 @@ internal sealed unsafe class Crafter
                     log($"Fewer than {DelineationsPerCraft} {plugin.Plans.Catalog!.ItemName(GameState.Delineation)} in the bags ({GameState.Delineations}): "
                         + "specialist actions use one each, so the rotations leave them out.", true);
             }
+            macroStats = stats;
             var request = new RaphaelRequest(r.RecipeId, GameState.JobLevel(r.Job.ClassJobId()), stats[0], stats[1], stats[2],
                 manipulation, specialist,
                 Current.Quality ?? (Current.Hq ? null : 0), hqIn, Math.Max(0, Current.SteadyHand - SteadyHandUsed),
@@ -610,7 +644,8 @@ internal sealed unsafe class Crafter
     /// </summary>
     private static int[]? HqIngredients(CraftJob job)
         => job.Hq && job.Quality == null
-            ? job.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId)).Select(i => Math.Min(i.Amount, GameState.BagCount(i.ItemId, true))).ToArray()
+            ? job.Recipe.Ingredients.Where(i => !Items.IsCrystal(i.ItemId) && GameState.CanBeHq(i.ItemId))
+                .Select(i => Math.Min(i.Amount, GameState.BagCount(i.ItemId, true))).ToArray()
             : null;
 
     private void OpenRecipe()
@@ -996,7 +1031,9 @@ internal sealed unsafe class Crafter
         if (pauseRequested) { Pause(); return; }
         Wait(0.6);
         // A dropped rotation (the mission's Steady Hand uses changed) is worked out again before the next craft.
-        Go(doneThisJob < Current.Crafts ? macro.Count == 0 ? Step.Solve : Step.Ingredients : Step.NextRecipe, keepWait: true);
+        Go(doneThisJob < Current.Crafts
+            ? RefreshDue() ? Step.Consumables : macro.Count == 0 ? Step.Solve : Step.Ingredients
+            : Step.NextRecipe, keepWait: true);
     }
 
     // ------------------------------------------------------------------ reacting to Good and Excellent steps
