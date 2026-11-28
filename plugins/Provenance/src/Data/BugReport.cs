@@ -209,7 +209,7 @@ internal static class BugReport
                 Line($"State from the game: {(ready ? "yes" : "no")}, seed {Integrations.Tribes.Seed}, {Integrations.Tribes.AllowancesLeft} of {Integrations.Tribes.DailyAllowance} allowances left, "
                      + $"day {Integrations.Tribes.DayNumber}, resets {Integrations.Tribes.NextReset:yyyy-MM-dd HH:mm}");
                 var t = plugin.Config.Tribes;
-                Line($"Settings: goal {t.Goal?.ToString() ?? "automatic"}, left out [{string.Join(",", t.LeftOut)}], pause for cutscenes {t.PauseForCutscenes}, leave out /say {t.LeaveOutSay}");
+                Line($"Settings: goal {t.Goal?.ToString() ?? "automatic"}, left out [{string.Join(",", t.LeftOut)}], pause for cutscenes {t.PauseForCutscenes}, leave out /say {t.LeaveOutSay}, hand in losing tomestones {t.HandInLosingTomestones}");
                 if (ready)
                 {
                     var accepted = Integrations.Tribes.Accepted(tribes);

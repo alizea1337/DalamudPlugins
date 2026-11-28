@@ -450,6 +450,13 @@ Some quests ask you to `/say` a phrase. The run says the quest's own phrase once
 the run hands that step to you. *Leave out quests that /say in public* (off to start) skips those quests
 altogether. Emotes get one more try after 15 seconds when nothing changed.
 
+### My tomestones are at the cap. Does the run stop at every hand-in?
+
+The game warns before a hand-in whose rewards you can't all receive. The run answers that warning itself only
+when the reward lost is reputation (a society's bar is full). With *Hand in even when tomestones would be lost*
+(off to start) it also answers when only Allagan Tomestones and reputation would be lost. If Company Seals or
+anything else would be lost, it stops and asks you.
+
 ### What does the bug report option on the Tribes page do?
 
 With *Note what the run would do while I do society quests myself (for bug reports)*, while you do a society

@@ -1384,6 +1384,32 @@ public class StepRulesTests
     public void TheRewardWarningIsAnsweredOnlyWhenReputationAloneIsLost(string prompt, bool yes)
         => Assert.Equal(yes, StepRules.OnlyReputationLost(prompt, RewardWarning));
 
+    [Theory]
+    // With "Hand in even when tomestones would be lost" on: tomestones and/or reputation lost -> Yes.
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Allagan Tomestones\n  Reputation\n\nDo you still wish to proceed?", true)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Allagan Tomestones\n\nDo you still wish to proceed?", true)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Reputation\n\nDo you still wish to proceed?", true)]
+    // Company Seals among them, or anything the template doesn't name: still the player's call.
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Company Seals\n  Allagan Tomestones\n  Reputation\n\nDo you still wish to proceed?", false)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Company Seals\n\nDo you still wish to proceed?", false)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\n  Allagan Tomestones\n  Gil\n\nDo you still wish to proceed?", false)]
+    [InlineData("Warning: You will not be able to receive all the following:\n\nDo you still wish to proceed?", false)]
+    [InlineData("Disband party?", false)]
+    public void WithTheSettingOnTheRewardWarningIsAnsweredWhenOnlyTomestonesAndReputationAreLost(string prompt, bool yes)
+        => Assert.Equal(yes, StepRules.RewardLossAccepted(prompt, RewardWarning, tomestonesToo: true));
+
+    [Fact]
+    public void WithTheSettingOffTomestonesLostAreThePlayersCall()
+    {
+        const string tomestones = "Warning: You will not be able to receive all the following:\n\n  Allagan Tomestones\n\nDo you still wish to proceed?";
+        Assert.False(StepRules.RewardLossAccepted(tomestones, RewardWarning, tomestonesToo: false));
+        Assert.True(StepRules.RewardLossAccepted(tomestones, RewardWarning, tomestonesToo: true));
+        // Whatever the client's language, the template's own lines are what count (an illustrative template, not the game's text).
+        const string de = "Achtung: Folgendes kann nicht erhalten werden:\n\n  Staatstaler\n  Allagische Steine\n  Ansehen\n\nTrotzdem fortfahren?";
+        Assert.True(StepRules.RewardLossAccepted("Achtung: Folgendes kann nicht erhalten werden:\n\n  Allagische Steine\n\nTrotzdem fortfahren?", de, tomestonesToo: true));
+        Assert.False(StepRules.RewardLossAccepted("Achtung: Folgendes kann nicht erhalten werden:\n\n  Staatstaler\n\nTrotzdem fortfahren?", de, tomestonesToo: true));
+    }
+
     /// <summary>The questions a knock-out brings up (Addon 111/196, 117, 112, 3787), split around what the game fills in.</summary>
     private static readonly (string Before, string After, bool Hole)[] KnockOut =
     {

@@ -456,6 +456,12 @@ public sealed class TribeSettings
     /// </summary>
     public bool LeaveOutSay { get; set; }
     /// <summary>
+    /// Hand in a daily even when the game warns that Allagan Tomestones would be lost (a character at the tomestone cap):
+    /// the warning is answered Yes when it lists only tomestones and reputation. Off: only a warning about reputation
+    /// alone is answered; anything else stops the run to ask.
+    /// </summary>
+    public bool HandInLosingTomestones { get; set; }
+    /// <summary>
     /// While you do a society quest yourself (no Provenance loop going), note in the debug log what the run would do,
     /// for bug reports (the Tribes page's options). Only once the Tribes page has been opened (<see cref="Seen"/>).
     /// </summary>

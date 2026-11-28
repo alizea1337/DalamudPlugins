@@ -210,7 +210,10 @@ keeps it from sliding things around.
     current class when it qualifies, otherwise on your best-geared one, and a battle quest on the *Monster
     drops* job or, when that one doesn't qualify, on the combat job you're on (see Fights).
   - Options: *Include in the run* in each society's opened row; *Pause for cutscenes* (otherwise they're
-    skipped); *Leave out quests that /say in public* (off to start), which skips those quests altogether; and
+    skipped); *Leave out quests that /say in public* (off to start), which skips those quests altogether;
+    *Hand in even when tomestones would be lost* (off to start), for characters at the tomestone cap: when the
+    game warns that a hand-in would lose only Allagan Tomestones or reputation, the run answers Yes (a warning
+    about reputation alone is always answered; Company Seals or anything else still stop the run to ask); and
     *Note what the run would do while I do society quests myself (for bug reports)* (on to start, and only
     active once you've opened the Tribes page). While you do a society quest by hand and no Provenance run is
     going, it notes in the debug log what the run would do, with no player names. Bug reports carry it, which

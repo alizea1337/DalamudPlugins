@@ -1155,7 +1155,7 @@ internal sealed unsafe class TribeRun
             lastState = StepperState.Idle;
             equipTries = 0;
             // The combat job (Settings, Monster drops) is for a fight of a quest accepted as a crafter (the Ixal's).
-            stepper.Begin(next.Quest.RowId, new StepOptions(Settings.PauseForCutscenes, Settings.LeaveOutSay, plugin.Config.Combat.ClassJob));
+            stepper.Begin(next.Quest.RowId, new StepOptions(Settings.PauseForCutscenes, Settings.LeaveOutSay, plugin.Config.Combat.ClassJob, Settings.HandInLosingTomestones));
             Log($"Working on \"{next.Quest.Name}\" ({next.Quest.Number}).", false);
             return;
         }

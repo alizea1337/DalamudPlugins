@@ -397,6 +397,14 @@ internal sealed class TribesPage : Page
             Config.Save();
             snapshot = null;
         }
+        v = S.HandInLosingTomestones;
+        if (Ui.Checkbox("Hand in even when tomestones would be lost", ref v,
+                "For when your Allagan Tomestones are at the cap: the game warns before a hand-in that would lose some, and the run stops to ask you. "
+                + "On: the run hands in anyway when only tomestones or reputation would be lost. If Company Seals or anything else would be lost, it still asks."))
+        {
+            S.HandInLosingTomestones = v;
+            Config.Save();
+        }
         v = S.WatchByHand;
         if (Ui.Checkbox("Note what the run would do while I do society quests myself", ref v,
                 "For bug reports: the debug log notes the steps and targets the run would pick. It only watches, it never acts."))
