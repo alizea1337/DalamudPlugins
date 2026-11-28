@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.25.2
+
+- Fixed a game crash: Provenance could ask the game for your aetheryte list while the character was still
+  loading (after logging in or changing zone), which crashed the game. It only asks once the character is fully
+  there now.
+- Crafting: a craft now only counts once the game confirms it ("You synthesize …"); before every click the
+  crafter checks that the recipe and your stats are still the ones the rotation was planned for. When the game
+  reports a failed or cancelled synthesis, or a result can't be confirmed, Custom Deliveries, Tribes and Cosmic
+  Exploration stop and hand over to you instead of carrying on.
+- Releases are now built from exactly the tagged version, with the solver tests run against the solver that
+  ships.
+- Tribes, battle societies (A Realm Reborn especially):
+  - Key items: the run no longer tries to use a key item where the quest wants it collected, handed over or
+    reported (the Sylphs' "Feed Me", the Kobolds' "Bo Zu's Blown Cover", the Sahagin's "A Quick Snip" and others).
+    When to use an item now comes from the quest's own data; if the game still answers "Invalid target", the
+    run talks to that person or examines that object instead.
+  - Travel to a quest spot now uses the spot's own height, so the run no longer flies to the floor below a
+    raised area and gets stuck against a cliff ("Mothers of All Bombs").
+  - Fights: when the enemy is out of sight or reach, the character walks closer (it stood still before, for
+    example below deck); casters stop again once the enemy is in sight. The same fix applies to monster drops in
+    orders.
+  - Leaving a cave or building on foot now heads for the nearest open spot, and a walk that makes no headway is
+    noticed after a few seconds instead of pushing into a wall. When an NPC can't be reached on foot from where
+    you are (an island reached by a quest ride), the run teleports to the zone's aetheryte first.
+  - The quest's own transport questions ("Ride the elbst to Moonshade Isle?") are answered when the step needs
+    the ride.
+  - While carrying a quest item, the run no longer goes back to whoever gave it before heading on.
+  - New setting *Hand in even when tomestones would be lost* (Tribes page, off): for players at their tomestone
+    cap, whose hand-ins would otherwise stop the run to ask.
+- All runs: a walk that keeps being sent without moving now counts as stuck, and the "start over from the zone's
+  aetheryte" step of getting unstuck really teleports (it only planned the walk again before).
+
 ## 0.25.1
 
 - Crafting: food and medicine were only checked when a recipe's crafts began, so in a long batch they ran out
