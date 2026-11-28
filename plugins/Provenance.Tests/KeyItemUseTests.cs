@@ -393,5 +393,9 @@ public class KeyItemUseTests
         var plan = StepRules.Decide(q, s, m, T0);
         Assert.Equal(StepKind.Talk, plan.Kind);
         Assert.Equal(BaGo, plan.Target!.BaseId);
+        // Once the quest moves on, the refusal is forgotten.
+        Assert.True(m.NotForItem(s, BombCore, baGo.Key));
+        m.Observe(s.Signature() + "|moved", T0.AddSeconds(5));
+        Assert.False(m.NotForItem(s, BombCore, baGo.Key));
     }
 }

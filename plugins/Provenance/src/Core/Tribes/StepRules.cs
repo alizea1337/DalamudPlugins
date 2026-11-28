@@ -183,8 +183,7 @@ public sealed class StepMemory
 
     /// <summary>
     /// The game said this object isn't a target for this key item at this sequence (563 "Invalid target"): the item
-    /// isn't aimed at it again while the quest is at that sequence, and the object stays one to talk to (it isn't
-    /// counted as tried).
+    /// isn't aimed at it again until the quest moves on, and the object stays one to talk to (it isn't counted as tried).
     /// </summary>
     public void RefusedItem(StepSnapshot s, uint item, ulong objectKey) => notForItem.Add($"{s.Sequence}:{item}:{objectKey}");
 
@@ -227,6 +226,7 @@ public sealed class StepMemory
             Tried.Clear();
             Looked.Clear();
             Attempts.Clear();
+            notForItem.Clear();
         }
         return true;
     }
