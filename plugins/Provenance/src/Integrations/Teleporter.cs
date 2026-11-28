@@ -23,13 +23,24 @@ internal static unsafe class Teleporter
         int Ward = -1, int Plot = -1, bool Apartment = false, ulong House = 0,
         FFXIVClientStructs.FFXIV.Client.Game.EstateType Kind = FFXIVClientStructs.FFXIV.Client.Game.EstateType.Unknown3);
 
-    /// <summary>Aetherytes the character can teleport to right now, with their current gil cost.</summary>
+    private static List<Destination> lastList = new();
+    private static DateTime lastListAt = DateTime.MinValue;
+    private static ulong lastListFor;
+
+    /// <summary>
+    /// Aetherytes the character can teleport to, with their gil cost. The game's list is refreshed only when that is
+    /// safe (see <see cref="CanRefresh"/>), at most once a second; otherwise the last list read is returned (empty for
+    /// another character, or before the first read).
+    /// </summary>
     public static List<Destination> Unlocked()
     {
-        var result = new List<Destination>();
+        var contentId = Services.ClientState.IsLoggedIn && Services.PlayerState.IsLoaded ? Services.PlayerState.ContentId : 0;
+        if (contentId != lastListFor) { lastList = new(); lastListAt = DateTime.MinValue; lastListFor = contentId; }
+        if (DateTime.UtcNow - lastListAt < TimeSpan.FromSeconds(1) || !CanRefresh()) return new List<Destination>(lastList);
         var telepo = Telepo.Instance();
-        if (telepo == null || !Services.ClientState.IsLoggedIn) return result;
+        if (telepo == null) return new List<Destination>(lastList);
         telepo->UpdateAetheryteList();
+        var result = new List<Destination>();
         var sheet = Services.Data.GetExcelSheet<Aetheryte>();
         foreach (var info in telepo->TeleportList)
         {
@@ -39,7 +50,22 @@ internal static unsafe class Teleporter
             result.Add(new Destination(info.AetheryteId, info.SubIndex, name, info.TerritoryId, info.GilCost, EstateLabel(info),
                 info.Ward, info.Plot, info.IsApartment, info.HouseId.Id, info.EstateType));
         }
-        return result;
+        lastList = result;
+        lastListAt = DateTime.UtcNow;
+        return new List<Destination>(result);
+    }
+
+    /// <summary>
+    /// The game's own refresh of the teleport list (Telepo.UpdateAetheryteList) reads the character's data and crashes
+    /// the game while that isn't fully there (logging in or out, changing areas). It is called only on the framework
+    /// thread, logged in, with the character present and not between areas.
+    /// </summary>
+    private static bool CanRefresh()
+    {
+        if (!Services.Framework.IsInFrameworkUpdateThread) return false;
+        if (!Services.ClientState.IsLoggedIn || !Services.PlayerState.IsLoaded || Services.PlayerState.ContentId == 0 || Services.Objects.LocalPlayer == null) return false;
+        var c = Services.Condition;
+        return !(c[ConditionFlag.BetweenAreas] || c[ConditionFlag.BetweenAreas51] || c[ConditionFlag.LoggingOut]);
     }
 
     /// <summary>Houses and apartments in the teleport list (their zone is a housing area).</summary>
