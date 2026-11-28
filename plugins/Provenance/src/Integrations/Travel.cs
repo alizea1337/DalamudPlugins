@@ -80,6 +80,10 @@ internal sealed unsafe partial class Travel
 
     private uint territory;
     private Vector2 approx;
+    /// <summary>The target's height when the caller knows it (a Level row, a spawn point); null: from where the player stands.</summary>
+    private float? approxHeight;
+    /// <summary>Arriving at a spot whose height is known (and isn't in view yet): this far above or below it at most, or the trip's own reach when wider.</summary>
+    public const float SpotRise = 10f;
     private float range;
     private Func<Vector3?>? exact;
     private string what = "";
@@ -117,6 +121,23 @@ internal sealed unsafe partial class Travel
     private Vector3? lastPath;
     /// <summary>"No path yet" is written once per walk, not every frame vnavmesh says no.</summary>
     private bool pathFailNoted;
+    /// <summary>Where the character stood when paths started being issued without it moving (null: it's moving), and since when.</summary>
+    private Vector3? idleFrom;
+    private DateTime idleSince;
+    /// <summary>Issuing paths without moving counts as stuck after <see cref="StuckAfter"/> and this much more.</summary>
+    private static readonly TimeSpan IdleGrace = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// A long walk to an NPC in the same zone: the walking path vnavmesh finds, asked once before the walk. When it
+    /// ends far short of the target (an island the quest's ride took the character to, Moonshade Isle), the trip
+    /// teleports to the zone's aetheryte nearest the target instead of walking into the shore.
+    /// </summary>
+    private System.Threading.Tasks.Task<List<Vector3>>? reachPath;
+    private DateTime reachSince;
+    private bool reachChecked;
+    private const float ReachCheckFrom = 80f;
+    private const float ReachShort = 50f;
+    private static readonly TimeSpan ReachPatience = TimeSpan.FromSeconds(8);
 
     public State Current { get; private set; } = State.Idle;
     public string Status { get; private set; } = "";
@@ -154,11 +175,17 @@ internal sealed unsafe partial class Travel
     public bool RoofAware { get; set; }
 
     /// <param name="exactPosition">The real target once it's in view (an NPC or a bell); null until then.</param>
-    public void GoTo(string description, uint territoryId, Vector2 approximateXz, float withinYalms, Func<Vector3?>? exactPosition)
+    /// <param name="height">
+    /// The target's height when it's known (a quest's Level row or spawn point): the walk goes for the walkable point at
+    /// that height, not the one at the player's (a spot up on a cliff, not the foot of it), and arrives only within
+    /// <see cref="SpotRise"/> of it. Null, as for every trip that doesn't give one: from the player's height, as before.
+    /// </param>
+    public void GoTo(string description, uint territoryId, Vector2 approximateXz, float withinYalms, Func<Vector3?>? exactPosition, float? height = null)
     {
         what = description;
         territory = territoryId;
         approx = approximateXz;
+        approxHeight = height;
         range = withinYalms;
         exact = exactPosition;
         stuckCount = 0;
@@ -181,6 +208,9 @@ internal sealed unsafe partial class Travel
         airArrivalMoved = false;
         lastPath = null;
         pathFailNoted = false;
+        idleFrom = null;
+        reachPath = null;
+        reachChecked = false;
         ResetIndoors(trip: true);
         Current = State.Idle;
         Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
@@ -412,6 +442,7 @@ internal sealed unsafe partial class Travel
                     {
                         var walk = Vector2.Distance(new Vector2(player.Position.X, player.Position.Z), approx);
                         if (walk > 80) Note($"{what}: walking {walk:0} yalms ({(hopped ? "after the aethernet" : "no aethernet hop is quicker here")})");
+                        if (!reachChecked) StartReachCheck(player.Position, walk);
                     }
                     Enter(State.Walking);
                     return;
@@ -431,6 +462,7 @@ internal sealed unsafe partial class Travel
         var seen = exact?.Invoke();
         var target = seen ?? Approximate(me);
         Status = "Walking to " + what;
+        if (reachPath != null && TickReach(me, target)) return;
 
         // Coming down onto a floor point (an open spot near a target under a roof, the floor at a raised target): that first.
         if (descent != Descent.None && TickDescent(me)) return;
@@ -442,7 +474,10 @@ internal sealed unsafe partial class Travel
         var rise = seen is { } at && !KeepMount ? Math.Abs(me.Y - at.Y) : 0f;
         // On the ground, a big target (an aetheryte on its plinth, range 6) is reached from lower down than an NPC.
         var maxRise = Services.Condition[ConditionFlag.InFlight] ? MaxRise : Math.Max(MaxRise, range - 1f);
-        if (flat <= range && rise <= maxRise)
+        // A spot whose height is known, not in view: at the foot of its cliff (or above it) isn't there yet; the walk
+        // goes on to it (vnavmesh paths up or round).
+        var spotOff = seen == null && approxHeight != null && !KeepMount && Math.Abs(me.Y - target.Y) > Math.Max(SpotRise, range);
+        if (flat <= range && rise <= maxRise && !spotOff)
         {
             // In the air beside it with no floor right below at its height: getting off here would drop the character beside it.
             if (LandFirst(me, target, seen)) return;
@@ -538,19 +573,35 @@ internal sealed unsafe partial class Travel
         // (Re)issue the walk when idle, or when the real target came into view somewhere else. Heading for the open spot
         // near a target under a roof, that spot is where it goes.
         var landing = LandingSpot;
-        var dest = landing ?? target;
+        // Walking out of a building: to the open spot nearest to where the walk out started, when one was found.
+        var outSpot = walkingOut ? walkOutTo : null;
+        var dest = outSpot ?? landing ?? target;
         var retarget = walkingTo is { } w && Vector3.Distance(w, dest) > 3;
         if (!Vnav.Busy || retarget)
         {
+            // Paths issued again and again without the character getting anywhere (vnavmesh's path ends where it
+            // stands, or it finds none): stuck all the same, though no path ever runs long enough for the watch below.
+            if (idleFrom is not { } from || Vector3.Distance(from, me) > 2f)
+            {
+                idleFrom = me;
+                idleSince = DateTime.UtcNow;
+            }
+            else if (DateTime.UtcNow - idleSince > StuckAfter + IdleGrace && !Vnav.Pathfinding)
+            {
+                idleFrom = null;
+                Note($"{what}: paths issued for {(DateTime.UtcNow - idleSince).TotalSeconds:0} seconds without getting anywhere");
+                GotStuck(me, target);
+                return;
+            }
             if (retarget) Vnav.Stop();
             flying = !OnFoot && !StayOnFoot && (Services.Condition[ConditionFlag.InFlight] || !NoFly && CanFlyHere());
-            if (Vnav.MoveCloseTo(dest, flying, landing != null ? LandingSpotWithin : Math.Max(1, range - 1)))
+            if (Vnav.MoveCloseTo(dest, flying, outSpot != null ? 1f : landing != null ? LandingSpotWithin : Math.Max(1, range - 1)))
             {
                 walkingTo = dest;
                 pathFailNoted = false;
                 // A line per new target, not per re-issue.
                 if (lastPath is not { } lp || Vector3.Distance(lp, dest) > 3)
-                    Note($"{what}: {(flying ? "flying" : StayOnFoot ? "walking on foot" : "walking")} to {(landing != null ? "the open spot near it, " : "")}{Where(dest)}, {Vector3.Distance(me, dest):0} yalms from {Where(me)}"
+                    Note($"{what}: {(flying ? "flying" : StayOnFoot ? "walking on foot" : "walking")} to {(outSpot != null ? "the nearest open spot, out of the building, " : landing != null ? "the open spot near it, " : "")}{Where(dest)}, {Vector3.Distance(me, dest):0} yalms from {Where(me)}"
                          + (!flying && Services.Condition[ConditionFlag.Mounted] ? $" (mounted, flight: {FlightStatus()})" : ""));
                 lastPath = dest;
             }
@@ -583,7 +634,13 @@ internal sealed unsafe partial class Travel
         while (trail.Count > 0 && now - trail.Peek().At > StuckAfter) trail.Dequeue();
         if (trail.Count < 2 || now - trail.Peek().At < StuckAfter - TimeSpan.FromSeconds(1)) return;
         if (Vector3.Distance(trail.Peek().Pos, me) > 1.0f) return;
+        GotStuck(me, target);
+    }
 
+    /// <summary>No headway on the way: path again, unstick, teleport to the zone's aetheryte, or give up, by how often it happened.</summary>
+    private void GotStuck(Vector3 me, Vector3 target)
+    {
+        idleFrom = null;
         stuckCount++;
         trail.Clear();
         Vnav.Stop();
@@ -700,10 +757,59 @@ internal sealed unsafe partial class Travel
         }
     }
 
-    /// <summary>The walkable point near the known X/Z (height from the mesh, near where the player is).</summary>
+    /// <summary>
+    /// Asks vnavmesh for the walking path, once per trip: for a long walk to an NPC (the buildings rules on), when a
+    /// teleport is allowed and the zone has an aetheryte to teleport to.
+    /// </summary>
+    private void StartReachCheck(Vector3 me, float walk)
+    {
+        reachChecked = true;
+        if (!RoofAware || OnFoot || KeepMount || FailFast || aethernetOnly || walk <= ReachCheckFrom) return;
+        if (Services.ClientState.TerritoryType != territory || Teleporter.NearestTo(territory, null) == null) return;
+        reachPath = Vnav.GroundPath(me, Approximate(me));
+        reachSince = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// The walking path, once vnavmesh has it: when it ends far short of the target and an aetheryte of the zone stands
+    /// nearer the target than that, teleport there (once per trip). True while it takes the tick.
+    /// </summary>
+    private bool TickReach(Vector3 me, Vector3 target)
+    {
+        var task = reachPath!;
+        if (!task.IsCompleted)
+        {
+            if (DateTime.UtcNow - reachSince < ReachPatience)
+            {
+                Status = "Working out the way to " + what;
+                return true;
+            }
+            reachPath = null;
+            Note($"{what}: vnavmesh didn't work out the walking path in {ReachPatience.TotalSeconds:0} seconds; walking");
+            return false;
+        }
+        reachPath = null;
+        if (!task.IsCompletedSuccessfully || task.Result is not { } path) return false;
+        var end = path.Count > 0 ? path[^1] : me;
+        var shortBy = Vector2.Distance(new Vector2(end.X, end.Z), new Vector2(target.X, target.Z));
+        if (shortBy <= Math.Max(ReachShort, range * 2)) return false;
+        var dest = Teleporter.NearestTo(territory, target);
+        if (dest == null || Teleporter.Position(dest.AetheryteId) is not { } crystal
+            || Vector2.Distance(new Vector2(crystal.X, crystal.Z), new Vector2(target.X, target.Z)) >= shortBy)
+        {
+            Note($"{what}: vnavmesh's walking path ends {shortBy:0} yalms short of it, at {Where(end)}, and no aetheryte here is nearer; walking as far as it goes");
+            return false;
+        }
+        Note($"{what}: no way there on foot from here (vnavmesh's walking path ends {shortBy:0} yalms short of it, at {Where(end)}); teleporting to {dest.Name} instead");
+        Vnav.Stop();
+        Enter(State.Teleporting, 20);
+        return true;
+    }
+
+    /// <summary>The walkable point near the known X/Z (height from the mesh, near the target's height when known, else near where the player is).</summary>
     private Vector3 Approximate(Vector3 me)
     {
-        var guess = new Vector3(approx.X, me.Y, approx.Y);
+        var guess = new Vector3(approx.X, approxHeight ?? me.Y, approx.Y);
         return Vnav.NearestPoint(guess, 5, 200) ?? Vnav.NearestPoint(guess, 40, 300) ?? guess;
     }
 
@@ -890,6 +996,7 @@ internal sealed unsafe partial class Travel
     {
         if (next != Current) Note($"{what}: {Current} -> {next}");
         if (next != State.Walking) pathFailNoted = false;
+        idleFrom = null;
         // Each walk starts afresh where the character is now (after a teleport, at the aetheryte).
         if (next == State.Walking) ResetIndoors(trip: false);
         Current = next;

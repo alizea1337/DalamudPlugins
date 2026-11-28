@@ -410,7 +410,7 @@ public static class EnemyRules
             if (m.Looked.Contains(key)) continue;
             var angle = MathF.Tau * (i % RingPoints) / RingPoints;
             var at = area.Centre + new Vector3(MathF.Cos(angle), 0, MathF.Sin(angle)) * (area.Radius * RingAt);
-            return new StepPlan(StepKind.Go, "around the marked area, looking for the quest's enemies") { Spot = at, Territory = s.Territory, Within = RingWithin, Level = key };
+            return new StepPlan(StepKind.Go, "around the marked area, looking for the quest's enemies") { Spot = at, Territory = s.Territory, Within = RingWithin, Level = key, Height = false };
         }
         return null;
     }

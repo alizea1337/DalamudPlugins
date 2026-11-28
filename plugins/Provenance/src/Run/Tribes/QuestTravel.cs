@@ -38,6 +38,8 @@ internal sealed class QuestTravel
     private uint territory;
     private Vector3 target;
     private float within;
+    /// <summary>The target's height is known (a Level row, a spawn point, an object): the trip goes for that height.</summary>
+    private bool heightKnown;
     private Func<Vector3?>? exact;
     private PortalLeg? leg;
     private int legs;
@@ -67,12 +69,17 @@ internal sealed class QuestTravel
     public bool AtPortal => Current == State.AtPortal;
 
     /// <param name="exactPosition">The real target once it's in view; null until then.</param>
-    public void GoTo(string description, uint territoryId, Vector3 at, float withinYalms, Func<Vector3?>? exactPosition)
+    /// <param name="knownHeight">
+    /// <paramref name="at"/>'s height is the target's (a Level row, a spawn point, an object's position); false when
+    /// it's only a guess (a gathering area from the map), and the player's own height is gone by as before.
+    /// </param>
+    public void GoTo(string description, uint territoryId, Vector3 at, float withinYalms, Func<Vector3?>? exactPosition, bool knownHeight = true)
     {
         what = description;
         territory = territoryId;
         target = at;
         within = withinYalms;
+        heightKnown = knownHeight;
         exact = exactPosition;
         legs = 0;
         broken.Clear();
@@ -127,7 +134,9 @@ internal sealed class QuestTravel
         var spot = seen ?? target;
         // Up on a ledge or down below the real target isn't there (the game won't talk that far up or down). In the air
         // beside it isn't either: getting off there would drop the character beside it, so the trip comes down first.
-        var level = seen == null || KeepMount || Math.Abs(me.Value.Y - spot.Y) <= 3f;
+        // A spot whose height is known, not in view, is there only within Travel's reach of that height (at the foot
+        // of the cliff a spawn point stands on isn't).
+        var level = KeepMount || (seen != null ? Math.Abs(me.Value.Y - spot.Y) <= 3f : !heightKnown || Math.Abs(me.Value.Y - spot.Y) <= Math.Max(Travel.SpotRise, within));
         var inAirBeside = !afterTrip && seen != null && !KeepMount && Services.Condition[ConditionFlag.InFlight] && !Landing.RightAboveIt(me.Value, spot);
         if (here == territory && Flat(me.Value, spot) <= within + 0.5f && level && !inAirBeside)
         {
@@ -146,7 +155,7 @@ internal sealed class QuestTravel
         if (leg == null)
         {
             if (legs > 1 && here == territory) Note($"{what}: on from here ({Flat(me.Value, spot):0} yalms)");
-            travel.GoTo(what, territory, new Vector2(spot.X, spot.Z), within, exact);
+            travel.GoTo(what, territory, new Vector2(spot.X, spot.Z), within, exact, heightKnown || seen != null ? spot.Y : null);
             Current = State.Travelling;
             return;
         }

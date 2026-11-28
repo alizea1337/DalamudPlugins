@@ -619,7 +619,7 @@ internal sealed unsafe class QuestStepper
                     // The gathering area is in another zone (Elysion): get there first.
                     var spot = next.Spot ?? (place is { } at ? new Vector3(at.Centre.X, 0, at.Centre.Y) : null);
                     if (spot == null) { AskUser($"Couldn't tell where to gather {QuestSteps.ItemName(next.Id)}; gather it yourself, then resume."); return; }
-                    Approach(next with { Kind = StepKind.Go, What = "the gathering area", Spot = spot, Within = Math.Max(10f, next.Within) }, snap);
+                    Approach(next with { Kind = StepKind.Go, What = "the gathering area", Spot = spot, Within = Math.Max(10f, next.Within), Height = next.Spot != null }, snap);
                     return;
                 }
                 var centre = next.Spot ?? (place is { } pl ? new Vector3(pl.Centre.X, snap.Player.Y, pl.Centre.Y) : snap.Player);
@@ -649,7 +649,8 @@ internal sealed unsafe class QuestStepper
     {
         plan = p;
         var zone = p.Territory != 0 ? p.Territory : snap.Territory;
-        if (zone == snap.Territory && InReach(p, snap.Player) && !WouldDropBeside(p, snap)) { Act(p, snap); return; }
+        var ridingOwn = script!.Mount is { } ridden && snap.Mounted && snap.Mount == ridden.Mount;
+        if (zone == snap.Territory && InReach(p, snap.Player, ridingOwn) && !WouldDropBeside(p, snap)) { Act(p, snap); return; }
         var to = p.Target?.Position ?? p.Spot ?? snap.Player;
         travel.OnFoot = p.OnFoot;
         travel.NoFly = p.NoFly;
@@ -669,7 +670,7 @@ internal sealed unsafe class QuestStepper
         rodeOnSince = default;
         // A trip to an enemy that gets stuck isn't started over from the aetheryte: the enemy is left instead.
         travel.FailFast = enemy != null;
-        travel.GoTo(Describe(p), zone, to, within, seen);
+        travel.GoTo(Describe(p), zone, to, within, seen, knownHeight: p.Target != null || p.Enemy != null || (p.Spot != null && p.Height));
         Status = Capital(Describe(p));
         phase = Phase.Travel;
         nextLook = DateTime.UtcNow.AddSeconds(2);
@@ -1826,7 +1827,8 @@ internal sealed unsafe class QuestStepper
            || Services.Condition[ConditionFlag.Casting] || Services.Condition[ConditionFlag.Casting87];
 
     /// <summary>The target is close enough to act on.</summary>
-    private static bool InReach(StepPlan p, Vector3 me)
+    /// <param name="onQuestMount">Riding the quest mount: a spot is reached by the distance on the ground alone.</param>
+    private static bool InReach(StepPlan p, Vector3 me, bool onQuestMount = false)
     {
         // An enemy moves: where it is now.
         var at = p.Target?.Position ?? (p.Enemy != null ? QuestSteps.FindEnemy(p.Enemy.Id)?.Position : null) ?? p.Spot;
@@ -1835,7 +1837,8 @@ internal sealed unsafe class QuestStepper
         return p.Kind switch
         {
             StepKind.Talk => flat <= p.Within && Math.Abs(me.Y - a.Y) <= 3f,
-            StepKind.Go => flat <= p.Within,
+            // A spot whose height is known: at the foot of its cliff isn't there.
+            StepKind.Go => flat <= p.Within && (!p.Height || onQuestMount || Math.Abs(me.Y - a.Y) <= Math.Max(Travel.SpotRise, p.Within)),
             StepKind.Say when p.Target == null => flat <= p.Within,
             StepKind.UseItem when p.Use == ItemUse.Self => flat <= p.Within,
             _ => Vector3.Distance(me, a) <= p.Within,

@@ -67,6 +67,13 @@ internal sealed unsafe partial class Travel
     // The walk (from the start of each, after a teleport too).
     private bool startLooked;
     private bool walkingOut;
+    /// <summary>The walk out goes to the open spot nearest to where it started (the landing search, around the player); null: none found.</summary>
+    private LandingSearch? outSearch;
+    private Vector3? walkOutTo;
+    /// <summary>Where the walk out last made headway, and when: a few seconds without it and the walk out is given up.</summary>
+    private Vector3 outMovedFrom;
+    private DateTime outMovedAt;
+    private static readonly TimeSpan WalkOutStill = TimeSpan.FromSeconds(5);
     private DateTime walkOutUntil;
     private DateTime nextOutLook;
     /// <summary>Down on the ground near the target (or close by on foot): the rest on foot, no mount, no flying.</summary>
@@ -94,6 +101,8 @@ internal sealed unsafe partial class Travel
         }
         startLooked = false;
         walkingOut = false;
+        outSearch = null;
+        walkOutTo = null;
         onFootRest = false;
         indoorsOff = false;
         landFirstLooked = false;
@@ -157,16 +166,52 @@ internal sealed unsafe partial class Travel
                 walkingOut = true;
                 walkOutUntil = now + WalkOutLimit;
                 nextOutLook = now + OutLookEvery;
+                outSearch = new LandingSearch(me);
+                walkOutTo = null;
+                outMovedFrom = me;
+                outMovedAt = now;
                 Note($"{what}: starting indoors (a roof over {Where(me)}): walking out first, no mount");
             }
         }
         if (walkingOut)
         {
+            // The open spot nearest to here first, a ring per frame (as for the spot near a covered target).
+            if (outSearch is { Done: false })
+            {
+                outSearch.Step(p => Vnav.NearestPoint(p, 3f, 10f), RoofOver);
+                if (!outSearch.Done) return true;
+                walkOutTo = outSearch.Found;
+                outMovedFrom = me;
+                outMovedAt = now;
+                Note(walkOutTo is { } found
+                    ? $"{what}: walking out to the nearest open spot, {Vector3.Distance(me, found):0} yalms away at {Where(found)}"
+                    : $"{what}: no open spot within {Landing.Radii[^1]:0} yalms; walking out towards the target");
+                return true;
+            }
+            // No headway (pushing against a wall): the walk out is given up, and the trip goes on as usual, with its own
+            // watch for getting stuck.
+            if (Vector3.Distance(me, outMovedFrom) > 1.5f)
+            {
+                outMovedFrom = me;
+                outMovedAt = now;
+            }
+            else if (now - outMovedAt > WalkOutStill)
+            {
+                walkingOut = false;
+                walkOutTo = null;
+                Note($"{what}: walking out made no headway for {WalkOutStill.TotalSeconds:0} seconds at {Where(me)}; on as usual");
+                Vnav.Stop();
+                walkingTo = null;
+                return true;
+            }
+            // At the open spot: look for the sky now.
+            if (walkOutTo is { } spotOut && Landing.Flat(me, spotOut) <= 2f) nextOutLook = now;
             if (now < nextOutLook) return false;
             nextOutLook = now + OutLookEvery;
             var open = !RoofOver(me);
             if (!open && now < walkOutUntil) return false;
             walkingOut = false;
+            walkOutTo = null;
             Note(open
                 ? $"{what}: out in the open at {Where(me)}; on as usual"
                 : $"{what}: still under a roof after {WalkOutLimit.TotalSeconds:0} seconds on foot, at {Where(me)}; on as usual");

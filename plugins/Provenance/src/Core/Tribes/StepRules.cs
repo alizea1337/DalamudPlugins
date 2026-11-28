@@ -46,6 +46,12 @@ public sealed record StepPlan(StepKind Kind, string What)
     public StepEnemy? Enemy { get; init; }
     /// <summary>Where to go or act when there's no object (a marker, a to-do spot).</summary>
     public Vector3? Spot { get; init; }
+    /// <summary>
+    /// The spot's height is the place's own (a Level row, a map marker, a spawn point, an enemy): the trip goes up or
+    /// down to it, and a look there counts only at about that height. False for a guess (a point around a marked
+    /// area, a gathering area from the map): the player's height is gone by then.
+    /// </summary>
+    public bool Height { get; init; } = true;
     /// <summary>The zone of the target or spot.</summary>
     public uint Territory { get; init; }
     /// <summary>How close to get before acting, in yalms.</summary>

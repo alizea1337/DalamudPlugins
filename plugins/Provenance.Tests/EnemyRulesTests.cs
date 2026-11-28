@@ -811,6 +811,9 @@ public class EnemyRulesTests
         Assert.Equal(StepKind.Go, first.Kind);
         Assert.Equal(6211295u, first.Level);
         Assert.Equal(EnemyRules.SpawnWithin, first.Within);
+        // A spawn point's height is the Level row's: the trip goes up (or down) to it, not to the ground at the player's height.
+        Assert.True(first.Height);
+        Assert.Equal(-66.0f, first.Spot!.Value.Y);
         m.Looked.Add(first.Level);
         Assert.Equal(6211294u, EnemyRules.Search(q, s, m)!.Level);
         m.Looked.Add(6211294);
@@ -829,6 +832,8 @@ public class EnemyRulesTests
             var go = EnemyRules.Search(q, s, m);
             Assert.NotNull(go);
             Assert.Equal(StepKind.Go, go!.Kind);
+            // A point around the area is a guess on the ground: its height isn't known.
+            Assert.False(go.Height);
             Assert.InRange(Vector3.Distance(go.Spot!.Value, EliteMarker.Position), 125 * EnemyRules.RingAt - 1, 125 * EnemyRules.RingAt + 1);
             seen.Add(go.Spot.Value);
             Assert.True(m.Looked.Add(go.Level));
