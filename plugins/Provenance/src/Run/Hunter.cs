@@ -251,6 +251,17 @@ internal sealed unsafe class Hunter
             if (BasicCombo.Ready(kit.Heal, healTarget) is var heal && heal != 0 && BasicCombo.Use(heal, healTarget)) { Wait(0.3); return; }
         }
         var next = BasicCombo.Next(kit!, mob.GameObjectId);
+        // Out of sight (or range) from here, which the game's action status doesn't tell: closer, to melee distance.
+        if (next != 0 && BasicCombo.OutOfPlace(BasicCombo.Placement(next, me, mob)))
+        {
+            if (DateTime.UtcNow >= nextMove)
+            {
+                Vnav.MoveCloseTo(mob.Position, false, Math.Max(1f, 2f + mob.HitboxRadius - 0.5f));
+                nextMove = DateTime.UtcNow.AddSeconds(1);
+            }
+            Wait(0.5);
+            return;
+        }
         if (next != 0 && BasicCombo.Use(next, mob.GameObjectId)) Wait(0.3);
         else Wait(0.1);
     }

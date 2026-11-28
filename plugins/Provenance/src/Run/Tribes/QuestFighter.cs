@@ -69,6 +69,11 @@ internal sealed unsafe class QuestFighter
     private const int CloseInAfter = 3;
     /// <summary>How close to the enemy's edge the character closes in when its actions are refused from where it stands.</summary>
     private const float CloseInTo = 2f;
+    /// <summary>
+    /// Actions going out and the enemy's health not dropping for this long: they don't land from where the character
+    /// stands (out of sight in a way the game doesn't call out), so it closes in, once until the enemy is hurt again.
+    /// </summary>
+    private static readonly TimeSpan CloseInUnhurt = TimeSpan.FromSeconds(6);
 
     /// <summary>The game's "Invalid target." (LogMessage 563), as <c>ActionManager.GetActionStatus</c> returns it.</summary>
     private const uint InvalidTarget = 563;
@@ -112,6 +117,9 @@ internal sealed unsafe class QuestFighter
     private uint hpAtStrike;
     /// <summary>Actions refused in a row for where the character stands.</summary>
     private int refusedHere;
+    /// <summary>Closing in to melee distance because nothing landed (<see cref="CloseInUnhurt"/>): the approach's reach, and that it was done.</summary>
+    private float? closeReach;
+    private bool closedIn;
 
     public QuestFighter(Plugin plugin) => this.plugin = plugin;
 
@@ -171,6 +179,8 @@ internal sealed unsafe class QuestFighter
         struckAt = default;
         hpAtStrike = 0;
         refusedHere = 0;
+        closeReach = null;
+        closedIn = false;
         if (kit == null)
         {
             Finish(End.GaveUp, "this class has no actions to fight with");
@@ -235,13 +245,14 @@ internal sealed unsafe class QuestFighter
         {
             lowestHp = mob.CurrentHp;
             hurtAt = now;
+            closedIn = false;
         }
         // Once, before anything is done to it: does the game let the character attack it at all? (Not asked of one
         // that was subdued or isn't hostile any more: that one takes no attack anyway, and the item's own answer counts.)
         if (!asked)
         {
             asked = true;
-            if (mob.StatusFlags.HasFlag(StatusFlags.Hostile) && !QuestSteps.Subdued(mob) && Refusal(mob.GameObjectId) == InvalidTarget) { NotOurs(mob); return; }
+            if (mob.StatusFlags.HasFlag(StatusFlags.Hostile) && !QuestSteps.Subdued(mob) && Refusal(me, mob) == InvalidTarget) { NotOurs(mob); return; }
         }
 
         switch (step)
@@ -278,9 +289,11 @@ internal sealed unsafe class QuestFighter
     private void Approach(IGameObject me, IBattleNpc mob, DateTime now)
     {
         Status = $"Going for {mob.Name}";
-        if (Vector3.Distance(me.Position, mob.Position) <= Reach(mob))
+        var reach = closeReach ?? Reach(mob);
+        if (Vector3.Distance(me.Position, mob.Position) <= reach)
         {
             StopWalking();
+            closeReach = null;
             // The stepper gets off the mount before a fight; should the character still ride, off first (a few tries).
             if (Services.Condition[ConditionFlag.Mounted])
             {
@@ -294,7 +307,7 @@ internal sealed unsafe class QuestFighter
             return;
         }
         if (now - stepSince > ReachFor) { EndUndone(mob, "couldn't reach it"); return; }
-        Walk(mob.Position, Math.Max(1f, Reach(mob) - 1f), now);
+        Walk(mob.Position, Math.Max(1f, reach - 1f), now);
     }
 
     private void Fight(IGameObject me, IBattleNpc mob, DateTime now)
@@ -329,8 +342,23 @@ internal sealed unsafe class QuestFighter
             var healTarget = me.GameObjectId;
             if (BasicCombo.Ready(kit.Heal, healTarget) is var heal && heal != 0 && BasicCombo.Use(heal, healTarget)) { Wait(0.3); return; }
         }
+        // Actions have gone out for a while and its health hasn't dropped: they don't land from here. Closer, to melee
+        // distance (once, until it's hurt again).
+        var close = CloseInTo + mob.HitboxRadius;
+        if (!closedIn && struckAt != default && now - struckAt < StrikeShows && now - hurtAt > CloseInUnhurt
+            && Vector3.Distance(me.Position, mob.Position) > close + 0.5f)
+        {
+            closedIn = true;
+            closeReach = close;
+            note = $"actions on {mob.Name} ({mob.BaseId}) went out for {(now - hurtAt).TotalSeconds:0} seconds without hurting it, from {Vector3.Distance(me.Position, mob.Position):0.0} yalms away; closing in";
+            QuestSteps.Face(mob.Position);
+            Go(Step.Approach);
+            return;
+        }
         var next = BasicCombo.Next(kit!, mob.GameObjectId);
-        if (next != 0 && BasicCombo.Use(next, mob.GameObjectId))
+        // The line of sight is checked first: the game's action status doesn't, and an action out of sight goes nowhere.
+        var placement = next != 0 ? BasicCombo.Placement(next, me, mob) : 0;
+        if (next != 0 && placement == 0 && BasicCombo.Use(next, mob.GameObjectId))
         {
             if (struckAt == default) hpAtStrike = mob.CurrentHp;
             struckAt = now;
@@ -340,8 +368,9 @@ internal sealed unsafe class QuestFighter
             return;
         }
         // Not used. Between two actions that's the recast, and the next try comes at once. Refused for where the
-        // character stands (no line of sight, not facing), it turns to the enemy and closes in, and tries less often.
-        var why = Refusal(mob.GameObjectId);
+        // character stands (no line of sight, out of range, not facing), it turns to the enemy and closes in, and tries
+        // less often.
+        var why = Positional(placement) ? placement : Refusal(me, mob);
         if (why == InvalidTarget) { NotOurs(mob); return; }
         if (!Positional(why))
         {
@@ -357,7 +386,6 @@ internal sealed unsafe class QuestFighter
         if (refusedHere == CloseInAfter)
             note = $"actions on {mob.Name} ({mob.BaseId}) refused {refusedHere} times from {Vector3.Distance(me.Position, mob.Position):0.0} yalms away, status {why}; turning to it and closing in";
         QuestSteps.Face(mob.Position);
-        var close = CloseInTo + mob.HitboxRadius;
         if (Vector3.Distance(me.Position, mob.Position) > close + 0.5f) Walk(mob.Position, Math.Max(1f, close - 0.5f), now);
         Wait(0.5);
     }
@@ -411,9 +439,10 @@ internal sealed unsafe class QuestFighter
 
     /// <summary>
     /// Why the game wouldn't take the kit's first action on the target now, leaving out the recast and a cast under way
-    /// (its action status; 0: it would). Asked at the start of a fight and whenever an action wasn't used.
+    /// (its action status, then whether it reaches the target from here, line of sight included; 0: it would). Asked at
+    /// the start of a fight and whenever an action wasn't used.
     /// </summary>
-    private uint Refusal(ulong target)
+    private uint Refusal(IGameObject me, IGameObject mob)
     {
         var am = ActionManager.Instance();
         if (am == null || kit == null) return 0;
@@ -421,7 +450,9 @@ internal sealed unsafe class QuestFighter
         foreach (var action in kit.Combo)
         {
             if (!BasicCombo.Learned(action, level)) continue;
-            return am->GetActionStatus(ActionType.Action, am->GetAdjustedActionId(action), target, false, false, null);
+            var adjusted = am->GetAdjustedActionId(action);
+            var status = am->GetActionStatus(ActionType.Action, adjusted, mob.GameObjectId, false, false, null);
+            return status != 0 ? status : BasicCombo.Placement(adjusted, me, mob);
         }
         return 0;
     }

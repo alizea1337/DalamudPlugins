@@ -113,6 +113,21 @@ internal static unsafe class BasicCombo
     public static bool Use(uint adjustedAction, ulong targetId)
         => ActionManager.Instance()->UseAction(ActionType.Action, adjustedAction, targetId);
 
+    /// <summary>
+    /// Whether the action reaches the target from where the character stands: 0 when it does, 562 "Target not in line
+    /// of sight.", 566 "Target is not in range." (the game's <c>ActionManager.GetActionInRangeOrLoS</c>, FFXIVClientStructs,
+    /// MIT). <c>GetActionStatus</c> doesn't check the line of sight: an action it allows can still be refused for it.
+    /// </summary>
+    public static uint Placement(uint adjustedAction, Dalamud.Game.ClientState.Objects.Types.IGameObject me, Dalamud.Game.ClientState.Objects.Types.IGameObject target)
+    {
+        if (me.Address == 0 || target.Address == 0) return 0;
+        return ActionManager.GetActionInRangeOrLoS(adjustedAction,
+            (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)me.Address, (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)target.Address);
+    }
+
+    /// <summary>A refusal for where the character stands: 562 no line of sight, 565 and 566 out of range.</summary>
+    public static bool OutOfPlace(uint status) => status is 562 or 565 or 566;
+
     /// <summary>The character's level is high enough and any unlock quest is done.</summary>
     public static bool Learned(uint action, int level)
     {
