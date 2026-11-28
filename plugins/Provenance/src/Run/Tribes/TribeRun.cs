@@ -771,7 +771,8 @@ internal sealed unsafe class TribeRun
         afterTravel = then;
         visitStep = Visit.Travel;
         travel.OnFoot = travel.NoFly = travel.KeepMount = false;
-        travel.GoTo(g.Name, g.Territory, g.Position, 3f, () => Interact.Nearest(ObjectKind.EventNpc, id => id == g.NpcId)?.Position);
+        // A giver without a Level row has no position (zero): its height isn't known either.
+        travel.GoTo(g.Name, g.Territory, g.Position, 3f, () => Interact.Nearest(ObjectKind.EventNpc, id => id == g.NpcId)?.Position, knownHeight: g.Position != Vector3.Zero);
         Status = "On the way to " + g.Name;
     }
 

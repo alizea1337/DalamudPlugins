@@ -136,7 +136,10 @@ internal sealed class QuestTravel
         // beside it isn't either: getting off there would drop the character beside it, so the trip comes down first.
         // A spot whose height is known, not in view, is there only within Travel's reach of that height (at the foot
         // of the cliff a spawn point stands on isn't).
-        var level = KeepMount || (seen != null ? Math.Abs(me.Value.Y - spot.Y) <= 3f : !heightKnown || Math.Abs(me.Value.Y - spot.Y) <= Math.Max(Travel.SpotRise, within));
+        // After the trip, its own arrival stands (it went by the walkable point at that height, which can lie off the
+        // Level row's own height); before it, the same point is compared against.
+        var level = KeepMount || (seen != null ? Math.Abs(me.Value.Y - spot.Y) <= 3f
+            : afterTrip || !heightKnown || Math.Abs(me.Value.Y - Travel.FloorNear(spot).Y) <= Math.Max(Travel.SpotRise, within));
         var inAirBeside = !afterTrip && seen != null && !KeepMount && Services.Condition[ConditionFlag.InFlight] && !Landing.RightAboveIt(me.Value, spot);
         if (here == territory && Flat(me.Value, spot) <= within + 0.5f && level && !inAirBeside)
         {

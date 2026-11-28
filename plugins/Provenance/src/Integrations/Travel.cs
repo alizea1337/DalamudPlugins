@@ -135,6 +135,18 @@ internal sealed unsafe partial class Travel
     private System.Threading.Tasks.Task<List<Vector3>>? reachPath;
     private DateTime reachSince;
     private bool reachChecked;
+    /// <summary>
+    /// A teleport within the zone the character is already in (to get unstuck, or off an island): the teleport goes
+    /// ahead instead of taking "already in the zone" as arrived. Cleared once the teleport's loading screen is over.
+    /// </summary>
+    private bool forceTeleport;
+    /// <summary>Teleports within the zone this trip (one at most for getting unstuck: real headway after it restarts the count of times stuck).</summary>
+    private int inZoneTeleports;
+    /// <summary>The last paths asked of vnavmesh came back without one (it may still be working it out).</summary>
+    private bool noPath;
+    /// <summary>Where the character got stuck last: once it has made real headway from there, the count of times stuck starts over.</summary>
+    private Vector3 stuckAt;
+    private const float HeadwayAfterStuck = 20f;
     private const float ReachCheckFrom = 80f;
     private const float ReachShort = 50f;
     private static readonly TimeSpan ReachPatience = TimeSpan.FromSeconds(8);
@@ -211,6 +223,9 @@ internal sealed unsafe partial class Travel
         idleFrom = null;
         reachPath = null;
         reachChecked = false;
+        forceTeleport = false;
+        inZoneTeleports = 0;
+        noPath = false;
         ResetIndoors(trip: true);
         Current = State.Idle;
         Note($"trip to {what} in {Place(territory)} (zone {territory}), within {range:0.#} yalms, from {Place(Services.ClientState.TerritoryType)} (zone {Services.ClientState.TerritoryType})");
@@ -278,8 +293,9 @@ internal sealed unsafe partial class Travel
         {
             case State.Teleporting:
                 if (DateTime.UtcNow < nextTry) return;
-                // Something else (GatherBuddy Reborn) may have brought us here already.
-                if (Services.ClientState.TerritoryType == territory && !Services.Condition[ConditionFlag.BetweenAreas] && !Services.Condition[ConditionFlag.Casting])
+                // Something else (GatherBuddy Reborn) may have brought us here already. Not for a teleport within the zone,
+                // which is wanted for itself.
+                if (!forceTeleport && Services.ClientState.TerritoryType == territory && !Services.Condition[ConditionFlag.BetweenAreas] && !Services.Condition[ConditionFlag.Casting])
                 {
                     Enter(State.WaitingForMap, 90);
                     return;
@@ -407,7 +423,12 @@ internal sealed unsafe partial class Travel
 
             case State.Arriving:
                 if (Services.Condition[ConditionFlag.BetweenAreas] || Services.Condition[ConditionFlag.BetweenAreas51]) { sawLoading = true; return; }
-                if (Services.ClientState.TerritoryType == territory && player != null && sawLoading) { Enter(State.WaitingForMap, 90); return; }
+                if (Services.ClientState.TerritoryType == territory && player != null && sawLoading)
+                {
+                    forceTeleport = false;
+                    Enter(State.WaitingForMap, 90);
+                    return;
+                }
                 if (!sawLoading && !Services.Condition[ConditionFlag.Casting] && DateTime.UtcNow > deadline - TimeSpan.FromSeconds(30))
                 {
                     // Nothing happened (cast interrupted, window closed); try again.
@@ -553,6 +574,13 @@ internal sealed unsafe partial class Travel
             trail.Clear();
         }
 
+        // Real headway since the last time stuck: an occasional stall on a long trip doesn't count towards giving up.
+        if (stuckCount > 0 && unstuckUntil == default && Vector3.Distance(me, stuckAt) > HeadwayAfterStuck)
+        {
+            Note($"{what}: {Vector3.Distance(me, stuckAt):0} yalms on since getting stuck; the count starts over");
+            stuckCount = 0;
+        }
+
         // Indoors and under roofs: out of a building on foot first; to a target under a roof, by an open spot near it.
         if (Indoors(me, target)) return;
 
@@ -580,16 +608,19 @@ internal sealed unsafe partial class Travel
         if (!Vnav.Busy || retarget)
         {
             // Paths issued again and again without the character getting anywhere (vnavmesh's path ends where it
-            // stands, or it finds none): stuck all the same, though no path ever runs long enough for the watch below.
+            // stands): stuck all the same, though no path ever runs long enough for the watch below. While vnavmesh has
+            // no path to give yet, it gets as long as a path being worked out does.
             if (idleFrom is not { } from || Vector3.Distance(from, me) > 2f)
             {
                 idleFrom = me;
                 idleSince = DateTime.UtcNow;
             }
-            else if (DateTime.UtcNow - idleSince > StuckAfter + IdleGrace && !Vnav.Pathfinding)
+            else if (DateTime.UtcNow - idleSince > (noPath ? PathfindPatience : StuckAfter + IdleGrace) && !Vnav.Pathfinding)
             {
                 idleFrom = null;
-                Note($"{what}: paths issued for {(DateTime.UtcNow - idleSince).TotalSeconds:0} seconds without getting anywhere");
+                Note(noPath
+                    ? $"{what}: vnavmesh found no path for {(DateTime.UtcNow - idleSince).TotalSeconds:0} seconds"
+                    : $"{what}: paths issued for {(DateTime.UtcNow - idleSince).TotalSeconds:0} seconds without getting anywhere");
                 GotStuck(me, target);
                 return;
             }
@@ -599,16 +630,21 @@ internal sealed unsafe partial class Travel
             {
                 walkingTo = dest;
                 pathFailNoted = false;
+                noPath = false;
                 // A line per new target, not per re-issue.
                 if (lastPath is not { } lp || Vector3.Distance(lp, dest) > 3)
                     Note($"{what}: {(flying ? "flying" : StayOnFoot ? "walking on foot" : "walking")} to {(outSpot != null ? "the nearest open spot, out of the building, " : landing != null ? "the open spot near it, " : "")}{Where(dest)}, {Vector3.Distance(me, dest):0} yalms from {Where(me)}"
                          + (!flying && Services.Condition[ConditionFlag.Mounted] ? $" (mounted, flight: {FlightStatus()})" : ""));
                 lastPath = dest;
             }
-            else if (!pathFailNoted)
+            else
             {
-                pathFailNoted = true;
-                Note($"{what}: vnavmesh found no path to {Where(dest)} from {Where(me)} yet");
+                noPath = true;
+                if (!pathFailNoted)
+                {
+                    pathFailNoted = true;
+                    Note($"{what}: vnavmesh found no path to {Where(dest)} from {Where(me)} yet");
+                }
             }
             trail.Clear();
             return;
@@ -641,6 +677,7 @@ internal sealed unsafe partial class Travel
     private void GotStuck(Vector3 me, Vector3 target)
     {
         idleFrom = null;
+        stuckAt = me;
         stuckCount++;
         trail.Clear();
         Vnav.Stop();
@@ -656,10 +693,10 @@ internal sealed unsafe partial class Travel
         // Stuck in the air near a target under a roof (rubbing along its wall): come down right here and walk in.
         if (LandWhereStuck(me, target)) return;
         if (AdvancedUnstuck && Unstuck(me, target)) return;
-        if (stuckCount == 2 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
+        if (stuckCount == 2 && !OnFoot && !aethernetOnly && inZoneTeleports == 0 && Teleporter.NearestTo(territory, null) != null)
         {
             // Second time: start over from the zone's aetheryte.
-            Enter(State.Teleporting, 20);
+            TeleportInZone();
             return;
         }
         if (stuckCount >= 3) Fail($"Got stuck on the way to {what}. vnavmesh can't find a way there from here; move a bit and start again.");
@@ -743,14 +780,14 @@ internal sealed unsafe partial class Travel
             }
             default:
                 // 4: teleport to the zone's aetheryte (when there is one), 5 and later: give up.
-                if (stuckCount == 4 && !OnFoot && !aethernetOnly && Teleporter.NearestTo(territory, null) != null)
+                if (stuckCount == 4 && !OnFoot && !aethernetOnly && inZoneTeleports == 0 && Teleporter.NearestTo(territory, null) != null)
                 {
-                    Enter(State.Teleporting, 20);
+                    TeleportInZone();
                     return true;
                 }
                 if (stuckCount >= 4)
                 {
-                    Fail($"Got stuck on the way to {what}, even after jumping, backing off, side-stepping and teleporting. Move a bit and start again.");
+                    Fail($"Got stuck on the way to {what}, even after jumping, backing off{(inZoneTeleports > 0 ? ", side-stepping and teleporting" : " and side-stepping")}. Move a bit and start again.");
                     return true;
                 }
                 return false;
@@ -766,6 +803,8 @@ internal sealed unsafe partial class Travel
         reachChecked = true;
         if (!RoofAware || OnFoot || KeepMount || FailFast || aethernetOnly || walk <= ReachCheckFrom) return;
         if (Services.ClientState.TerritoryType != territory || Teleporter.NearestTo(territory, null) == null) return;
+        // A trip that may fly isn't bound to the walking path (the island zones are flown across).
+        if (!NoFly && MayFlyHere()) return;
         reachPath = Vnav.GroundPath(me, Approximate(me));
         reachSince = DateTime.UtcNow;
     }
@@ -790,7 +829,13 @@ internal sealed unsafe partial class Travel
         }
         reachPath = null;
         if (!task.IsCompletedSuccessfully || task.Result is not { } path) return false;
-        var end = path.Count > 0 ? path[^1] : me;
+        // No path at all (the start is off the mesh, say): that says nothing about the way there.
+        if (path.Count == 0)
+        {
+            Note($"{what}: vnavmesh gave no walking path from {Where(me)}; walking");
+            return false;
+        }
+        var end = path[^1];
         var shortBy = Vector2.Distance(new Vector2(end.X, end.Z), new Vector2(target.X, target.Z));
         if (shortBy <= Math.Max(ReachShort, range * 2)) return false;
         var dest = Teleporter.NearestTo(territory, target);
@@ -802,16 +847,31 @@ internal sealed unsafe partial class Travel
         }
         Note($"{what}: no way there on foot from here (vnavmesh's walking path ends {shortBy:0} yalms short of it, at {Where(end)}); teleporting to {dest.Name} instead");
         Vnav.Stop();
-        Enter(State.Teleporting, 20);
+        TeleportInZone();
         return true;
     }
 
-    /// <summary>The walkable point near the known X/Z (height from the mesh, near the target's height when known, else near where the player is).</summary>
-    private Vector3 Approximate(Vector3 me)
+    /// <summary>
+    /// Teleports to the zone's aetheryte nearest the target, also when the character is in that zone already (the
+    /// Teleporting step would otherwise take that as arrived). Bounded as any teleport: refused past its time, the trip fails.
+    /// </summary>
+    private void TeleportInZone()
     {
-        var guess = new Vector3(approx.X, approxHeight ?? me.Y, approx.Y);
-        return Vnav.NearestPoint(guess, 5, 200) ?? Vnav.NearestPoint(guess, 40, 300) ?? guess;
+        Vnav.Stop();
+        walkingTo = null;
+        forceTeleport = Services.ClientState.TerritoryType == territory;
+        inZoneTeleports++;
+        Enter(State.Teleporting, 20);
     }
+
+    /// <summary>The walkable point near the known X/Z (height from the mesh, near the target's height when known, else near where the player is).</summary>
+    private Vector3 Approximate(Vector3 me) => FloorNear(new Vector3(approx.X, approxHeight ?? me.Y, approx.Y));
+
+    /// <summary>
+    /// The walkable point a trip goes for near a spot (the nearest on vnavmesh's mesh to it, or the spot itself when
+    /// there's none): a spot whose height is known is arrived at against this point, by every check of it alike.
+    /// </summary>
+    public static Vector3 FloorNear(Vector3 guess) => Vnav.NearestPoint(guess, 5, 200) ?? Vnav.NearestPoint(guess, 40, 300) ?? guess;
 
     /// <summary>Mount roulette, when the game allows it here. True when the cast started.</summary>
     private static bool TryMount()
@@ -851,6 +911,20 @@ internal sealed unsafe partial class Travel
     }
 
     private static bool flightCheckFailed;
+
+    /// <summary>
+    /// The character may fly in this zone, mounted or not: in flight, or mounted where the game lets it take off, or
+    /// (on foot) the zone's flight is unlocked (its aether currents, or the story quest the game counts as such).
+    /// </summary>
+    private static bool MayFlyHere()
+    {
+        if (Services.Condition[ConditionFlag.InFlight] || Services.Condition[ConditionFlag.Diving]) return true;
+        if (Services.Condition[ConditionFlag.Mounted]) return CanFlyHere();
+        var row = Services.Data.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(Services.ClientState.TerritoryType);
+        var set = row?.AetherCurrentCompFlgSet.RowId ?? 0;
+        var ps = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+        return set != 0 && ps != null && ps->IsAetherCurrentZoneComplete(set);
+    }
 
     /// <summary>The game's flight answer, for the debug log ("NoFly" when the trip itself doesn't fly).</summary>
     private string FlightStatus()

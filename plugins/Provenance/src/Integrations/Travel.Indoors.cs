@@ -188,18 +188,17 @@ internal sealed unsafe partial class Travel
                     : $"{what}: no open spot within {Landing.Radii[^1]:0} yalms; walking out towards the target");
                 return true;
             }
-            // No headway (pushing against a wall): the walk out is given up, and the trip goes on as usual, with its own
-            // watch for getting stuck.
+            // No headway to the open spot (pushing against a wall): the spot is dropped and the walk out goes on as
+            // before, on foot towards the target, looking for the sky, within its time.
             if (Vector3.Distance(me, outMovedFrom) > 1.5f)
             {
                 outMovedFrom = me;
                 outMovedAt = now;
             }
-            else if (now - outMovedAt > WalkOutStill)
+            else if (walkOutTo != null && now - outMovedAt > WalkOutStill)
             {
-                walkingOut = false;
                 walkOutTo = null;
-                Note($"{what}: walking out made no headway for {WalkOutStill.TotalSeconds:0} seconds at {Where(me)}; on as usual");
+                Note($"{what}: no headway to the open spot for {WalkOutStill.TotalSeconds:0} seconds at {Where(me)}; walking out towards the target");
                 Vnav.Stop();
                 walkingTo = null;
                 return true;

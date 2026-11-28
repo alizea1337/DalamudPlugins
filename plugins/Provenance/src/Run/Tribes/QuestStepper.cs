@@ -163,6 +163,8 @@ internal sealed unsafe class QuestStepper
     private bool sawEvent;
     /// <summary>Since the last act a menu or a question was answered, or the hand-over window came up (the talk did something).</summary>
     private bool answered;
+    /// <summary>What the character rides and carries when the step was done (neither is in the quest's progress): a change is the talk's doing.</summary>
+    private string holdsAtAct = "";
     private int tradeSlot;
     private int tradeOpenSlot;
     private int tradeOpened;
@@ -546,6 +548,10 @@ internal sealed unsafe class QuestStepper
         }
     }
 
+    /// <summary>What the character rides and carries, as a key.</summary>
+    private string Holds(StepSnapshot snap)
+        => $"{snap.Mounted}|{snap.Mount}|{(script!.CarryStatus != 0 && snap.Statuses.Contains(script.CarryStatus))}";
+
     /// <summary>Getting on the quest mount, or picking something up to carry: counted (the rules cap getting them back), with who gave it.</summary>
     private void NoteHolds(StepSnapshot snap)
     {
@@ -787,6 +793,7 @@ internal sealed unsafe class QuestStepper
         settleUntil = now + SettleTalk;
         sawEvent = false;
         answered = false;
+        holdsAtAct = Holds(snap);
         spawnWaited = false;
         if (p.Kind == StepKind.Go)
         {
@@ -1035,6 +1042,7 @@ internal sealed unsafe class QuestStepper
             }
         }
         else if (p.Kind == StepKind.Talk && p.Marked && p.Target is { Kind: StepObjectKind.Npc } npc && sawEvent && !answered && !snap.InCombat
+                 && npc.BaseId != memory.CarryGiver && npc.BaseId != memory.MountGiver && Holds(snap) == holdsAtAct
                  && StepRules.PointsElsewhere(script!, snap, npc.BaseId))
         {
             // Their scene played and nothing changed, and the open to-do lines point elsewhere too (carrying the limpet
@@ -1838,7 +1846,7 @@ internal sealed unsafe class QuestStepper
         {
             StepKind.Talk => flat <= p.Within && Math.Abs(me.Y - a.Y) <= 3f,
             // A spot whose height is known: at the foot of its cliff isn't there.
-            StepKind.Go => flat <= p.Within && (!p.Height || onQuestMount || Math.Abs(me.Y - a.Y) <= Math.Max(Travel.SpotRise, p.Within)),
+            StepKind.Go => flat <= p.Within && (!p.Height || onQuestMount || Math.Abs(me.Y - Travel.FloorNear(a).Y) <= Math.Max(Travel.SpotRise, p.Within)),
             StepKind.Say when p.Target == null => flat <= p.Within,
             StepKind.UseItem when p.Use == ItemUse.Self => flat <= p.Within,
             _ => Vector3.Distance(me, a) <= p.Within,
