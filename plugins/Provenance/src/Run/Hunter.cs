@@ -42,6 +42,8 @@ internal sealed unsafe class Hunter
     private DateTime stepSince;
     private DateTime waitUntil;
     private DateTime nextMove;
+    /// <summary>Walking closer because the target was out of sight or range from where the character stood.</summary>
+    private bool closingIn;
     private bool stanceSet;
     private bool pauseRequested;
     private int kills;
@@ -252,14 +254,24 @@ internal sealed unsafe class Hunter
         }
         var next = BasicCombo.Next(kit!, mob.GameObjectId);
         // Out of sight (or range) from here, which the game's action status doesn't tell: closer, to melee distance.
-        if (next != 0 && BasicCombo.OutOfPlace(BasicCombo.Placement(next, me, mob)))
+        var placement = next != 0 ? BasicCombo.Placement(next, me, mob) : 0;
+        if (BasicCombo.OutOfPlace(placement))
         {
             if (DateTime.UtcNow >= nextMove)
             {
                 Vnav.MoveCloseTo(mob.Position, false, Math.Max(1f, 2f + mob.HitboxRadius - 0.5f));
                 nextMove = DateTime.UtcNow.AddSeconds(1);
+                closingIn = true;
             }
             Wait(0.5);
+            return;
+        }
+        // In sight and range again: the walk in stops first (a cast doesn't start on the move).
+        if (closingIn && next != 0 && placement == 0)
+        {
+            closingIn = false;
+            Vnav.Stop();
+            Wait(0.2);
             return;
         }
         if (next != 0 && BasicCombo.Use(next, mob.GameObjectId)) Wait(0.3);

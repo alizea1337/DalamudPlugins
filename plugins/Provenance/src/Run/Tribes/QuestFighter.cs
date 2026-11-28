@@ -358,6 +358,13 @@ internal sealed unsafe class QuestFighter
         var next = BasicCombo.Next(kit!, mob.GameObjectId);
         // The line of sight is checked first: the game's action status doesn't, and an action out of sight goes nowhere.
         var placement = next != 0 ? BasicCombo.Placement(next, me, mob) : 0;
+        // In sight and in range now: the walk in stops first (a cast doesn't start on the move).
+        if (next != 0 && placement == 0 && walking)
+        {
+            StopWalking();
+            Wait(0.2);
+            return;
+        }
         if (next != 0 && placement == 0 && BasicCombo.Use(next, mob.GameObjectId))
         {
             if (struckAt == default) hpAtStrike = mob.CurrentHp;
