@@ -167,6 +167,17 @@ public sealed class StepMemory
     public int GiveUps { get; set; }
     /// <summary>Enemies defeated since the quest last moved on (a defeat that counts moves it on).</summary>
     public int Kills { get; set; }
+    private readonly HashSet<string> notForItem = new();
+
+    /// <summary>
+    /// The game said this object isn't a target for this key item at this sequence (563 "Invalid target"): the item
+    /// isn't aimed at it again while the quest is at that sequence, and the object stays one to talk to (it isn't
+    /// counted as tried).
+    /// </summary>
+    public void RefusedItem(StepSnapshot s, uint item, ulong objectKey) => notForItem.Add($"{s.Sequence}:{item}:{objectKey}");
+
+    public bool NotForItem(StepSnapshot s, uint item, ulong objectKey) => notForItem.Contains($"{s.Sequence}:{item}:{objectKey}");
+
     /// <summary>Times the quest's item was used on an enemy, by game object id.</summary>
     public Dictionary<ulong, int> ItemUses { get; } = new();
     /// <summary>
@@ -540,6 +551,13 @@ public static class StepRules
         => step.Kind is StepKind.Talk or StepKind.Say or StepKind.Emote && step.Target is { Kind: StepObjectKind.Npc } t
            && (t.BaseId == TurnIn(q) || t.BaseId == q.Giver || SpotObjects(OpenLines(q, s)).Contains(t.BaseId));
 
+    /// <summary>
+    /// The open to-do lines point somewhere besides this NPC (another NPC or object, or an area): a talk with them that
+    /// played its scene and changed nothing isn't tried again before those (see the stepper).
+    /// </summary>
+    public static bool PointsElsewhere(QuestScript q, StepSnapshot s, uint npc)
+        => OpenLines(q, s).SelectMany(t => t.Spots).Any(p => p.Object != npc && p.Object != q.Giver);
+
     /// <summary>The step's target or spot is in this zone, within this many yalms on the ground.</summary>
     private static bool Near(StepPlan step, StepSnapshot s, float within)
     {
@@ -639,12 +657,16 @@ public static class StepRules
                 return Public(q, s, m, now, line, StepKind.Emote, emote.Command, emote.Emote, $"{emote.Command} at the target");
         }
 
-        // A key item to use: the line names it ("Use the firecrackers ..."), or it's the only one held and the line
+        // A key item to use. The quest's listeners say at which sequences one is used at all: at any other, a key item
+        // that's held was collected, or goes to someone by talking ("Deliver the limpet bomb core to Ba Go", "Obtain
+        // sugary sap from deepwood saplings"), however the to-do line names it. Where they say one is used, or where the
+        // data says nothing, the line names it ("Use the firecrackers ..."), or it's the only one held and the line
         // points at objects (not people) to use it on ("Salt the designated locations").
         var usable = q.KeyItems.Where(k => k.Usable && s.Count(k.Id) > 0).ToList();
-        // Where the sequence has a fight, the quest's listeners say what the item goes on: the objects they name, and
-        // no object at all when they name only enemies (the item is for the enemy then: the fight uses it).
-        var itemObjects = fights ? q.ItemObjects.Where(o => o.Sequence == s.Sequence).Select(o => o.Object).ToHashSet() : new HashSet<uint>();
+        if (q.ItemSequences is { } useSequences && !useSequences.Contains(s.Sequence)) usable.Clear();
+        // The listeners also say what the item goes on: the NPCs and objects they name at this sequence, and no object at
+        // all when they name only enemies (the item is for the enemy then: the fight uses it).
+        var itemObjects = fights || q.ItemSequences != null ? q.ItemObjects.Where(o => o.Sequence == s.Sequence).Select(o => o.Object).ToHashSet() : new HashSet<uint>();
         var itemForEnemies = fights && itemObjects.Count == 0 && EnemyRules.Active(q, s.Sequence).Any(e => e.Task == EnemyTask.UseItem);
         foreach (var item in itemForEnemies ? new List<KeyItemFact>() : usable)
         {
@@ -652,8 +674,11 @@ public static class StepRules
             var naming = lines.Where(l => item.Words.Any(w => l.Text.Contains(w, StringComparison.CurrentCultureIgnoreCase)) || Names(l.Text, item.Name)).ToList();
             var named = naming.Count > 0;
             var spotObjects = SpotObjects(named ? naming : lines);
-            var onObjects = usable.Count == 1 && lines.Count > 0 && Live(q, s, m).Any(o => o.Kind == StepObjectKind.Object && spotObjects.Contains(o.BaseId));
-            if ((named || onObjects) && UseItem(q, s, m, item, carrying, named, spotObjects, itemObjects) is { } use) return use;
+            var live = Live(q, s, m).ToList();
+            var onObjects = usable.Count == 1 && lines.Count > 0 && live.Any(o => o.Kind == StepObjectKind.Object && spotObjects.Contains(o.BaseId));
+            // The only item held, and the listeners name what it goes on ("Free the captives from their cages"): on those.
+            var onListened = usable.Count == 1 && itemObjects.Count > 0 && live.Any(o => itemObjects.Contains(o.BaseId));
+            if ((named || onObjects || onListened) && UseItem(q, s, m, item, carrying, named, spotObjects, itemObjects) is { } use) return use;
         }
 
         // Once the crafting or gathering is done: to whoever the items go to, and nobody else: whoever the quest is
@@ -667,7 +692,8 @@ public static class StepRules
         // Nothing made yet and nothing to make it from: whoever hands the materials out, before the one the work goes to.
         else if (Source(q, s, m, craftShort) is { } source) return source with { OnFoot = carrying };
 
-        if (Pick(q, s, m) is { } target)
+        // Carrying something: not to whoever handed it over (talking to them again only says where it goes).
+        if (Pick(q, s, m, carrying && m.CarryGiver != 0 ? o => o.BaseId != m.CarryGiver : null) is { } target)
         {
             // Getting the quest mount (or what's carried) back again and again: something takes it away; the player's.
             if (!riding && q.Mount != null && s.Sequence != 255 && m.MountGiver != 0 && target.BaseId == m.MountGiver && m.Mounts > MaxRegains)
@@ -684,7 +710,9 @@ public static class StepRules
             var areas = lines.SelectMany(t => t.Spots).Where(p => p.Area).Select(p => p.Level).ToHashSet();
             if (areas.Count > 0 && Where(q, s, m, areas) is { } first) return first with { OnFoot = carrying };
         }
-        if (Where(q, s, m) is { } go) return go with { OnFoot = carrying };
+        // Carrying something: not back to where whoever handed it over stands.
+        var fromGiver = carrying && m.CarryGiver != 0 ? lines.SelectMany(t => t.Spots).Where(p => p.Object == m.CarryGiver).Select(p => p.Level).ToHashSet() : null;
+        if (Where(q, s, m, fromGiver) is { } go) return go with { OnFoot = carrying };
 
         // Nothing marked is left and none of the quest's enemies is in view: where the quest puts them, and around
         // the marked area for field mobs.
@@ -914,17 +942,19 @@ public static class StepRules
     {
         var use = item.Ground ? ItemUse.Ground : item.Self ? ItemUse.Self : ItemUse.Target;
         var strict = use == ItemUse.Ground || !named;
-        Func<StepObject, bool>? only = strict ? o => spotObjects.Contains(o.BaseId) && (named || o.Kind == StepObjectKind.Object) : null;
-        // In a sequence with a fight: only what the quest's listeners say the item goes on.
-        if (itemObjects is { Count: > 0 })
-        {
-            var before = only;
-            only = o => itemObjects.Contains(o.BaseId) && (before?.Invoke(o) ?? true);
-        }
+        // What the quest's listeners say the item goes on, when they name NPCs or objects at this sequence: those only.
+        // Otherwise, thrown on the ground or used without the line naming it, only an object the line's spots name.
+        Func<StepObject, bool>? aim = itemObjects is { Count: > 0 } ? o => itemObjects.Contains(o.BaseId)
+            : strict ? o => spotObjects.Contains(o.BaseId) && (named || o.Kind == StepObjectKind.Object)
+            : null;
+        // Never on an object the game said isn't a target for this item (563 "Invalid target"): that one is talked to.
+        Func<StepObject, bool> only = o => (aim?.Invoke(o) ?? true) && !m.NotForItem(s, item.Id, o.Key);
         var target = Pick(q, s, m, only);
         var within = use == ItemUse.Self ? 2f : Math.Max(1.5f, item.Range - 1f);
         if (target != null)
             return new StepPlan(StepKind.UseItem, $"use the {item.Name}") { Target = target, Territory = s.Territory, Within = within, Id = item.Id, Use = use, OnFoot = carrying, Key = $"item:{item.Id}:{target.Key}" };
+        // Only objects the game turned the item down for are in view: the step's talk (below) is about them.
+        if (Live(q, s, m).Any(o => (aim?.Invoke(o) ?? true) && m.NotForItem(s, item.Id, o.Key))) return null;
         if (Where(q, s, m) is { } go)
         {
             // An area to use it in (no object to aim at): self-use there; otherwise go and look first.
@@ -1219,18 +1249,42 @@ public static class StepRules
     /// The game's warning before a reward it can't give (Addon 4609: "Warning: You will not be able to receive all the
     /// following:", the rewards one per line, "Do you still wish to proceed?"), when the only one lost is the last of the
     /// template's list, Reputation: a daily handed in with the society's bar full. Seals or tomestones lost are the
-    /// player's call.
+    /// player's call (see <see cref="RewardLossAccepted"/> for the setting that takes tomestones too).
     /// </summary>
-    public static bool OnlyReputationLost(string prompt, string template)
+    public static bool OnlyReputationLost(string prompt, string template) => RewardLossAccepted(prompt, template, false);
+
+    /// <summary>
+    /// The reward warning (Addon 4609) is answered Yes: what it lists as lost is Reputation only, or, with
+    /// <paramref name="tomestonesToo"/> (the Tribes setting "Hand in even when tomestones would be lost"), Allagan
+    /// Tomestones and Reputation only. The template's lines name the three rewards in the client's language, in its
+    /// order: Company Seals, Allagan Tomestones, Reputation. Company Seals, or anything the template doesn't name, are
+    /// always the player's call.
+    /// </summary>
+    public static bool RewardLossAccepted(string prompt, string template, bool tomestonesToo)
     {
         static List<string> Lines(string s) => s.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
         var t = Lines(template);
         var p = Lines(prompt);
         if (t.Count < 3 || p.Count < 3) return false;
         var reputation = t[^2];
+        // The tomestones' line comes right before Reputation's in the template (seals, tomestones, reputation).
+        var tomestones = tomestonesToo && t.Count >= 5 ? t[^3] : null;
         bool Same(string a, string b) => a.Equals(b, StringComparison.CurrentCultureIgnoreCase);
         if (!Same(p[0], t[0]) || !Same(p[^1], t[^1])) return false;
-        return p.Skip(1).Take(p.Count - 2).All(l => Same(l, reputation));
+        return p.Skip(1).Take(p.Count - 2).All(l => Same(l, reputation) || (tomestones != null && Same(l, tomestones)));
+    }
+
+    /// <summary>
+    /// A Yes/No question that is one of the quest's own (a Q row of its text sheet, "Ride the elbst to Moonshade
+    /// Isle?"), asked by the NPC the run is talking to for the step at hand: one a to-do line of the current sequence
+    /// names. The quest's transport rides are asked so; the run took that talk for this step, so it says Yes.
+    /// </summary>
+    public static bool OwnQuestion(QuestScript q, byte sequence, StepPlan? talking, string question)
+    {
+        if (talking is not { Kind: StepKind.Talk, Target: { Kind: StepObjectKind.Npc } npc }) return false;
+        if (!q.TodosAt(sequence).SelectMany(t => t.Spots).Any(p => p.Object == npc.BaseId)) return false;
+        var asked = Normal(question);
+        return asked.Length > 0 && q.MenuPrompts.Any(k => Normal(k).Equals(asked, StringComparison.CurrentCultureIgnoreCase));
     }
 
     public static bool KnownQuestion(string prompt, IEnumerable<string> known)

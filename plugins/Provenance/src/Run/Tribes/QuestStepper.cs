@@ -33,7 +33,11 @@ internal enum StepperState
 /// drops; 0 when none is picked (the player is asked then). A battle society's quest is fought on the job it was
 /// accepted as.
 /// </param>
-internal sealed record StepOptions(bool PauseForCutscenes, bool LeaveOutSay, uint CombatJob = 0);
+/// <param name="TomestonesLost">
+/// The Tribes setting "Hand in even when tomestones would be lost": the reward warning is answered Yes when it lists
+/// only Allagan Tomestones and Reputation (Reputation alone always is).
+/// </param>
+internal sealed record StepOptions(bool PauseForCutscenes, bool LeaveOutSay, uint CombatJob = 0, bool TomestonesLost = false);
 
 /// <summary>What the quest wants crafted.</summary>
 /// <param name="Product">The item to craft (its recipe for <paramref name="ClassJob"/>, the class the quest was accepted as).</param>
@@ -86,6 +90,8 @@ internal sealed unsafe class QuestStepper
     /// <summary>After an action, how long to wait for it to count before trying again.</summary>
     private static readonly TimeSpan SettleTalk = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan SettlePublic = TimeSpan.FromSeconds(6);
+    /// <summary>The game's "Invalid target." (LogMessage 563), as it refuses a key item on something that isn't for it.</summary>
+    private const uint InvalidTarget = 563;
     private static readonly TimeSpan LookAround = TimeSpan.FromSeconds(3);
     /// <summary>How often the quest is looked at (its script asked): four times a second.</summary>
     private static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(0.25);
@@ -155,6 +161,8 @@ internal sealed unsafe class QuestStepper
     private bool wasRiding;
     private bool wasCarrying;
     private bool sawEvent;
+    /// <summary>Since the last act a menu or a question was answered, or the hand-over window came up (the talk did something).</summary>
+    private bool answered;
     private int tradeSlot;
     private int tradeOpenSlot;
     private int tradeOpened;
@@ -409,6 +417,7 @@ internal sealed unsafe class QuestStepper
         wasRiding = false;
         wasCarrying = false;
         sawEvent = false;
+        answered = false;
         tradeSince = default;
         resultSince = default;
         resultNoted = false;
@@ -776,6 +785,7 @@ internal sealed unsafe class QuestStepper
         phase = Phase.Settle;
         settleUntil = now + SettleTalk;
         sawEvent = false;
+        answered = false;
         spawnWaited = false;
         if (p.Kind == StepKind.Go)
         {
@@ -877,6 +887,18 @@ internal sealed unsafe class QuestStepper
             case StepKind.UseItem:
             {
                 var used = QuestSteps.UseKeyItem(p.Id, p.Use, target, p.Spot, out var why);
+                if (!used && why == InvalidTarget && p.Target != null)
+                {
+                    // The game says the item isn't for this one ("Invalid target"): it's to be talked to instead. Not a
+                    // try at it, and it isn't left out: the step is decided again with the item kept off it.
+                    memory.RefusedItem(snap, p.Id, p.Target.Key);
+                    memory.Attempts.Remove(p.Key);
+                    Note($"use item {p.Id} on {target?.Name.TextValue ?? p.Target.Name} ({p.Target.BaseId}): the game says it isn't a target for the item (status {why}); talking to it instead");
+                    phase = Phase.Decide;
+                    lastPlan = "";
+                    Wait(0.3);
+                    return;
+                }
                 memory.Note(p.Key, now);
                 Status = $"Using the {QuestSteps.ItemName(p.Id)}";
                 settleUntil = now + SettleTalk + TimeSpan.FromSeconds(script!.KeyItems.FirstOrDefault(k => k.Id == p.Id)?.CastSeconds ?? 0);
@@ -1010,6 +1032,14 @@ internal sealed unsafe class QuestStepper
                 memory.Attempts.Remove(p.Key);
                 Leave(p.Enemy.Id, p.Enemy.Name, $"the quest mount's action did nothing to it in {StepRules.InteractTries} uses (its health stayed at {mob.CurrentHp * 100 / Math.Max(1, mob.MaxHp)}%)");
             }
+        }
+        else if (p.Kind == StepKind.Talk && p.Target is { Kind: StepObjectKind.Npc } npc && sawEvent && !answered && !snap.InCombat
+                 && StepRules.PointsElsewhere(script!, snap, npc.BaseId))
+        {
+            // Their scene played and nothing changed, and the open to-do lines point elsewhere too (carrying the limpet
+            // bomb, Ba Go only says to hurry to the furnace): on to the other place, not the same talk again.
+            memory.Tried.Add(npc.Key);
+            Note($"talked to {npc.Name} ({npc.BaseId}): the scene played without anything changing, and the open to-do lines point elsewhere; on to those");
         }
         else if (!p.Public && p.Target != null && memory.Count(p.Key) >= StepRules.InteractTries)
         {
@@ -1589,9 +1619,16 @@ internal sealed unsafe class QuestStepper
 
         if (QuestSteps.Question() is { } question)
         {
-            if (StepRules.KnownQuestion(question, QuestSteps.KnownQuestions) || StepRules.OnlyReputationLost(question, QuestSteps.RewardWarning))
+            // The quest's own question from whoever the step talks to (a transport ride, "Ride the elbst to Moonshade Isle?").
+            var own = phase == Phase.Settle && QuestSteps.Sequence(script!.Quest) is { } sequence && StepRules.OwnQuestion(script, sequence, plan, question);
+            if (own || StepRules.KnownQuestion(question, QuestSteps.KnownQuestions)
+                || StepRules.RewardLossAccepted(question, QuestSteps.RewardWarning, options.TomestonesLost))
             {
-                if (QuestSteps.Yes()) Note($"question \"{question.Replace('\n', ' ')}\" -> Yes");
+                if (QuestSteps.Yes())
+                {
+                    answered = true;
+                    Note($"question \"{question.Replace('\n', ' ')}\" -> Yes{(own ? " (the quest's own question, from whoever the step talks to)" : "")}");
+                }
                 Wait(0.8);
                 return true;
             }
@@ -1695,6 +1732,7 @@ internal sealed unsafe class QuestStepper
                 tradeOpened = 0;
             }
             Status = "Handing over";
+            answered = true;
             // However the window behaves, it gets this long.
             if (now - tradeSince > TradePatience)
             {
@@ -1756,6 +1794,7 @@ internal sealed unsafe class QuestStepper
                 return true;
             }
             StepRules.Answered(menu.Prompt, menu.Entries, pick, memory);
+            answered = true;
             Note($"menu \"{menu.Prompt}\" -> \"{StepRules.Normal(menu.Entries[pick])}\" ({pick + 1} of {menu.Entries.Count})");
             menu.Select(pick);
             Wait(0.8);

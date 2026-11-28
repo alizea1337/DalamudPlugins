@@ -154,6 +154,12 @@ public sealed class QuestScript
     /// sequence names some, a key item is used on those only; when it names only enemies, on no object at all.
     /// </summary>
     public IReadOnlyList<(byte Sequence, uint Object)> ItemObjects { get; init; } = Array.Empty<(byte, uint)>();
+    /// <summary>
+    /// The sequences at which the quest's listeners say a key item is used at all (see <see cref="EnemyRules.ItemSequences"/>).
+    /// At another sequence a key item that's held was collected or is to be handed over (a to-do line naming it, "Deliver
+    /// the limpet bomb core", isn't a use). Null when the data doesn't say: then the to-do line's text decides.
+    /// </summary>
+    public IReadOnlySet<byte>? ItemSequences { get; init; }
 
     public IEnumerable<ScriptTodo> TodosAt(byte sequence) => Todos.Where(t => t.Sequence == sequence);
 }

@@ -152,6 +152,16 @@ public static class EnemyRules
         return list;
     }
 
+    /// <summary>
+    /// The sequences at which the quest's listeners say a key item is used on something (kind 8: an NPC, an object, an
+    /// enemy or an area); null when the quest has no listeners at all (the data says nothing then). At any other
+    /// sequence the quest's key items are collected or handed over, not used: the scripts agree (their
+    /// <c>IsEventItemUsable</c> names the same sequences and targets), and every society daily with a key item that is
+    /// used has such a listener (7.58).
+    /// </summary>
+    public static IReadOnlySet<byte>? ItemSequences(IReadOnlyCollection<ListenerRow> listeners)
+        => listeners.Count == 0 ? null : listeners.Where(l => l.Kind == 8).Select(l => l.Sequence).ToHashSet();
+
     /// <summary>The NPCs and objects a key item is used on, by sequence (listeners of kind 8 that aren't enemies or areas).</summary>
     public static IReadOnlyList<(byte Sequence, uint Object)> ItemObjects(IEnumerable<ListenerRow> listeners)
         => listeners.Where(l => l.Kind == 8 && l.Listener is >= FirstNpc and < 4_000_000).Select(l => (l.Sequence, l.Listener)).Distinct().ToList();

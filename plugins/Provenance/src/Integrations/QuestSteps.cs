@@ -196,6 +196,7 @@ internal static unsafe class QuestSteps
             MenuAnswers = facts.Text.Where(kv => AnswerKey.IsMatch(kv.Key) && kv.Value.Length > 0).Select(kv => kv.Value).ToList(),
             Enemies = EnemyRules.Read(facts.Args, facts.Listeners, QuestFacts.LevelSpot),
             ItemObjects = EnemyRules.ItemObjects(facts.Listeners),
+            ItemSequences = EnemyRules.ItemSequences(facts.Listeners),
         };
     }
 
