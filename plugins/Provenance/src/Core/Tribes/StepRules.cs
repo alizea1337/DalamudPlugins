@@ -65,6 +65,12 @@ public sealed record StepPlan(StepKind Kind, string What)
     public bool Face { get; init; }
     /// <summary>Carrying something: walk (no mount, no teleport).</summary>
     public bool OnFoot { get; init; }
+    /// <summary>
+    /// The step's marked target, talked to because the quest marks it (not a hand-in, the report or the facility
+    /// access): when its scene plays and nothing changes while the open lines point elsewhere too, it isn't talked to
+    /// again before those (the stepper).
+    /// </summary>
+    public bool Marked { get; init; }
     /// <summary>Riding a quest mount that may not fly.</summary>
     public bool NoFly { get; init; }
     /// <summary>Crafting and gathering: how many are still wanted (the materials, for crafting).</summary>
@@ -706,7 +712,7 @@ public static class StepRules
                 return Ask($"The quest mount was lost {m.Mounts} times; do this step yourself, then resume.");
             if (!carrying && m.CarryGiver != 0 && target.BaseId == m.CarryGiver && m.Pickups > MaxRegains)
                 return Ask($"What you carry was dropped {m.Pickups} times; do this step yourself, then resume.");
-            return Talk(target, carrying ? "deliver what you carry" : "the step's marked target") with { OnFoot = carrying };
+            return Talk(target, carrying ? "deliver what you carry" : "the step's marked target") with { OnFoot = carrying, Marked = true };
         }
 
         // The quest wants only its item used on its enemies, and the item isn't in the bags (yet, or any more): there's

@@ -165,6 +165,11 @@ public class KeyItemUseTests
         var plan = Decide(BlownCover(), s, new StepMemory { CarryGiver = BaGo, Pickups = 1 });
         Assert.Equal(StepKind.Talk, plan.Kind);
         Assert.Equal(BaGo, plan.Target!.BaseId);
+        // A marked target while the line also points at the furnace: a talk that changes nothing isn't repeated.
+        Assert.True(plan.Marked);
+        Assert.True(StepRules.PointsElsewhere(BlownCover(), s, BaGo));
+        // At the hand-in Ba Go is all the line points at.
+        Assert.False(StepRules.PointsElsewhere(BlownCover(), Snap(Outer, 4, me, Array.Empty<StepObject>(), new() { [BombCore] = 1 }), BaGo));
     }
 
     // ------------------------------------------------------------------ 1384 "A Quick Snip", 1385 "Violence of the Clams" (Sahagin, zone 138)

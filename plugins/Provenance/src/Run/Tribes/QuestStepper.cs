@@ -1034,7 +1034,7 @@ internal sealed unsafe class QuestStepper
                 Leave(p.Enemy.Id, p.Enemy.Name, $"the quest mount's action did nothing to it in {StepRules.InteractTries} uses (its health stayed at {mob.CurrentHp * 100 / Math.Max(1, mob.MaxHp)}%)");
             }
         }
-        else if (p.Kind == StepKind.Talk && p.Target is { Kind: StepObjectKind.Npc } npc && sawEvent && !answered && !snap.InCombat
+        else if (p.Kind == StepKind.Talk && p.Marked && p.Target is { Kind: StepObjectKind.Npc } npc && sawEvent && !answered && !snap.InCombat
                  && StepRules.PointsElsewhere(script!, snap, npc.BaseId))
         {
             // Their scene played and nothing changed, and the open to-do lines point elsewhere too (carrying the limpet
